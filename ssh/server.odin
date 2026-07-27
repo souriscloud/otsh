@@ -12,6 +12,7 @@ import "core:c"
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:sync"
 import "core:sys/posix"
 import "core:thread"
 import ls "../libssh"
@@ -75,7 +76,7 @@ Server :: struct {
 	host:         string,
 	port:         int,
 	running:      bool,
-	warned_enum:  bool, // one-shot enumeration warning
+	warned_enum:  bool, // one-shot enumeration warning; touched atomically
 }
 
 // The terminal geometry the client asked for. No pseudo-terminal is actually
@@ -370,7 +371,31 @@ DEFAULT_HOST_KEY :: "hostkey"
 
 // Binds, listens, and accepts connections until the process exits, spawning one
 // thread per connection. Returns false if setup fails; otherwise blocks.
+// Refuses to continue on a libssh too old to have the Terrapin fix. The check
+// is at runtime, not compile time, because the shared library that gets loaded
+// is not necessarily the one the bindings were compiled against.
+@(private)
+check_libssh_version :: proc() -> bool {
+	required := ls.version_int(ls.MIN_MAJOR, ls.MIN_MINOR, ls.MIN_MICRO)
+	if got := ls.version(required); got != nil {
+		return true
+	}
+	// ssh_version returns nil when the runtime library is older than requested.
+	actual := ls.version(0)
+	fmt.eprintfln(
+		"otsh: refusing to start — libssh %s is older than the required %d.%d.%d.\n" +
+		"      Versions before 0.10.6 lack the fix for CVE-2023-48795 (Terrapin).\n" +
+		"      Upgrade the system libssh, then rebuild.",
+		actual == nil ? "(unknown)" : string(actual),
+		ls.MIN_MAJOR, ls.MIN_MINOR, ls.MIN_MICRO,
+	)
+	return false
+}
+
 serve :: proc(cfg: Config) -> bool {
+	if !check_libssh_version() {
+		return false
+	}
 	cfg := cfg
 	if cfg.host == "" {cfg.host = DEFAULT_HOST}
 	if cfg.port == 0 {cfg.port = DEFAULT_PORT}
@@ -445,7 +470,15 @@ serve :: proc(cfg: Config) -> bool {
 			free(s)
 			continue
 		}
-		thread.create_and_start_with_poly_data(s, session_thread, self_cleanup = true)
+		// Thread creation can fail under resource pressure. Dropping the
+		// connection cleanly is the only sane response — leaving it accepted
+		// with nothing to service it would hold a socket open forever.
+		if thread.create_and_start_with_poly_data(s, session_thread, self_cleanup = true) == nil {
+			fmt.eprintln("otsh: could not start a session thread; dropping the connection")
+			ls.disconnect(s.sess)
+			ls.free_session(s.sess)
+			free(s)
+		}
 	}
 
 	ls.bind_free(srv.bind)
@@ -569,8 +602,10 @@ allow :: proc "contextless" (s: ^Session, req: Auth_Request) -> bool {
 	ok := s.server.authenticate(req)
 	if !ok {
 		s.auth_failures += 1
-		if req.method == .Publickey && !s.server.warned_enum {
-			s.server.warned_enum = true
+		// One-shot across all connections. Atomic because every session thread
+		// can reach it; the exchange makes exactly one of them print.
+		if req.method == .Publickey &&
+		   !sync.atomic_exchange(&s.server.warned_enum, true) {
 			fmt.eprintln(
 				"otsh: NOTE an Authenticator rejected a public key. The client will now\n" +
 				"      offer its next key, and the next — a rejecting server learns every\n" +

@@ -431,6 +431,45 @@ Before exposing an `otsh` server to the internet:
     without understanding why they were left out** — this server's
     request handling assumes a single interactive shell channel (§8).
 
+## 11. What has actually been checked
+
+Not an audit. This records what was tested and what was not, so you can judge
+the gap yourself rather than infer it.
+
+**Checked, with results:**
+
+| Area | Method | Result |
+| --- | --- | --- |
+| Input parser | ~45,000 fuzz iterations over random bytes, escape-shaped bytes, and every truncated prefix of valid sequences | No invariant violation: never over-consumes, never reports success without progress |
+| Ring buffer | Randomised push/pop with wraparound, checking byte-for-byte ordering | No lost, reordered or invented bytes |
+| `key_name` | Fuzzed against undersized buffers with guard bytes | No write past the slice |
+| Session lifecycle | 36 real SSH connections, then `leaks(1)` | **0 leaks, 0 bytes.** RSS flat from connection 12 to 36 |
+| Auth path | Code review of `cb_auth_pubkey` | An unverified probe returns before identity capture and before the `Authenticator`; only a signature-verified key reaches app code |
+| Transport | Live negotiation against OpenSSH | curve25519 + ed25519 + AES-GCM; `aes128-cbc` and SHA-1 kex refused |
+| libssh version | Runtime guard | Refuses to start below 0.10.6 (the CVE-2023-48795 / Terrapin fix) |
+
+**Fixed during that pass:**
+
+- A failed session-thread creation leaked the `Session` and left the accepted
+  socket open with nothing servicing it. Now dropped cleanly.
+- `Server.warned_enum` was written from every session thread without
+  synchronisation — a benign but real data race. Now an atomic exchange, still
+  firing exactly once (verified across 9 rejected keys on 3 connections).
+
+**Not checked:**
+
+- No third-party review. Nobody with an adversarial mindset and no stake in
+  this code has looked at it.
+- No sanitizer run. AddressSanitizer would not link in this environment
+  (Odin's bundled LLVM runtime versus the system clang), so the leak evidence
+  above comes from `leaks(1)` and RSS, not from instrumented builds.
+- No testing of libssh itself, and no independent verification of its
+  protocol handling. Its CVEs are yours; keep the system library current and
+  watch <https://www.libssh.org/security/>.
+- No load, soak, or hostile-client testing beyond the limits above. Nothing
+  has been run for days, or against a client deliberately violating the
+  protocol at the packet level.
+
 ---
 
 See also: [architecture](architecture.md) for how the auth path is wired,

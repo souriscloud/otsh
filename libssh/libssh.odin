@@ -22,6 +22,25 @@ Event :: distinct rawptr
 Key :: distinct rawptr
 Threads_Callbacks :: distinct rawptr
 
+// Builds a libssh version integer the way its SSH_VERSION_INT macro does.
+version_int :: proc "contextless" (major, minor, micro: int) -> c.int {
+	return c.int(major << 16 | minor << 8 | micro)
+}
+
+// The oldest libssh otsh will run against.
+//
+// 0.10.6 is where the fix for CVE-2023-48795 ("Terrapin", a prefix-truncation
+// attack on the SSH transport) landed, along with the strict-kex extension that
+// makes the fix effective. Running a server on anything older is not something
+// this package will do quietly.
+//
+// This is a floor, not an endorsement: libssh is a separate project with its own
+// advisories, and being above this line does not mean you are patched. Track
+// https://www.libssh.org/security/ and keep the system library current.
+MIN_MAJOR :: 0
+MIN_MINOR :: 10
+MIN_MICRO :: 6
+
 // --- return codes -----------------------------------------------------------
 
 OK :: 0
@@ -213,6 +232,10 @@ foreign lib {
 	get_error :: proc(s: rawptr) -> cstring ---
 	@(link_name = "ssh_get_clientbanner")
 	get_clientbanner :: proc(s: Session) -> cstring ---
+	// Returns the runtime library version as text, or nil if the library is
+	// older than the (major<<16 | minor<<8 | micro) value passed in.
+	@(link_name = "ssh_version")
+	version :: proc(req_version: c.int) -> cstring ---
 	@(link_name = "ssh_get_fd")
 	get_fd :: proc(s: Session) -> c.int ---
 

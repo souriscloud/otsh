@@ -26,7 +26,7 @@ Auth_Method :: enum u8 {
 
 The SSH authentication methods this server understands.
 
-*ssh/server.odin:28*
+*ssh/server.odin:29*
 
 ### `Auth_Methods`
 
@@ -37,7 +37,7 @@ Auth_Methods :: distinct bit_set[Auth_Method;u8]
 A set of `Auth_Method`. Note that offering `.None` means an OpenSSH client
 authenticates before ever offering a key, leaving `Session.id` empty.
 
-*ssh/server.odin:35*
+*ssh/server.odin:36*
 
 ### `Auth_Request`
 
@@ -56,7 +56,7 @@ Auth_Request :: struct {
 What an `Authenticator` is told. For `.Publickey`, the key's signature has
 already been verified — unverified probes never reach application code.
 
-*ssh/server.odin:42*
+*ssh/server.odin:43*
 
 ### `Authenticator`
 
@@ -76,7 +76,7 @@ If you want a members-only app, do not reject here. Accept the key, take the
 inside the app. They are equally excluded and you learn exactly one key.
 See examples/members.
 
-*ssh/server.odin:63*
+*ssh/server.odin:64*
 
 ### `Config`
 
@@ -109,7 +109,7 @@ Config :: struct {
 How to run the server. Every field has a documented default, so the zero value
 is a working — if wide open — public server on port 2222.
 
-*ssh/server.odin:279*
+*ssh/server.odin:280*
 
 ### `Handler`
 
@@ -120,7 +120,7 @@ Handler :: #type proc(s: ^Session)
 Handler runs on its own thread, one per connection, and owns the session for
 as long as it runs. When it returns the connection is torn down.
 
-*ssh/server.odin:25*
+*ssh/server.odin:26*
 
 ### `Identity_Secret`
 
@@ -175,7 +175,7 @@ Pty :: struct {
 The terminal geometry the client asked for. No pseudo-terminal is actually
 allocated — this is just what the client told us about its own.
 
-*ssh/server.odin:83*
+*ssh/server.odin:84*
 
 ### `Ring`
 
@@ -190,7 +190,7 @@ Ring :: struct {
 Fixed-size byte ring for incoming keystrokes. Fixed so that libssh callbacks,
 which run without an Odin context, never touch an allocator.
 
-*ssh/server.odin:131*
+*ssh/server.odin:132*
 
 ### `Server`
 
@@ -206,14 +206,14 @@ Server :: struct {
 	host:         string,
 	port:         int,
 	running:      bool,
-	warned_enum:  bool, // one-shot enumeration warning
+	warned_enum:  bool, // one-shot enumeration warning; touched atomically
 }
 ```
 
 Server-wide state, shared by every connection. Internal; reach it through
 `Session.server` only if you know what you are doing.
 
-*ssh/server.odin:67*
+*ssh/server.odin:68*
 
 ### `Session`
 
@@ -255,7 +255,7 @@ One connection. Created and freed by the accept loop; your `Handler` owns it
 for the duration of the call. All its string accessors borrow memory that
 dies with the session.
 
-*ssh/server.odin:95*
+*ssh/server.odin:96*
 
 ## Constants
 
@@ -267,7 +267,7 @@ ALL_AUTH :: Auth_Methods{.None, .Password, .Publickey}
 
 Every method. The default when `Config.methods` is left zero.
 
-*ssh/server.odin:38*
+*ssh/server.odin:39*
 
 ### `DEFAULT_CIPHERS`
 
@@ -312,7 +312,7 @@ ensure_host_key :: proc(path: string) -> bool {
 
 AEAD ciphers only: no CBC, no stream ciphers with separate MACs.
 
-*ssh/server.odin:307*
+*ssh/server.odin:308*
 
 ### `DEFAULT_HOST`
 
@@ -325,44 +325,16 @@ DEFAULT_HOST_KEY :: "hostkey"
 
 // Binds, listens, and accepts connections until the process exits, spawning one
 // thread per connection. Returns false if setup fails; otherwise blocks.
-serve :: proc(cfg: Config) -> bool {
-	cfg := cfg
-	if cfg.host == "" {cfg.host = DEFAULT_HOST}
-	if cfg.port == 0 {cfg.port = DEFAULT_PORT}
-	if cfg.host_key_path == "" {cfg.host_key_path = DEFAULT_HOST_KEY}
-
-	ls.threads_set_callbacks(ls.threads_get_pthread())
-	if ls.init() != ls.OK {
-		fmt.eprintln("otsh: ssh_init failed")
-		return false
-	}
-
-	if !ensure_host_key(cfg.host_key_path) {
-		return false
-	}
-
-	srv := new(Server)
-	srv.handler = cfg.handler
-	srv.authenticate = cfg.authenticate
-	srv.methods = cfg.methods == {} ? ALL_AUTH : cfg.methods
-	srv.user_data = cfg.user_data
-	srv.host = cfg.host
-	srv.port = cfg.port
-	limiter_init(&srv.limiter, cfg.limits)
-
-	if cfg.identity_secret != "" {
-		secret, ok := load_or_create_secret(cfg.identity_secret)
-		if !ok {
-			return false
-		}
-		srv.secret = secret
-	}
+// Refuses to continue on a libssh too old to have the Terrapin fix. The check
+// is at runtime, not compile time, because the shared library that gets loaded
+// is not necessarily the one the bindings were compiled against.
+@(private)
 ```
 
 Defaults applied to a zero-valued Config field. sshtui fills these in too;
 they live here as well so calling ssh.serve directly cannot bind port 0.
 
-*ssh/server.odin:365*
+*ssh/server.odin:366*
 
 ### `DEFAULT_HOST_KEY`
 
@@ -371,47 +343,15 @@ DEFAULT_HOST_KEY :: "hostkey"
 
 // Binds, listens, and accepts connections until the process exits, spawning one
 // thread per connection. Returns false if setup fails; otherwise blocks.
-serve :: proc(cfg: Config) -> bool {
-	cfg := cfg
-	if cfg.host == "" {cfg.host = DEFAULT_HOST}
-	if cfg.port == 0 {cfg.port = DEFAULT_PORT}
-	if cfg.host_key_path == "" {cfg.host_key_path = DEFAULT_HOST_KEY}
-
-	ls.threads_set_callbacks(ls.threads_get_pthread())
-	if ls.init() != ls.OK {
-		fmt.eprintln("otsh: ssh_init failed")
-		return false
-	}
-
-	if !ensure_host_key(cfg.host_key_path) {
-		return false
-	}
-
-	srv := new(Server)
-	srv.handler = cfg.handler
-	srv.authenticate = cfg.authenticate
-	srv.methods = cfg.methods == {} ? ALL_AUTH : cfg.methods
-	srv.user_data = cfg.user_data
-	srv.host = cfg.host
-	srv.port = cfg.port
-	limiter_init(&srv.limiter, cfg.limits)
-
-	if cfg.identity_secret != "" {
-		secret, ok := load_or_create_secret(cfg.identity_secret)
-		if !ok {
-			return false
-		}
-		srv.secret = secret
-	}
-
-	srv.bind = ls.bind_new()
-	if srv.bind == nil {
-		fmt.eprintln("otsh: ssh_bind_new failed")
+// Refuses to continue on a libssh too old to have the Terrapin fix. The check
+// is at runtime, not compile time, because the shared library that gets loaded
+// is not necessarily the one the bindings were compiled against.
+@(private)
 ```
 
 Host key path used when `Config.host_key_path` is empty.
 
-*ssh/server.odin:369*
+*ssh/server.odin:370*
 
 ### `DEFAULT_HOSTKEYS`
 
@@ -452,7 +392,7 @@ ensure_host_key :: proc(path: string) -> bool {
 
 Ed25519 only — matches the key `ensure_host_key` generates.
 
-*ssh/server.odin:311*
+*ssh/server.odin:312*
 
 ### `DEFAULT_KEX`
 
@@ -500,7 +440,7 @@ ensure_host_key :: proc(path: string) -> bool {
 Modern-only. Every one of these is an AEAD or an ETM MAC with a
 curve25519 exchange; nothing here depends on SHA-1, CBC, or NIST curves.
 
-*ssh/server.odin:305*
+*ssh/server.odin:306*
 
 ### `DEFAULT_LIMITS`
 
@@ -559,7 +499,7 @@ ensure_host_key :: proc(path: string) -> bool {
 
 Encrypt-then-MAC only, SHA-2 only.
 
-*ssh/server.odin:309*
+*ssh/server.odin:310*
 
 ### `DEFAULT_PORT`
 
@@ -570,45 +510,15 @@ DEFAULT_HOST_KEY :: "hostkey"
 
 // Binds, listens, and accepts connections until the process exits, spawning one
 // thread per connection. Returns false if setup fails; otherwise blocks.
-serve :: proc(cfg: Config) -> bool {
-	cfg := cfg
-	if cfg.host == "" {cfg.host = DEFAULT_HOST}
-	if cfg.port == 0 {cfg.port = DEFAULT_PORT}
-	if cfg.host_key_path == "" {cfg.host_key_path = DEFAULT_HOST_KEY}
-
-	ls.threads_set_callbacks(ls.threads_get_pthread())
-	if ls.init() != ls.OK {
-		fmt.eprintln("otsh: ssh_init failed")
-		return false
-	}
-
-	if !ensure_host_key(cfg.host_key_path) {
-		return false
-	}
-
-	srv := new(Server)
-	srv.handler = cfg.handler
-	srv.authenticate = cfg.authenticate
-	srv.methods = cfg.methods == {} ? ALL_AUTH : cfg.methods
-	srv.user_data = cfg.user_data
-	srv.host = cfg.host
-	srv.port = cfg.port
-	limiter_init(&srv.limiter, cfg.limits)
-
-	if cfg.identity_secret != "" {
-		secret, ok := load_or_create_secret(cfg.identity_secret)
-		if !ok {
-			return false
-		}
-		srv.secret = secret
-	}
-
-	srv.bind = ls.bind_new()
+// Refuses to continue on a libssh too old to have the Terrapin fix. The check
+// is at runtime, not compile time, because the shared library that gets loaded
+// is not necessarily the one the bindings were compiled against.
+@(private)
 ```
 
 Port used when `Config.port` is zero.
 
-*ssh/server.odin:367*
+*ssh/server.odin:368*
 
 ### `ID_BYTES`
 
@@ -660,7 +570,7 @@ Handler :: #type proc(s: ^Session)
 Per-session input buffer. Bytes beyond this stay in libssh's own buffer and
 are re-offered later, which is the protocol's flow control.
 
-*ssh/server.odin:21*
+*ssh/server.odin:22*
 
 ### `SECRET_SIZE`
 
@@ -696,7 +606,7 @@ Creates the host key if it does not exist yet — the SSH equivalent of a TLS
 certificate. Clients pin it in ~/.ssh/known_hosts, so it must be stable
 across restarts.
 
-*ssh/server.odin:316*
+*ssh/server.odin:317*
 
 ### `fingerprint`
 
@@ -707,7 +617,7 @@ fingerprint :: proc "contextless" (s: ^Session) -> string
 SHA256 fingerprint of the key the client authenticated with, or "" if they
 did not use one. Stable across connections — use it as an account id.
 
-*ssh/server.odin:173*
+*ssh/server.odin:174*
 
 ### `id`
 
@@ -719,7 +629,7 @@ Pseudonymous account id: HMAC(server secret, fingerprint). Empty unless an
 identity secret is configured and the client used a key. Store this, not the
 fingerprint. See identity.odin.
 
-*ssh/server.odin:186*
+*ssh/server.odin:187*
 
 ### `ids_equal`
 
@@ -741,7 +651,7 @@ key_type :: proc "contextless" (s: ^Session) -> string
 The verified key's algorithm, e.g. "ssh-ed25519". Empty unless public-key
 auth was used.
 
-*ssh/server.odin:179*
+*ssh/server.odin:180*
 
 ### `load_or_create_secret`
 
@@ -782,7 +692,7 @@ actually block for us — it returns immediately every time, which would spin
 a core per session. So libssh gets to do the parsing while we do the waiting,
 on the session socket directly.
 
-*ssh/server.odin:211*
+*ssh/server.odin:212*
 
 ### `remote_addr`
 
@@ -792,7 +702,7 @@ remote_addr :: proc "contextless" (s: ^Session) -> string
 
 Numeric peer address, no reverse DNS.
 
-*ssh/server.odin:191*
+*ssh/server.odin:192*
 
 ### `ring_pop`
 
@@ -802,7 +712,7 @@ ring_pop :: proc "contextless" (r: ^Ring, dst: []u8) -> int
 
 Removes up to `len(dst)` bytes, returning how many were moved.
 
-*ssh/server.odin:148*
+*ssh/server.odin:149*
 
 ### `ring_push`
 
@@ -812,7 +722,7 @@ ring_push :: proc "contextless" (r: ^Ring, src: []u8) -> int
 
 Appends what fits, returning how many bytes were taken.
 
-*ssh/server.odin:138*
+*ssh/server.odin:139*
 
 ### `serve`
 
@@ -820,10 +730,7 @@ Appends what fits, returning how many bytes were taken.
 serve :: proc(cfg: Config) -> bool
 ```
 
-Binds, listens, and accepts connections until the process exits, spawning one
-thread per connection. Returns false if setup fails; otherwise blocks.
-
-*ssh/server.odin:373*
+*ssh/server.odin:395*
 
 ### `size`
 
@@ -834,7 +741,7 @@ size :: proc "contextless" (s: ^Session) -> (cols, rows: int)
 Current terminal geometry in cells, falling back to 80x24 if the client never
 said.
 
-*ssh/server.odin:197*
+*ssh/server.odin:198*
 
 ### `take_resize`
 
@@ -844,7 +751,7 @@ take_resize :: proc "contextless" (s: ^Session) -> bool
 
 True exactly once after each window resize.
 
-*ssh/server.odin:269*
+*ssh/server.odin:270*
 
 ### `term`
 
@@ -854,7 +761,7 @@ term :: proc "contextless" (s: ^Session) -> string
 
 The client's `$TERM`, e.g. "xterm-256color". Empty if no pty was requested.
 
-*ssh/server.odin:167*
+*ssh/server.odin:168*
 
 ### `user`
 
@@ -865,7 +772,7 @@ user :: proc "contextless" (s: ^Session) -> string
 The username the client offered. Client-chosen and unverified — never use it
 as identity; use `id` instead.
 
-*ssh/server.odin:162*
+*ssh/server.odin:163*
 
 ### `warn_if_world_readable`
 
@@ -887,7 +794,7 @@ write :: proc(s: ^Session, data: []u8) -> int
 Sends bytes to the client. Returns how many were written, 0 once the
 connection is gone.
 
-*ssh/server.odin:251*
+*ssh/server.odin:252*
 
 ### `write_string`
 
@@ -897,4 +804,4 @@ write_string :: proc(s: ^Session, str: string) -> int
 
 `write` for a string.
 
-*ssh/server.odin:264*
+*ssh/server.odin:265*
