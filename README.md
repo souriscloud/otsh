@@ -303,6 +303,18 @@ the Escape key — the standard timeout resolution for the standard problem.
 Per-IP connection limits, a handshake timeout and a concurrent-session cap
 *are* implemented; see `ssh.Limits` and the [security model](docs/security.md).
 
+## Tests
+
+```sh
+./test.sh          # 34 tests, no network needed
+```
+
+Covers text metrics and wide-character handling, input decoding (UTF-8, C0,
+CSI, SS3, SGR mouse), the diffing renderer's core property that an unchanged
+frame emits nothing, the input ring's wraparound and flow-control return
+value, and identity: same key gives the same id, different secrets give
+unlinkable ids, and the id survives a restart.
+
 ## Documentation
 
 Full docs are in [docs/](docs/index.md), including two build-it-yourself
