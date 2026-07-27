@@ -446,6 +446,33 @@ mistake is more useful than the patch.
 | Terminal dimensions arrive as a client-chosen `uint32` and were never upper-bounded. `10000x10000` committed 1.5 GB; a 2e9-square pty overflowed the allocation size, `make` returned an empty slice, and the first draw panicked — **killing the process and every other session on it**. A `window-change` on an established session did it too. | Clamped at both layers (`MAX_PTY_COLS`/`MAX_PTY_ROWS` in `ssh`, `MAX_COLS`/`MAX_ROWS` in `tui`). Verified: 65535², 2³¹-1², and 2e9² pty requests all leave the server running. |
 | `Program.pending` was unbounded. An unterminated `ESC [` followed by endless digits was never consumable, so nothing drained it, and `parse_csi` rescanned the whole buffer every frame. Measured **138% CPU on one connection at ~20 bytes/second**, memory climbing. | `MAX_INCOMPLETE` (256 bytes) forces a resync. Same attack now: **3% CPU, memory flat** (+48 KB across 2.4 MB of attack traffic). |
 
+**Two more from the memory/C-boundary lens, both confirmed:**
+
+- **`Session` was allocated with the caller's `context.allocator` and freed with
+  the connection thread's.** Odin threads get `runtime.default_context()` unless
+  told otherwise, so those are different allocators. Any consumer setting
+  `context.allocator` — an arena, a tracking allocator, the ordinary idiom, and
+  exactly what you would reach for to check the leak claims above — got a
+  **SIGABRT from one unauthenticated TCP connection**. Per-connection state now
+  comes from an explicit heap allocator on both sides.
+
+  The first fix for this was wrong and worth recording: routing both sides
+  through the caller's allocator still aborted, because an arena is neither
+  thread-safe nor able to free individual objects. It also surfaced a second
+  instance — moving `limiter_acquire` into the accept loop had put the limiter's
+  map keys on the same cross-thread path. Both now name the heap allocator
+  explicitly.
+
+- **Overwriting half a double-width glyph corrupted the rest of the row,
+  permanently.** `flush` advances the grid index by one per cell but the real
+  cursor by each rune's width, which only stays in step while every wide lead
+  has exactly one continuation cell. A box border or a fill landing on one column
+  of a CJK label broke the pairing, shifted everything after it by a column, and
+  — because `prev` then recorded those cells as correctly painted — an identical
+  next frame emitted nothing to repair it. `set_cell` now blanks the orphaned
+  half when a pair is broken. Three regression tests cover it, including the
+  "modal over a CJK label" case that reaches it through ordinary drawing.
+
 **Six more, confirmed and fixed:**
 
 - `set_algorithms` ignored `ssh_bind_options_set`'s return. libssh rejects a list
@@ -478,6 +505,13 @@ mistake is more useful than the patch.
   accept passwords, rate-limit them yourself.
 - `"-"` was described as re-admitting SHA-1 and CBC. On libssh 0.12 it does not;
   it re-admits CTR ciphers and non-ETM MACs.
+
+**Also tightened, from suspected findings:** mouse coordinates arrive as
+unbounded attacker-controlled integers and are now clamped (`tui` clipped them,
+but apps indexing arrays with them would not); `derive_id` called `free_all` on
+the whole thread's temp arena and now scopes its scratch space; `kt_buf` was 32
+bytes, which silently truncated 6 of 13 real key-type names including every
+certificate type and FIDO2 security keys — now 64.
 
 **One accepted limitation:**
 

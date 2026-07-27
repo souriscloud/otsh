@@ -164,12 +164,44 @@ set_cell :: proc(s: ^Screen, x, y: int, r: rune, style: Style) {
 	if w == 0 {
 		return
 	}
-	s.cur[y * s.w + x] = Cell {
+	row := y * s.w
+
+	// Overwriting half of a double-width glyph would leave the other half
+	// orphaned. `flush` walks the grid one index at a time while advancing the
+	// real cursor by each rune's width, so a lead without its continuation (or a
+	// continuation without its lead) desynchronises the two for the rest of that
+	// run — and since `prev` then records the wrong cells as painted, the damage
+	// is permanent rather than repaired on the next frame.
+	//
+	// This is reachable with ordinary drawing: a box or a fill landing on one
+	// column of a CJK label is enough. So break the pair up here, where we still
+	// know which cells were involved, and blank the orphan.
+	if s.cur[row + x].r == WIDE_CONT && x > 0 {
+		s.cur[row + x - 1] = Cell {
+			r     = ' ',
+			style = s.cur[row + x - 1].style,
+		}
+	}
+	if rune_width(s.cur[row + x].r) == 2 && x + 1 < s.w {
+		s.cur[row + x + 1] = Cell {
+			r     = ' ',
+			style = s.cur[row + x + 1].style,
+		}
+	}
+	// The cell we are about to claim as a continuation has the same problem.
+	if w == 2 && x + 1 < s.w && rune_width(s.cur[row + x + 1].r) == 2 && x + 2 < s.w {
+		s.cur[row + x + 2] = Cell {
+			r     = ' ',
+			style = s.cur[row + x + 2].style,
+		}
+	}
+
+	s.cur[row + x] = Cell {
 		r     = r,
 		style = style,
 	}
 	if w == 2 && x + 1 < s.w {
-		s.cur[y * s.w + x + 1] = Cell {
+		s.cur[row + x + 1] = Cell {
 			r     = WIDE_CONT,
 			style = style,
 		}

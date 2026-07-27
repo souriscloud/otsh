@@ -6,7 +6,9 @@
 // trivial to do on purpose.
 package ssh
 
+import "base:runtime"
 import "core:c"
+import "core:mem"
 import "core:sync"
 import "core:sys/posix"
 
@@ -63,17 +65,23 @@ resolve_limits :: proc "contextless" (l: Limits) -> Limits {
 
 @(private)
 Limiter :: struct {
-	mu:       sync.Mutex,
-	total:    int,
-	per_ip:   map[string]int,
-	limits:   Limits,
-	inited:   bool,
+	mu:        sync.Mutex,
+	total:     int,
+	per_ip:    map[string]int,
+	limits:    Limits,
+	inited:    bool,
+	// Slots are taken by the accept loop and released by each connection's own
+	// thread, so the map and its cloned keys outlive whichever context created
+	// them. They get the heap allocator explicitly rather than context.allocator,
+	// which may be an arena the other thread cannot free from.
+	allocator: mem.Allocator,
 }
 
 @(private)
 limiter_init :: proc(l: ^Limiter, limits: Limits) {
 	l.limits = resolve_limits(limits)
-	l.per_ip = make(map[string]int)
+	l.allocator = runtime.heap_allocator()
+	l.per_ip = make(map[string]int, 16, l.allocator)
 	l.inited = true
 }
 
@@ -103,7 +111,7 @@ limiter_acquire :: proc(l: ^Limiter, addr: string) -> bool {
 		if existing, found := l.per_ip[addr]; found {
 			l.per_ip[addr] = existing + 1
 		} else {
-			l.per_ip[strings_clone(addr)] = 1
+			l.per_ip[strings_clone(addr, l.allocator)] = 1
 		}
 	}
 	return true
@@ -126,7 +134,7 @@ limiter_release :: proc(l: ^Limiter, addr: string) {
 			// Delete the entry (and its cloned key) so the map cannot grow
 			// without bound across many distinct source addresses.
 			key, _ := delete_key(&l.per_ip, addr)
-			delete(key)
+			delete(key, l.allocator)
 		} else {
 			l.per_ip[addr] = n - 1
 		}
@@ -134,8 +142,8 @@ limiter_release :: proc(l: ^Limiter, addr: string) {
 }
 
 @(private)
-strings_clone :: proc(s: string) -> string {
-	b := make([]u8, len(s))
+strings_clone :: proc(s: string, allocator: mem.Allocator) -> string {
+	b := make([]u8, len(s), allocator)
 	copy(b, s)
 	return string(b)
 }

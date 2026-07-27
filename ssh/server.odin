@@ -10,6 +10,7 @@ package ssh
 import "base:runtime"
 import "core:c"
 import "core:fmt"
+import "core:mem"
 import "core:os"
 import "core:strings"
 import "core:sync"
@@ -76,6 +77,18 @@ Server :: struct {
 	secret:       Identity_Secret,
 	limiter:      Limiter,
 	user_data:    rawptr,
+	// The allocator per-connection state is created and destroyed with.
+	//
+	// Deliberately NOT context.allocator. A Session is allocated by the accept
+	// loop and freed by its own thread, so it crosses threads — and the caller's
+	// allocator may be an arena or a tracking allocator that is neither
+	// thread-safe nor able to free individual objects. Using it here turns one
+	// unauthenticated TCP connection into a SIGABRT for anyone following the
+	// ordinary Odin idiom of setting context.allocator.
+	//
+	// The heap allocator is thread-safe and supports free, so Sessions come from
+	// there regardless of what the caller has configured.
+	allocator:    mem.Allocator,
 	host:         string,
 	port:         int,
 	running:      bool,
@@ -486,6 +499,7 @@ serve :: proc(cfg: Config) -> bool {
 	}
 
 	srv := new(Server)
+	srv.allocator = runtime.heap_allocator()
 	srv.handler = cfg.handler
 	srv.authenticate = cfg.authenticate
 	srv.methods = cfg.methods == {} ? ALL_AUTH : cfg.methods
@@ -530,12 +544,12 @@ serve :: proc(cfg: Config) -> bool {
 	fmt.printfln("otsh: listening on %s:%d  →  ssh -p %d %s", cfg.host, cfg.port, cfg.port, cfg.host)
 
 	for srv.running {
-		s := new(Session)
+		s := new(Session, srv.allocator)
 		s.server = srv
 		s.user_data = srv.user_data
 		s.sess = ls.new_session()
 		if s.sess == nil {
-			free(s)
+			free(s, srv.allocator)
 			continue
 		}
 		// ssh_bind_accept blocks until a TCP connection arrives; the crypto
@@ -543,7 +557,7 @@ serve :: proc(cfg: Config) -> bool {
 		if ls.bind_accept(srv.bind, s.sess) != ls.OK {
 			fmt.eprintfln("otsh: accept failed: %s", ls.get_error(rawptr(srv.bind)))
 			ls.free_session(s.sess)
-			free(s)
+			free(s, srv.allocator)
 			continue
 		}
 
@@ -556,7 +570,7 @@ serve :: proc(cfg: Config) -> bool {
 		if !limiter_acquire(&srv.limiter, addr) {
 			ls.disconnect(s.sess)
 			ls.free_session(s.sess)
-			free(s)
+			free(s, srv.allocator)
 			continue
 		}
 		// Thread creation can fail under resource pressure. Dropping the
@@ -567,7 +581,7 @@ serve :: proc(cfg: Config) -> bool {
 			limiter_release(&srv.limiter, remote_addr(s))
 			ls.disconnect(s.sess)
 			ls.free_session(s.sess)
-			free(s)
+			free(s, srv.allocator)
 		}
 	}
 
@@ -597,7 +611,7 @@ session_thread :: proc(s: ^Session) {
 		s.fp_buf = {}
 		s.id_buf = {}
 		ls.free_session(s.sess)
-		free(s)
+		free(s, s.server.allocator)
 	}
 
 	// A client that opens a socket and then goes quiet would otherwise hold
@@ -790,7 +804,11 @@ derive_id :: proc "contextless" (s: ^Session) {
 		return
 	}
 	context = runtime.default_context()
-	defer free_all(context.temp_allocator)
+	// Scope the scratch space instead of calling free_all: that would wipe the
+	// whole thread's temp arena, including anything an Authenticator allocated
+	// earlier in the same connection.
+	scratch := runtime.default_temp_allocator_temp_begin()
+	defer runtime.default_temp_allocator_temp_end(scratch)
 	s.id_len = len(pseudonym(&s.server.secret, fingerprint(s), s.id_buf[:]))
 }
 

@@ -290,3 +290,73 @@ style_helpers :: proc(t: ^testing.T) {
 	testing.expect(t, .Bold in bold.attrs, "attr not set")
 	testing.expect(t, .Bold not_in base.attrs, "original mutated")
 }
+
+// --- wide-glyph pairing -----------------------------------------------------
+//
+// `flush` walks the grid one index at a time while advancing the real terminal
+// cursor by each rune's width. That only stays in step if every double-width
+// lead is followed by exactly one continuation cell and every continuation has
+// a lead. Overwriting half a wide glyph — a box border landing on a CJK label,
+// say — used to break that and shift the rest of the row by a column, and
+// because `prev` then recorded the wrong cells as painted, the corruption was
+// permanent rather than fixed on the next frame.
+
+@(test)
+overwriting_right_half_of_wide_glyph :: proc(t: ^testing.T) {
+	s: tui.Screen
+	tui.screen_init(&s, 6, 1)
+	defer tui.screen_destroy(&s)
+
+	tui.set_cell(&s, 1, 0, '世', {}) // occupies 1 and 2
+	testing.expect_value(t, s.cur[2].r, tui.WIDE_CONT)
+
+	tui.set_cell(&s, 2, 0, 'a', {}) // lands on the continuation
+	testing.expect(t, s.cur[1].r != '世', "the orphaned lead must be cleared")
+	testing.expect_value(t, s.cur[1].r, ' ')
+	testing.expect_value(t, s.cur[2].r, 'a')
+}
+
+@(test)
+overwriting_left_half_of_wide_glyph :: proc(t: ^testing.T) {
+	s: tui.Screen
+	tui.screen_init(&s, 6, 1)
+	defer tui.screen_destroy(&s)
+
+	tui.set_cell(&s, 1, 0, '世', {})
+	tui.set_cell(&s, 1, 0, 'a', {}) // lands on the lead
+	testing.expect_value(t, s.cur[1].r, 'a')
+	testing.expect(t, s.cur[2].r != tui.WIDE_CONT, "the orphaned continuation must be cleared")
+	testing.expect_value(t, s.cur[2].r, ' ')
+}
+
+@(test)
+no_orphans_survive_arbitrary_overdraw :: proc(t: ^testing.T) {
+	// The invariant flush relies on, asserted over the kind of overlapping
+	// drawing a real app does: a CJK label with a box and a fill over it.
+	s: tui.Screen
+	tui.screen_init(&s, 40, 3)
+	defer tui.screen_destroy(&s)
+
+	tui.draw_text(&s, 0, 1, "名前: 世界へようこそ", {})
+	tui.fill_rect(&s, 5, 1, 8, 1, ' ', tui.Style{attrs = {.Reverse}})
+	tui.draw_box(&s, 5, 0, 8, 3, {})
+
+	for y in 0 ..< s.h {
+		for x in 0 ..< s.w {
+			c := s.cur[y * s.w + x]
+			if c.r == tui.WIDE_CONT {
+				testing.expectf(t, x > 0, "continuation at column 0 (%d,%d)", x, y)
+				lead := s.cur[y * s.w + x - 1].r
+				testing.expectf(t, tui.rune_width(lead) == 2,
+					"continuation at (%d,%d) has no wide lead (found %v)", x, y, lead)
+			}
+			if tui.rune_width(c.r) == 2 {
+				testing.expectf(t, x + 1 < s.w, "wide lead in the last column (%d,%d)", x, y)
+				if x + 1 < s.w {
+					testing.expectf(t, s.cur[y * s.w + x + 1].r == tui.WIDE_CONT,
+						"wide lead at (%d,%d) lost its continuation", x, y)
+				}
+			}
+		}
+	}
+}
