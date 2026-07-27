@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="805" height="498" viewBox="0 0 804.8 498.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.0">
+<rect width="804.8" height="498.0" rx="8" fill="#1c1b22"/>
+<rect width="804.8" height="28" rx="8" fill="#26252e"/>
+<rect y="20" width="804.8" height="8" fill="#26252e"/>
+<circle cx="18" cy="14.0" r="5" fill="#e05561"/>
+<circle cx="34" cy="14.0" r="5" fill="#e9a658"/>
+<circle cx="50" cy="14.0" r="5" fill="#7ec490"/>
+<text x="402.4" y="18.0" fill="#8b8797" font-size="11.5" text-anchor="middle">filing an issue</text>
+<text x="32.8" y="53.5" fill="#e9a658" font-weight="600" xml:space="preserve">issues</text>
+<text x="91.6" y="53.5" fill="#64606c" xml:space="preserve">··</text>
+<text x="604.0" y="53.5" fill="#948e9c" xml:space="preserve">5 open · 1 connected</text>
+<text x="16.0" y="70.5" fill="#4e4a58" xml:space="preserve">────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="133.6" y="206.5" fill="#e9a658" xml:space="preserve">╭─ new issue ──────────────────────────────────────────────────╮</text>
+<text x="133.6" y="223.5" fill="#e9a658" xml:space="preserve">│</text>
+<text x="662.8" y="223.5" fill="#e9a658" xml:space="preserve">│</text>
+<text x="133.6" y="240.5" fill="#e9a658" xml:space="preserve">│</text>
+<text x="158.8" y="240.5" fill="#64606c" xml:space="preserve">title</text>
+<text x="662.8" y="240.5" fill="#e9a658" xml:space="preserve">│</text>
+<text x="133.6" y="257.5" fill="#e9a658" xml:space="preserve">│</text>
+<text x="142.0" y="257.5" fill="#dedae2" xml:space="preserve">  wide glyph width table</text>
+<text x="662.8" y="257.5" fill="#e9a658" xml:space="preserve">│</text>
+<text x="133.6" y="274.5" fill="#e9a658" xml:space="preserve">│</text>
+<text x="662.8" y="274.5" fill="#e9a658" xml:space="preserve">│</text>
+<text x="133.6" y="291.5" fill="#e9a658" xml:space="preserve">│</text>
+<text x="158.8" y="291.5" fill="#64606c" xml:space="preserve">enter file · esc cancel</text>
+<text x="662.8" y="291.5" fill="#e9a658" xml:space="preserve">│</text>
+<text x="133.6" y="308.5" fill="#e9a658" xml:space="preserve">╰──────────────────────────────────────────────────────────────╯</text>
+<text x="16.0" y="461.5" fill="#4e4a58" xml:space="preserve">────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="32.8" y="478.5" fill="#64606c" xml:space="preserve">type a title · enter file · esc cancel</text>
+<text x="746.8" y="478.5" fill="#948e9c" xml:space="preserve">All</text>
+</svg>

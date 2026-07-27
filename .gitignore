@@ -1,0 +1,31 @@
+# --- secrets -----------------------------------------------------------------
+# Host keys identify the server; identity secrets are the HMAC key behind every
+# user's pseudonymous id. Committing either is a real leak, so match broadly.
+*hostkey
+*hostkey.pub
+*_secret
+hostkey
+id_ed25519*
+id_rsa*
+*.pem
+
+# --- build output ------------------------------------------------------------
+# build.sh drops the binary in the repo root, named after the source directory.
+/tracker
+/whoami
+/members
+/guestbook
+/stopwatch
+*.o
+*.bin
+*.dSYM/
+
+# --- generated ---------------------------------------------------------------
+# Rebuild with: python3 docs/tools/build_site.py
+docs/site/
+
+# --- editors / OS ------------------------------------------------------------
+.DS_Store
+*.swp
+.idea/
+.vscode/

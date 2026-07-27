@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="670" height="396" viewBox="0 0 670.4 396.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.0">
+<rect width="670.4" height="396.0" rx="8" fill="#1c1b22"/>
+<rect width="670.4" height="28" rx="8" fill="#26252e"/>
+<rect y="20" width="670.4" height="8" fill="#26252e"/>
+<circle cx="18" cy="14.0" r="5" fill="#e05561"/>
+<circle cx="34" cy="14.0" r="5" fill="#e9a658"/>
+<circle cx="50" cy="14.0" r="5" fill="#7ec490"/>
+<text x="335.2" y="18.0" fill="#8b8797" font-size="11.5" text-anchor="middle">ssh -p 2223 localhost</text>
+<text x="66.4" y="121.5" fill="#00cdcd" xml:space="preserve">╭─ whoami ─────────────────────────────────────────────────────╮</text>
+<text x="66.4" y="138.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="595.6" y="138.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="66.4" y="155.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="91.6" y="155.5" fill="#7f7f7f" xml:space="preserve">user</text>
+<text x="200.8" y="155.5" fill="#ffffff" font-weight="600" xml:space="preserve">souris</text>
+<text x="595.6" y="155.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="66.4" y="172.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="91.6" y="172.5" fill="#7f7f7f" xml:space="preserve">term</text>
+<text x="200.8" y="172.5" fill="#ffffff" font-weight="600" xml:space="preserve">xterm-ghostty</text>
+<text x="595.6" y="172.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="66.4" y="189.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="91.6" y="189.5" fill="#7f7f7f" xml:space="preserve">auth</text>
+<text x="200.8" y="189.5" fill="#ffffff" font-weight="600" xml:space="preserve">publickey</text>
+<text x="595.6" y="189.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="66.4" y="206.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="91.6" y="206.5" fill="#7f7f7f" xml:space="preserve">key type</text>
+<text x="200.8" y="206.5" fill="#ffffff" font-weight="600" xml:space="preserve">ssh-ed25519</text>
+<text x="595.6" y="206.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="66.4" y="223.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="91.6" y="223.5" fill="#7f7f7f" xml:space="preserve">fingerprint</text>
+<text x="200.8" y="223.5" fill="#ffffff" font-weight="600" xml:space="preserve">SHA256:z1y6Suv76mu/fRBKwgOQKr6svmq3U+zDvO3iQ…</text>
+<text x="595.6" y="223.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="66.4" y="240.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="91.6" y="240.5" fill="#7f7f7f" xml:space="preserve">size</text>
+<text x="200.8" y="240.5" fill="#ffffff" font-weight="600" xml:space="preserve">76×20</text>
+<text x="595.6" y="240.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="66.4" y="257.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="91.6" y="257.5" fill="#7f7f7f" xml:space="preserve">frames</text>
+<text x="200.8" y="257.5" fill="#ffffff" font-weight="600" xml:space="preserve">88</text>
+<text x="595.6" y="257.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="66.4" y="274.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="91.6" y="274.5" fill="#7f7f7f" xml:space="preserve">sent</text>
+<text x="200.8" y="274.5" fill="#ffffff" font-weight="600" xml:space="preserve">9972 bytes</text>
+<text x="595.6" y="274.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="66.4" y="291.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="595.6" y="291.5" fill="#00cdcd" xml:space="preserve">│</text>
+<text x="66.4" y="308.5" fill="#00cdcd" xml:space="preserve">╰──</text>
+<text x="91.6" y="308.5" fill="#7f7f7f" xml:space="preserve"> q to quit</text>
+<text x="184.0" y="308.5" fill="#00cdcd" xml:space="preserve">─────────────────────────────────────────────────╯</text>
+</svg>

@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install libssh (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssh-dev pkg-config
+
+      - name: Install libssh (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libssh pkg-config
+
+      # otsh uses core:sys/posix, which tracks Odin's nightly rather than a
+      # tagged release.
+      - name: Install Odin
+        uses: laytan/setup-odin@v2
+        with:
+          release: false
+          branch: master
+
+      - name: Build packages and every example
+        run: |
+          ./build.sh
+          for ex in examples/*/; do ./build.sh "$ex"; done
+
+      - name: Run tests
+        run: ./test.sh
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # The generated API pages are committed, so a doc comment edited without
+      # re-running the generator is a CI failure rather than silent drift.
+      - name: API reference is up to date
+        run: python3 docs/tools/gen_api.py --check
+
+      # Validates links, images, unconverted Markdown and the sidebar.
+      - name: Docs site builds and validates
+        run: python3 docs/tools/build_site.py --check

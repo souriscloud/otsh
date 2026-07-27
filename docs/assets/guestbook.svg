@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="738" height="464" viewBox="0 0 737.6 464.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.0">
+<rect width="737.6" height="464.0" rx="8" fill="#1c1b22"/>
+<rect width="737.6" height="28" rx="8" fill="#26252e"/>
+<rect y="20" width="737.6" height="8" fill="#26252e"/>
+<circle cx="18" cy="14.0" r="5" fill="#e05561"/>
+<circle cx="34" cy="14.0" r="5" fill="#e9a658"/>
+<circle cx="50" cy="14.0" r="5" fill="#7ec490"/>
+<text x="368.8" y="18.0" fill="#8b8797" font-size="11.5" text-anchor="middle">ssh -p 2228 localhost</text>
+<rect x="49.6" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="58.0" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="66.4" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="74.8" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="83.2" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="91.6" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="100.0" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="108.4" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="116.8" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="125.2" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="133.6" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="142.0" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="150.4" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="158.8" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="167.2" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="175.6" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="184.0" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="192.4" y="110.0" width="8.9" height="17.0" fill="#00cdcd"/>
+<rect x="200.8" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="209.2" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="217.6" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="226.0" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="234.4" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="242.8" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="251.2" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="259.6" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="268.0" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="276.4" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="284.8" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="293.2" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="301.6" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="310.0" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="318.4" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="326.8" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="335.2" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="343.6" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="352.0" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="360.4" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="368.8" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="377.2" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="385.6" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="394.0" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<text x="32.8" y="70.5" fill="#78beff" xml:space="preserve">╭─ guestbook ──────────────────────────────────────────────────────────────────╮</text>
+<text x="32.8" y="87.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="49.6" y="87.5" fill="#7f7f7f" xml:space="preserve">2 message(s) — you are guest-ec34340117</text>
+<text x="696.4" y="87.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="104.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="49.6" y="104.5" fill="#7f7f7f" xml:space="preserve">────────────────────────────────────────────────────────────────────────────</text>
+<text x="696.4" y="104.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="121.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="49.6" y="121.5" fill="#1c1b22" font-weight="600" xml:space="preserve">guest-f898814b48:</text>
+<text x="200.8" y="121.5" fill="#1c1b22" xml:space="preserve">hello from the first key</text>
+<text x="696.4" y="121.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="138.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="49.6" y="138.5" fill="#00cdcd" font-weight="600" xml:space="preserve">guest-064cd260d6:</text>
+<text x="200.8" y="138.5" fill="#ffffff" xml:space="preserve">different key, same guestbook</text>
+<text x="696.4" y="138.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="155.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="696.4" y="155.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="172.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="696.4" y="172.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="189.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="696.4" y="189.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="206.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="696.4" y="206.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="223.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="696.4" y="223.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="240.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="696.4" y="240.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="257.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="696.4" y="257.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="274.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="696.4" y="274.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="291.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="696.4" y="291.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="308.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="696.4" y="308.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="325.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="696.4" y="325.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="342.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="696.4" y="342.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="359.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="696.4" y="359.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="376.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="696.4" y="376.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="393.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="49.6" y="393.5" fill="#7f7f7f" xml:space="preserve">────────────────────────────────────────────────────────────────────────────</text>
+<text x="696.4" y="393.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="410.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="49.6" y="410.5" fill="#7f7f7f" xml:space="preserve">↑↓/jk move · enter write · q quit</text>
+<text x="696.4" y="410.5" fill="#78beff" xml:space="preserve">│</text>
+<text x="32.8" y="427.5" fill="#78beff" xml:space="preserve">╰──────────────────────────────────────────────────────────────────────────────╯</text>
+</svg>
