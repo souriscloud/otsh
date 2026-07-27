@@ -8,7 +8,7 @@ Generated from `tui/*.odin` by `docs/tools/gen_api.py`. For how these fit togeth
 
 **Types** — [`App`](#app), [`Attr`](#attr), [`Attrs`](#attrs), [`Backend`](#backend), [`Border`](#border), [`Cell`](#cell), [`Color`](#color), [`Color_Mode`](#color-mode), [`Input`](#input), [`Key`](#key), [`Key_Kind`](#key-kind), [`Local`](#local), [`Mouse`](#mouse), [`Mouse_Kind`](#mouse-kind), [`Msg`](#msg), [`Program`](#program), [`Resize`](#resize), [`Screen`](#screen), [`Style`](#style), [`Tick`](#tick)
 
-**Constants** — [`BORDER_DOUBLE`](#border-double), [`BORDER_ROUND`](#border-round), [`BORDER_SHARP`](#border-sharp), [`BORDER_THICK`](#border-thick), [`WIDE_CONT`](#wide-cont)
+**Constants** — [`BORDER_DOUBLE`](#border-double), [`BORDER_ROUND`](#border-round), [`BORDER_SHARP`](#border-sharp), [`BORDER_THICK`](#border-thick), [`MAX_COLS`](#max-cols), [`MAX_ROWS`](#max-rows), [`WIDE_CONT`](#wide-cont)
 
 **Procedures** — [`ansi`](#ansi), [`draw_box`](#draw-box), [`draw_text`](#draw-text), [`draw_text_clipped`](#draw-text-clipped), [`fill_rect`](#fill-rect), [`flush`](#flush), [`key_name`](#key-name), [`local_backend`](#local-backend), [`local_enter_raw`](#local-enter-raw), [`local_exit_raw`](#local-exit-raw), [`no_color`](#no-color), [`parse_input`](#parse-input), [`quit`](#quit), [`rgb`](#rgb), [`run`](#run), [`rune_width`](#rune-width), [`screen_clear`](#screen-clear), [`screen_destroy`](#screen-destroy), [`screen_init`](#screen-init), [`screen_resize`](#screen-resize), [`set_cell`](#set-cell), [`set_cursor`](#set-cursor), [`text_width`](#text-width), [`with_attrs`](#with-attrs), [`with_bg`](#with-bg), [`with_fg`](#with-fg)
 
@@ -87,7 +87,7 @@ Border :: struct {
 
 The six runes `draw_box` uses: four corners, then horizontal and vertical.
 
-*tui/screen.odin:207*
+*tui/screen.odin:224*
 
 ### `Cell`
 
@@ -367,7 +367,7 @@ BORDER_DOUBLE :: Border{'╔', '╗', '╚', '╝', '═', '║'}
 
 Double-ruled.
 
-*tui/screen.odin:216*
+*tui/screen.odin:233*
 
 ### `BORDER_ROUND`
 
@@ -377,7 +377,7 @@ BORDER_ROUND :: Border{'╭', '╮', '╰', '╯', '─', '│'}
 
 Rounded corners.
 
-*tui/screen.odin:212*
+*tui/screen.odin:229*
 
 ### `BORDER_SHARP`
 
@@ -387,7 +387,7 @@ BORDER_SHARP :: Border{'┌', '┐', '└', '┘', '─', '│'}
 
 Square corners.
 
-*tui/screen.odin:214*
+*tui/screen.odin:231*
 
 ### `BORDER_THICK`
 
@@ -397,7 +397,71 @@ BORDER_THICK :: Border{'┏', '┓', '┗', '┛', '━', '┃'}
 
 Heavy weight.
 
-*tui/screen.odin:218*
+*tui/screen.odin:235*
+
+### `MAX_COLS`
+
+```odin
+MAX_COLS :: 1000
+MAX_ROWS :: 300
+
+// Resizes the grids, forcing a full repaint on the next flush. A no-op if the
+// size is unchanged. Dimensions are clamped to MAX_COLS/MAX_ROWS.
+screen_resize :: proc(s: ^Screen, w, h: int) {
+	w, h := clamp(w, 1, MAX_COLS), clamp(h, 1, MAX_ROWS)
+	if s.w == w && s.h == h && s.cur != nil {
+		return
+	}
+	delete(s.cur)
+	delete(s.prev)
+	s.w, s.h = w, h
+	s.cur = make([]Cell, w * h)
+	s.prev = make([]Cell, w * h)
+	s.full_redraw = true
+	screen_clear(s)
+}
+```
+
+Hard bounds on a screen, in cells.
+
+Terminal geometry arrives from whatever is on the other end. Over SSH that is
+an untrusted uint32 the client picks, so this is a security boundary, not a
+style choice: at 16 bytes per cell and two grids, an unclamped 2e9 x 2e9
+overflows the allocation size, `make` hands back an empty slice, and the first
+draw panics and takes the whole process down. Anything merely large — 10000 x
+10000 — commits gigabytes instead.
+
+The caps are generous against real hardware — an ultrawide 5120px display at a
+6px font is about 850 columns, a 4K display at a 10px line height about 210
+rows — while bounding a session at roughly 9.6 MB of cell grid (two grids,
+16 bytes a cell). That worst case still multiplies by the session limit, so an
+operator expecting many concurrent users should size RAM accordingly.
+
+*tui/screen.odin:125*
+
+### `MAX_ROWS`
+
+```odin
+MAX_ROWS :: 300
+
+// Resizes the grids, forcing a full repaint on the next flush. A no-op if the
+// size is unchanged. Dimensions are clamped to MAX_COLS/MAX_ROWS.
+screen_resize :: proc(s: ^Screen, w, h: int) {
+	w, h := clamp(w, 1, MAX_COLS), clamp(h, 1, MAX_ROWS)
+	if s.w == w && s.h == h && s.cur != nil {
+		return
+	}
+	delete(s.cur)
+	delete(s.prev)
+	s.w, s.h = w, h
+	s.cur = make([]Cell, w * h)
+	s.prev = make([]Cell, w * h)
+	s.full_redraw = true
+	screen_clear(s)
+}
+```
+
+*tui/screen.odin:126*
 
 ### `WIDE_CONT`
 
@@ -432,7 +496,7 @@ draw_box :: proc(s: ^Screen, x, y, w, h: int, style: Style, b := BORDER_ROUND, t
 Draws a box outline with an optional title inset into the top edge. Nothing is
 drawn inside it. Silently does nothing if smaller than 2x2.
 
-*tui/screen.odin:222*
+*tui/screen.odin:239*
 
 ### `draw_text`
 
@@ -442,7 +506,7 @@ draw_text :: proc(s: ^Screen, x, y: int, text: string, style: Style) -> int
 
 Returns the number of columns consumed.
 
-*tui/screen.odin:163*
+*tui/screen.odin:180*
 
 ### `draw_text_clipped`
 
@@ -452,7 +516,7 @@ draw_text_clipped :: proc(s: ^Screen, x, y, max_w: int, text: string, style: Sty
 
 Draws text clipped to `max_w` columns, appending "…" when it does not fit.
 
-*tui/screen.odin:176*
+*tui/screen.odin:193*
 
 ### `fill_rect`
 
@@ -462,7 +526,7 @@ fill_rect :: proc(s: ^Screen, x, y, w, h: int, r: rune, style: Style)
 
 Fills a rectangle with one rune. Clipped to the screen.
 
-*tui/screen.odin:198*
+*tui/screen.odin:215*
 
 ### `flush`
 
@@ -473,7 +537,7 @@ flush :: proc(s: ^Screen) -> []u8
 Produces the escape sequence stream that turns the previously rendered frame
 into the current one. Returns an empty slice when nothing changed.
 
-*tui/screen.odin:365*
+*tui/screen.odin:382*
 
 ### `key_name`
 
@@ -584,7 +648,7 @@ rune_width :: proc "contextless" (r: rune) -> int
 Display width in terminal columns. Covers the ranges that matter in
 practice: combining marks (0), CJK and emoji (2), everything else (1).
 
-*tui/screen.odin:255*
+*tui/screen.odin:272*
 
 ### `screen_clear`
 
@@ -594,7 +658,7 @@ screen_clear :: proc(s: ^Screen, style := Style{})
 
 Resets the working buffer. Called by the runtime before each view().
 
-*tui/screen.odin:128*
+*tui/screen.odin:145*
 
 ### `screen_destroy`
 
@@ -623,9 +687,9 @@ screen_resize :: proc(s: ^Screen, w, h: int)
 ```
 
 Resizes the grids, forcing a full repaint on the next flush. A no-op if the
-size is unchanged.
+size is unchanged. Dimensions are clamped to MAX_COLS/MAX_ROWS.
 
-*tui/screen.odin:113*
+*tui/screen.odin:130*
 
 ### `set_cell`
 
@@ -636,7 +700,7 @@ set_cell :: proc(s: ^Screen, x, y: int, r: rune, style: Style)
 Paints one cell, clipped to the screen. A double-width rune also claims the
 cell to its right; a zero-width one is ignored.
 
-*tui/screen.odin:142*
+*tui/screen.odin:159*
 
 ### `set_cursor`
 
@@ -648,7 +712,7 @@ Shows the terminal cursor at this cell for the current frame. Call it every
 frame you want the cursor visible — `screen_clear` hides it again. Use it for
 text input, so the caret lands where the user is typing.
 
-*tui/screen.odin:246*
+*tui/screen.odin:263*
 
 ### `text_width`
 
@@ -659,7 +723,7 @@ text_width :: proc "contextless" (text: string) -> int
 Total display width of a string in terminal columns. Use this, never `len`,
 for centering or alignment.
 
-*tui/screen.odin:295*
+*tui/screen.odin:312*
 
 ### `with_attrs`
 

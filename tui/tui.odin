@@ -172,6 +172,18 @@ send :: proc(p: ^Program, msg: Msg) {
 	}
 }
 
+// The longest input sequence worth waiting to complete. Real ones are a
+// handful of bytes; the longest this parser recognises is well under 32.
+//
+// Without a cap here, a client that sends "ESC [" followed by an endless run of
+// digits and never a final byte parks the parser: nothing is consumable, so
+// nothing is removed, `pending` grows forever, and `parse_csi` rescans all of it
+// every frame — one connection reaching >100% CPU on trivial bandwidth. The
+// stall timeout below does not save us, because it only fires when input
+// *pauses*, and a slow trickle keeps resetting it.
+@(private)
+MAX_INCOMPLETE :: 256
+
 @(private)
 dispatch_input :: proc(p: ^Program) {
 	for len(p.pending) > 0 {
@@ -186,6 +198,12 @@ dispatch_input :: proc(p: ^Program) {
 				}
 				ordered_remove(&p.pending, 0)
 				p.stalls = 0
+				continue
+			}
+			// Too long to be a real sequence: this is garbage or an attack.
+			// Drop the leading byte and resync rather than buffering forever.
+			if len(p.pending) > MAX_INCOMPLETE {
+				ordered_remove(&p.pending, 0)
 				continue
 			}
 			return

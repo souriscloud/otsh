@@ -431,7 +431,75 @@ Before exposing an `otsh` server to the internet:
     without understanding why they were left out** — this server's
     request handling assumes a single interactive shell channel (§8).
 
-## 11. What has actually been checked
+## 11. Independent audit findings
+
+Three independent reviewers audited this code with no stake in it, along three
+lenses: memory and the C boundary, concurrency and lifecycle, and auth and
+crypto. They found eight confirmed defects the author had missed, including two
+remote crashes. All are fixed; the details are kept here because the *class* of
+mistake is more useful than the patch.
+
+**Two were critical, both reachable by any client the default config accepts:**
+
+| Was | Now |
+| --- | --- |
+| Terminal dimensions arrive as a client-chosen `uint32` and were never upper-bounded. `10000x10000` committed 1.5 GB; a 2e9-square pty overflowed the allocation size, `make` returned an empty slice, and the first draw panicked — **killing the process and every other session on it**. A `window-change` on an established session did it too. | Clamped at both layers (`MAX_PTY_COLS`/`MAX_PTY_ROWS` in `ssh`, `MAX_COLS`/`MAX_ROWS` in `tui`). Verified: 65535², 2³¹-1², and 2e9² pty requests all leave the server running. |
+| `Program.pending` was unbounded. An unterminated `ESC [` followed by endless digits was never consumable, so nothing drained it, and `parse_csi` rescanned the whole buffer every frame. Measured **138% CPU on one connection at ~20 bytes/second**, memory climbing. | `MAX_INCOMPLETE` (256 bytes) forces a resync. Same attack now: **3% CPU, memory flat** (+48 KB across 2.4 MB of attack traffic). |
+
+**Six more, confirmed and fixed:**
+
+- `set_algorithms` ignored `ssh_bind_options_set`'s return. libssh rejects a list
+  whose entries are all unknown and *silently keeps its own broader default* —
+  so a typo in `Config.ciphers` downgraded the negotiated crypto with no
+  indication. It now refuses to start.
+- The host key was written by libssh under the process umask — `0666` under a
+  permissive one, i.e. briefly world-**writable**, and a descriptor opened during
+  that window survives the later `chmod`. The file is now created `O_EXCL` at
+  `0600` before libssh writes into it. Verified under `umask 000`: the only mode
+  ever observable is `0600`.
+- `ids_equal("", "")` returned **true**, and empty ids are easy to produce (no
+  identity secret, `none`/`password` auth). An app comparing against a record
+  whose id was never populated would have admitted every anonymous client. Empty
+  ids now never compare equal.
+- A 32-byte all-zero identity secret was accepted. An all-zero HMAC key is a
+  published key: every id becomes computable by anyone holding a fingerprint.
+  Now refused.
+- The identity secret was left in freed heap memory. Now zeroed before release.
+- An existing host key of the wrong type was accepted, then failed key exchange
+  for every client with **no log line anywhere** — a silent, total outage.
+  `ensure_host_key` now checks the key's type against the advertised algorithms
+  and explains the mismatch.
+
+**Two corrections to this document, from measurement:**
+
+- `max_auth_attempts` was described as bounding password guessing. It does not:
+  the counter is per-`Session`, so reconnecting resets it — measured ~37
+  guesses/second from one address. It also does not drop the connection. If you
+  accept passwords, rate-limit them yourself.
+- `"-"` was described as re-admitting SHA-1 and CBC. On libssh 0.12 it does not;
+  it re-admits CTR ciphers and non-ETM MACs.
+
+**One accepted limitation:**
+
+- `gssapi-with-mic` is handled inside libssh and never reaches `allow()`, so
+  `Config.methods` cannot deny it. On a Kerberos-joined host with a keytab,
+  libssh can complete that exchange with no otsh policy applied. It is contained
+  by the `s.authenticated && s.chan != nil && s.shell` gate in `session_thread`,
+  which is load-bearing for exactly this reason — do not remove it. There is
+  currently no way to express "deny GSSAPI" in `Config`.
+
+**What the auditors verified as sound** (so you know what has real coverage):
+the central claim that an unverified public key cannot authenticate or reach
+application code — attacked three ways, including a hand-rolled client that
+sends `PK_OK` and immediately tries to open a channel; HMAC parameter order and
+truncation; the constant-time comparison; that the algorithm strings really do
+land on the wire in both directions; that overriding the kex list does *not*
+disable libssh's Terrapin countermeasure (it is appended unconditionally); that
+`ssh_version` has the semantics the guard assumes; that session teardown leaks
+nothing across 40 cycles; and that the one-thread-per-session invariant genuinely
+holds, which is what makes the unsynchronised `Session` fields safe.
+
+## 12. What has actually been checked
 
 Not an audit. This records what was tested and what was not, so you can judge
 the gap yourself rather than infer it.

@@ -108,10 +108,27 @@ screen_destroy :: proc(s: ^Screen) {
 	delete(s.out)
 }
 
+// Hard bounds on a screen, in cells.
+//
+// Terminal geometry arrives from whatever is on the other end. Over SSH that is
+// an untrusted uint32 the client picks, so this is a security boundary, not a
+// style choice: at 16 bytes per cell and two grids, an unclamped 2e9 x 2e9
+// overflows the allocation size, `make` hands back an empty slice, and the first
+// draw panics and takes the whole process down. Anything merely large — 10000 x
+// 10000 — commits gigabytes instead.
+//
+// The caps are generous against real hardware — an ultrawide 5120px display at a
+// 6px font is about 850 columns, a 4K display at a 10px line height about 210
+// rows — while bounding a session at roughly 9.6 MB of cell grid (two grids,
+// 16 bytes a cell). That worst case still multiplies by the session limit, so an
+// operator expecting many concurrent users should size RAM accordingly.
+MAX_COLS :: 1000
+MAX_ROWS :: 300
+
 // Resizes the grids, forcing a full repaint on the next flush. A no-op if the
-// size is unchanged.
+// size is unchanged. Dimensions are clamped to MAX_COLS/MAX_ROWS.
 screen_resize :: proc(s: ^Screen, w, h: int) {
-	w, h := max(w, 1), max(h, 1)
+	w, h := clamp(w, 1, MAX_COLS), clamp(h, 1, MAX_ROWS)
 	if s.w == w && s.h == h && s.cur != nil {
 		return
 	}

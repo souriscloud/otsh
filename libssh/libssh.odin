@@ -276,6 +276,8 @@ foreign lib {
 	pki_generate :: proc(type: Keytype, parameter: c.int, pkey: ^Key) -> c.int ---
 	@(link_name = "ssh_pki_export_privkey_file")
 	pki_export_privkey_file :: proc(privkey: Key, passphrase: cstring, auth_fn: rawptr, auth_data: rawptr, filename: cstring) -> c.int ---
+	@(link_name = "ssh_pki_import_privkey_file")
+	pki_import_privkey_file :: proc(filename: cstring, passphrase: cstring, auth_fn: rawptr, auth_data: rawptr, pkey: ^Key) -> c.int ---
 	@(link_name = "ssh_key_free")
 	key_free :: proc(k: Key) ---
 	@(link_name = "ssh_key_type")

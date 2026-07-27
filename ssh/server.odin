@@ -43,7 +43,10 @@ ALL_AUTH :: Auth_Methods{.None, .Password, .Publickey}
 Auth_Request :: struct {
 	user:        string,
 	method:      Auth_Method,
-	password:    string, // .Password only
+	// .Password only. Unlike every other field here, this borrows libssh's own
+	// buffer, which is zeroed and freed as soon as the callback returns — copy it
+	// if you need it beyond the call.
+	password:    string,
 	fingerprint: string, // .Publickey only, e.g. "SHA256:0Cn7…" — signature verified
 	key_type:    string, // .Publickey only, e.g. "ssh-ed25519"
 	id:          string, // pseudonymous account id, when an identity secret is set
@@ -78,6 +81,12 @@ Server :: struct {
 	running:      bool,
 	warned_enum:  bool, // one-shot enumeration warning; touched atomically
 }
+
+// Upper bounds on client-supplied terminal geometry, matching tui's own limits.
+// pty-req and window-change both carry uint32 dimensions chosen by the client;
+// unclamped they are an allocation-size overflow and a remote crash.
+MAX_PTY_COLS :: 1000
+MAX_PTY_ROWS :: 300
 
 // The terminal geometry the client asked for. No pseudo-terminal is actually
 // allocated — this is just what the client told us about its own.
@@ -114,7 +123,7 @@ Session :: struct {
 	term_len:      int,
 	fp_buf:        [96]u8,
 	fp_len:        int,
-	kt_buf:        [32]u8,
+	kt_buf:        [64]u8,
 	kt_len:        int,
 	id_buf:        [ID_SIZE]u8,
 	id_len:        int,
@@ -199,7 +208,9 @@ size :: proc "contextless" (s: ^Session) -> (cols, rows: int) {
 	cols, rows = s.pty.cols, s.pty.rows
 	if cols <= 0 {cols = 80}
 	if rows <= 0 {rows = 24}
-	return
+	// The client chose these. Clamp on the way out as well as on the way in, so
+	// no caller can be handed a hostile geometry even if it never reaches tui.
+	return clamp(cols, 1, MAX_PTY_COLS), clamp(rows, 1, MAX_PTY_ROWS)
 }
 
 // Blocks for up to timeout_ms waiting for input. Returns ok=false once the
@@ -314,9 +325,32 @@ DEFAULT_HOSTKEYS :: "ssh-ed25519"
 // Creates the host key if it does not exist yet — the SSH equivalent of a TLS
 // certificate. Clients pin it in ~/.ssh/known_hosts, so it must be stable
 // across restarts.
-ensure_host_key :: proc(path: string) -> bool {
+ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 	if os.exists(path) {
 		warn_if_world_readable(path)
+		// An existing key of the wrong type is a silent, total outage: key
+		// exchange fails for every client and nothing upstream logs a reason.
+		// Check it here, where we can say something useful.
+		cpath := strings.clone_to_cstring(path, context.temp_allocator)
+		key: ls.Key
+		if ls.pki_import_privkey_file(cpath, nil, nil, nil, &key) != ls.OK {
+			fmt.eprintfln("otsh: cannot read the host key at %s", path)
+			return false
+		}
+		defer ls.key_free(key)
+
+		name := ls.key_type_to_char(ls.key_type(key))
+		type_name := name == nil ? "unknown" : string(name)
+		if advertised != "-" && !contains(advertised, type_name) {
+			fmt.eprintfln(
+				"otsh: the host key at %s is %s, but the advertised host key\n" +
+				"      algorithms are %q. No client could complete key exchange.\n" +
+				"      Either use an %s key, or set Config.hostkey_algorithms to\n" +
+				"      include %s.",
+				path, type_name, advertised, advertised, type_name,
+			)
+			return false
+		}
 		return true
 	}
 	key: ls.Key
@@ -328,13 +362,30 @@ ensure_host_key :: proc(path: string) -> bool {
 
 	cpath := strings.clone_to_cstring(path)
 	defer delete(cpath)
-	if ls.pki_export_privkey_file(key, nil, nil, nil, cpath) != ls.OK {
-		fmt.eprintln("otsh: failed to write host key to", path)
+
+	// libssh writes the key with fopen(path, "wb"), i.e. 0666 & ~umask. Under a
+	// permissive umask that is a world-WRITABLE private key, and chmod-ing after
+	// the fact does not help: another process only has to win the open(), not the
+	// read — a descriptor obtained during the window survives the chmod, and a
+	// writable window means the key can be replaced, not merely stolen.
+	//
+	// So create the file ourselves, empty, O_EXCL and 0600, before libssh opens
+	// it. fopen("wb") on an existing file truncates but leaves the mode alone,
+	// so the key is never visible at any wider permission.
+	if f, err := os.open(path, {.Write, .Create, .Excl}, {.Read_User, .Write_User}); err == nil {
+		os.close(f)
+	} else {
+		fmt.eprintfln("otsh: cannot create host key file %s: %v", path, err)
 		return false
 	}
-	// libssh writes with the process umask, which is usually 0644. A host key
-	// any local user can read is a host key any local user can impersonate you
-	// with, so tighten it immediately.
+
+	if ls.pki_export_privkey_file(key, nil, nil, nil, cpath) != ls.OK {
+		fmt.eprintln("otsh: failed to write host key to", path)
+		os.remove(path)
+		return false
+	}
+	// Belt and braces: confirm the mode really is 0600 rather than assuming
+	// libssh left it alone.
 	if posix.chmod(cpath, {.IRUSR, .IWUSR}) != .OK {
 		fmt.eprintfln("otsh: WARNING could not chmod 600 %s", path)
 	}
@@ -343,22 +394,44 @@ ensure_host_key :: proc(path: string) -> bool {
 }
 
 @(private)
-set_algorithms :: proc(b: ls.Bind, cfg: Config) {
+contains :: proc(haystack, needle: string) -> bool {
+	return strings.contains(haystack, needle)
+}
+
+// Returns false if any list was rejected by libssh.
+//
+// This return value matters more than it looks. libssh rejects a list whose
+// entries are *all* unknown to it and silently keeps its own, broader default —
+// which includes CTR ciphers and non-ETM MACs. Ignoring the result means a typo
+// in Config, or a name this libssh build does not know, downgrades the
+// negotiated crypto with no indication anywhere. Fail closed instead.
+@(private)
+set_algorithms :: proc(b: ls.Bind, cfg: Config) -> bool {
+	ok := true
 	// "-" opts out and leaves libssh's defaults alone.
-	apply :: proc(b: ls.Bind, opt: ls.Bind_Option, value, fallback: string) {
+	apply :: proc(b: ls.Bind, opt: ls.Bind_Option, value, fallback, what: string, ok: ^bool) {
 		v := value == "" ? fallback : value
 		if v == "-" {
 			return
 		}
 		cv := strings.clone_to_cstring(v, context.temp_allocator)
-		ls.bind_options_set(b, opt, rawptr(cv))
+		if ls.bind_options_set(b, opt, rawptr(cv)) != ls.OK {
+			fmt.eprintfln(
+				"otsh: libssh rejected the %s list %q.\n" +
+				"      Every name in it is unknown to this libssh build, so it would have\n" +
+				"      fallen back to libssh's own (weaker) default. Refusing to start.",
+				what, v,
+			)
+			ok^ = false
+		}
 	}
-	apply(b, .Key_Exchange, cfg.key_exchange, DEFAULT_KEX)
-	apply(b, .Ciphers_C_S, cfg.ciphers, DEFAULT_CIPHERS)
-	apply(b, .Ciphers_S_C, cfg.ciphers, DEFAULT_CIPHERS)
-	apply(b, .Hmac_C_S, cfg.macs, DEFAULT_MACS)
-	apply(b, .Hmac_S_C, cfg.macs, DEFAULT_MACS)
-	apply(b, .Hostkey_Algorithms, cfg.hostkey_algorithms, DEFAULT_HOSTKEYS)
+	apply(b, .Key_Exchange, cfg.key_exchange, DEFAULT_KEX, "key exchange", &ok)
+	apply(b, .Ciphers_C_S, cfg.ciphers, DEFAULT_CIPHERS, "cipher (client->server)", &ok)
+	apply(b, .Ciphers_S_C, cfg.ciphers, DEFAULT_CIPHERS, "cipher (server->client)", &ok)
+	apply(b, .Hmac_C_S, cfg.macs, DEFAULT_MACS, "MAC (client->server)", &ok)
+	apply(b, .Hmac_S_C, cfg.macs, DEFAULT_MACS, "MAC (server->client)", &ok)
+	apply(b, .Hostkey_Algorithms, cfg.hostkey_algorithms, DEFAULT_HOSTKEYS, "host key algorithm", &ok)
+	return ok
 }
 
 // Defaults applied to a zero-valued Config field. sshtui fills these in too;
@@ -407,7 +480,8 @@ serve :: proc(cfg: Config) -> bool {
 		return false
 	}
 
-	if !ensure_host_key(cfg.host_key_path) {
+	if !ensure_host_key(cfg.host_key_path,
+	    cfg.hostkey_algorithms == "" ? DEFAULT_HOSTKEYS : cfg.hostkey_algorithms) {
 		return false
 	}
 
@@ -443,7 +517,9 @@ serve :: proc(cfg: Config) -> bool {
 	ls.bind_options_set(srv.bind, .Bindaddr, rawptr(chost))
 	ls.bind_options_set(srv.bind, .Bindport, &port)
 	ls.bind_options_set(srv.bind, .Hostkey, rawptr(ckey))
-	set_algorithms(srv.bind, cfg)
+	if !set_algorithms(srv.bind, cfg) {
+		return false
+	}
 
 	if ls.bind_listen(srv.bind) < 0 {
 		fmt.eprintfln("otsh: listen failed: %s", ls.get_error(rawptr(srv.bind)))
@@ -470,11 +546,25 @@ serve :: proc(cfg: Config) -> bool {
 			free(s)
 			continue
 		}
+
+		// Check the limits here, before committing a thread. Doing it inside the
+		// session thread meant a rejected connection still cost a pthread and a
+		// ~17 KB Session first, so the limiter protected memory but not the
+		// accept path itself.
+		addr := peer_address(ls.get_fd(s.sess), s.addr_buf[:])
+		s.addr_len = len(addr)
+		if !limiter_acquire(&srv.limiter, addr) {
+			ls.disconnect(s.sess)
+			ls.free_session(s.sess)
+			free(s)
+			continue
+		}
 		// Thread creation can fail under resource pressure. Dropping the
 		// connection cleanly is the only sane response — leaving it accepted
 		// with nothing to service it would hold a socket open forever.
 		if thread.create_and_start_with_poly_data(s, session_thread, self_cleanup = true) == nil {
 			fmt.eprintln("otsh: could not start a session thread; dropping the connection")
+			limiter_release(&srv.limiter, remote_addr(s))
 			ls.disconnect(s.sess)
 			ls.free_session(s.sess)
 			free(s)
@@ -488,14 +578,10 @@ serve :: proc(cfg: Config) -> bool {
 
 @(private)
 session_thread :: proc(s: ^Session) {
-	addr := peer_address(ls.get_fd(s.sess), s.addr_buf[:])
-	s.addr_len = len(addr)
-	admitted := limiter_acquire(&s.server.limiter, addr)
-
+	// The accept loop already took this connection's limiter slot and recorded
+	// the peer address; this thread owns releasing it.
 	defer {
-		if admitted {
-			limiter_release(&s.server.limiter, remote_addr(s))
-		}
+		limiter_release(&s.server.limiter, remote_addr(s))
 		if s.chan != nil {
 			ls.channel_send_eof(s.chan)
 			ls.channel_close(s.chan)
@@ -512,10 +598,6 @@ session_thread :: proc(s: ^Session) {
 		s.id_buf = {}
 		ls.free_session(s.sess)
 		free(s)
-	}
-
-	if !admitted {
-		return // over a connection limit; drop without a handshake
 	}
 
 	// A client that opens a socket and then goes quiet would otherwise hold
@@ -820,10 +902,10 @@ cb_pty_request :: proc "c" (
 	}
 
 	s.pty = Pty {
-		cols    = int(width),
-		rows    = int(height),
-		px      = int(pxwidth),
-		py      = int(pxheight),
+		cols    = clamp(int(width), 1, MAX_PTY_COLS),
+		rows    = clamp(int(height), 1, MAX_PTY_ROWS),
+		px      = clamp(int(pxwidth), 0, 1 << 20),
+		py      = clamp(int(pxheight), 0, 1 << 20),
 		present = true,
 	}
 	// "Yes, you have a terminal." No actual pty is allocated — we just record
@@ -849,10 +931,10 @@ cb_window_change :: proc "c" (
 	userdata: rawptr,
 ) -> c.int {
 	s := (^Session)(userdata)
-	s.pty.cols = int(width)
-	s.pty.rows = int(height)
-	s.pty.px = int(pxwidth)
-	s.pty.py = int(pxheight)
+	s.pty.cols = clamp(int(width), 1, MAX_PTY_COLS)
+	s.pty.rows = clamp(int(height), 1, MAX_PTY_ROWS)
+	s.pty.px = clamp(int(pxwidth), 0, 1 << 20)
+	s.pty.py = clamp(int(pxheight), 0, 1 << 20)
 	s.resized = true
 	return ls.OK
 }

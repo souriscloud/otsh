@@ -8,7 +8,7 @@ Generated from `ssh/*.odin` by `docs/tools/gen_api.py`. For how these fit togeth
 
 **Types** — [`Auth_Method`](#auth-method), [`Auth_Methods`](#auth-methods), [`Auth_Request`](#auth-request), [`Authenticator`](#authenticator), [`Config`](#config), [`Handler`](#handler), [`Identity_Secret`](#identity-secret), [`Limits`](#limits), [`Pty`](#pty), [`Ring`](#ring), [`Server`](#server), [`Session`](#session)
 
-**Constants** — [`ALL_AUTH`](#all-auth), [`DEFAULT_CIPHERS`](#default-ciphers), [`DEFAULT_HOST`](#default-host), [`DEFAULT_HOST_KEY`](#default-host-key), [`DEFAULT_HOSTKEYS`](#default-hostkeys), [`DEFAULT_KEX`](#default-kex), [`DEFAULT_LIMITS`](#default-limits), [`DEFAULT_MACS`](#default-macs), [`DEFAULT_PORT`](#default-port), [`ID_BYTES`](#id-bytes), [`ID_SIZE`](#id-size), [`MAX_INPUT`](#max-input), [`SECRET_SIZE`](#secret-size)
+**Constants** — [`ALL_AUTH`](#all-auth), [`DEFAULT_CIPHERS`](#default-ciphers), [`DEFAULT_HOST`](#default-host), [`DEFAULT_HOST_KEY`](#default-host-key), [`DEFAULT_HOSTKEYS`](#default-hostkeys), [`DEFAULT_KEX`](#default-kex), [`DEFAULT_LIMITS`](#default-limits), [`DEFAULT_MACS`](#default-macs), [`DEFAULT_PORT`](#default-port), [`ID_BYTES`](#id-bytes), [`ID_SIZE`](#id-size), [`MAX_INPUT`](#max-input), [`MAX_PTY_COLS`](#max-pty-cols), [`MAX_PTY_ROWS`](#max-pty-rows), [`SECRET_SIZE`](#secret-size)
 
 **Procedures** — [`ensure_host_key`](#ensure-host-key), [`fingerprint`](#fingerprint), [`id`](#id), [`ids_equal`](#ids-equal), [`key_type`](#key-type), [`load_or_create_secret`](#load-or-create-secret), [`pseudonym`](#pseudonym), [`read`](#read), [`remote_addr`](#remote-addr), [`ring_pop`](#ring-pop), [`ring_push`](#ring-push), [`serve`](#serve), [`size`](#size), [`take_resize`](#take-resize), [`term`](#term), [`user`](#user), [`warn_if_world_readable`](#warn-if-world-readable), [`write`](#write), [`write_string`](#write-string)
 
@@ -45,7 +45,10 @@ authenticates before ever offering a key, leaving `Session.id` empty.
 Auth_Request :: struct {
 	user:        string,
 	method:      Auth_Method,
-	password:    string, // .Password only
+	// .Password only. Unlike every other field here, this borrows libssh's own
+	// buffer, which is zeroed and freed as soon as the callback returns — copy it
+	// if you need it beyond the call.
+	password:    string,
 	fingerprint: string, // .Publickey only, e.g. "SHA256:0Cn7…" — signature verified
 	key_type:    string, // .Publickey only, e.g. "ssh-ed25519"
 	id:          string, // pseudonymous account id, when an identity secret is set
@@ -76,7 +79,7 @@ If you want a members-only app, do not reject here. Accept the key, take the
 inside the app. They are equally excluded and you learn exactly one key.
 See examples/members.
 
-*ssh/server.odin:64*
+*ssh/server.odin:67*
 
 ### `Config`
 
@@ -109,7 +112,7 @@ Config :: struct {
 How to run the server. Every field has a documented default, so the zero value
 is a working — if wide open — public server on port 2222.
 
-*ssh/server.odin:280*
+*ssh/server.odin:291*
 
 ### `Handler`
 
@@ -148,7 +151,12 @@ Limits :: struct {
 	// the socket times out. Without this, a client that connects and then says
 	// nothing holds a thread indefinitely.
 	handshake_seconds: int,
-	// Failed authentication attempts before the connection is dropped.
+	// Failed `Authenticator` verdicts after which this connection stops being
+	// asked. It does NOT drop the connection, and it does NOT bound guessing
+	// across connections: the counter lives on the Session, so a client that
+	// reconnects gets a fresh budget. Measured at roughly 37 guesses/second from
+	// one address against a rejecting Authenticator. If you accept passwords,
+	// rate-limit them yourself — this is not that control.
 	max_auth_attempts: int,
 }
 ```
@@ -175,7 +183,7 @@ Pty :: struct {
 The terminal geometry the client asked for. No pseudo-terminal is actually
 allocated — this is just what the client told us about its own.
 
-*ssh/server.odin:84*
+*ssh/server.odin:93*
 
 ### `Ring`
 
@@ -190,7 +198,7 @@ Ring :: struct {
 Fixed-size byte ring for incoming keystrokes. Fixed so that libssh callbacks,
 which run without an Odin context, never touch an allocator.
 
-*ssh/server.odin:132*
+*ssh/server.odin:141*
 
 ### `Server`
 
@@ -213,7 +221,7 @@ Server :: struct {
 Server-wide state, shared by every connection. Internal; reach it through
 `Session.server` only if you know what you are doing.
 
-*ssh/server.odin:68*
+*ssh/server.odin:71*
 
 ### `Session`
 
@@ -239,7 +247,7 @@ Session :: struct {
 	term_len:      int,
 	fp_buf:        [96]u8,
 	fp_len:        int,
-	kt_buf:        [32]u8,
+	kt_buf:        [64]u8,
 	kt_len:        int,
 	id_buf:        [ID_SIZE]u8,
 	id_len:        int,
@@ -255,7 +263,7 @@ One connection. Created and freed by the accept loop; your `Handler` owns it
 for the duration of the call. All its string accessors borrow memory that
 dies with the session.
 
-*ssh/server.odin:96*
+*ssh/server.odin:105*
 
 ## Constants
 
@@ -281,38 +289,42 @@ DEFAULT_HOSTKEYS :: "ssh-ed25519"
 // Creates the host key if it does not exist yet — the SSH equivalent of a TLS
 // certificate. Clients pin it in ~/.ssh/known_hosts, so it must be stable
 // across restarts.
-ensure_host_key :: proc(path: string) -> bool {
+ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 	if os.exists(path) {
 		warn_if_world_readable(path)
+		// An existing key of the wrong type is a silent, total outage: key
+		// exchange fails for every client and nothing upstream logs a reason.
+		// Check it here, where we can say something useful.
+		cpath := strings.clone_to_cstring(path, context.temp_allocator)
+		key: ls.Key
+		if ls.pki_import_privkey_file(cpath, nil, nil, nil, &key) != ls.OK {
+			fmt.eprintfln("otsh: cannot read the host key at %s", path)
+			return false
+		}
+		defer ls.key_free(key)
+
+		name := ls.key_type_to_char(ls.key_type(key))
+		type_name := name == nil ? "unknown" : string(name)
+		if advertised != "-" && !contains(advertised, type_name) {
+			fmt.eprintfln(
+				"otsh: the host key at %s is %s, but the advertised host key\n" +
+				"      algorithms are %q. No client could complete key exchange.\n" +
+				"      Either use an %s key, or set Config.hostkey_algorithms to\n" +
+				"      include %s.",
+				path, type_name, advertised, advertised, type_name,
+			)
+			return false
+		}
 		return true
 	}
 	key: ls.Key
 	if ls.pki_generate(.Ed25519, 0, &key) != ls.OK {
 		fmt.eprintln("otsh: failed to generate host key")
-		return false
-	}
-	defer ls.key_free(key)
-
-	cpath := strings.clone_to_cstring(path)
-	defer delete(cpath)
-	if ls.pki_export_privkey_file(key, nil, nil, nil, cpath) != ls.OK {
-		fmt.eprintln("otsh: failed to write host key to", path)
-		return false
-	}
-	// libssh writes with the process umask, which is usually 0644. A host key
-	// any local user can read is a host key any local user can impersonate you
-	// with, so tighten it immediately.
-	if posix.chmod(cpath, {.IRUSR, .IWUSR}) != .OK {
-		fmt.eprintfln("otsh: WARNING could not chmod 600 %s", path)
-	}
-	fmt.println("otsh: generated new ed25519 host key at", path)
-	return true
-}
 ```
 
 AEAD ciphers only: no CBC, no stream ciphers with separate MACs.
 
-*ssh/server.odin:308*
+*ssh/server.odin:319*
 
 ### `DEFAULT_HOST`
 
@@ -334,7 +346,7 @@ DEFAULT_HOST_KEY :: "hostkey"
 Defaults applied to a zero-valued Config field. sshtui fills these in too;
 they live here as well so calling ssh.serve directly cannot bind port 0.
 
-*ssh/server.odin:366*
+*ssh/server.odin:439*
 
 ### `DEFAULT_HOST_KEY`
 
@@ -351,7 +363,7 @@ DEFAULT_HOST_KEY :: "hostkey"
 
 Host key path used when `Config.host_key_path` is empty.
 
-*ssh/server.odin:370*
+*ssh/server.odin:443*
 
 ### `DEFAULT_HOSTKEYS`
 
@@ -361,9 +373,32 @@ DEFAULT_HOSTKEYS :: "ssh-ed25519"
 // Creates the host key if it does not exist yet — the SSH equivalent of a TLS
 // certificate. Clients pin it in ~/.ssh/known_hosts, so it must be stable
 // across restarts.
-ensure_host_key :: proc(path: string) -> bool {
+ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 	if os.exists(path) {
 		warn_if_world_readable(path)
+		// An existing key of the wrong type is a silent, total outage: key
+		// exchange fails for every client and nothing upstream logs a reason.
+		// Check it here, where we can say something useful.
+		cpath := strings.clone_to_cstring(path, context.temp_allocator)
+		key: ls.Key
+		if ls.pki_import_privkey_file(cpath, nil, nil, nil, &key) != ls.OK {
+			fmt.eprintfln("otsh: cannot read the host key at %s", path)
+			return false
+		}
+		defer ls.key_free(key)
+
+		name := ls.key_type_to_char(ls.key_type(key))
+		type_name := name == nil ? "unknown" : string(name)
+		if advertised != "-" && !contains(advertised, type_name) {
+			fmt.eprintfln(
+				"otsh: the host key at %s is %s, but the advertised host key\n" +
+				"      algorithms are %q. No client could complete key exchange.\n" +
+				"      Either use an %s key, or set Config.hostkey_algorithms to\n" +
+				"      include %s.",
+				path, type_name, advertised, advertised, type_name,
+			)
+			return false
+		}
 		return true
 	}
 	key: ls.Key
@@ -372,27 +407,11 @@ ensure_host_key :: proc(path: string) -> bool {
 		return false
 	}
 	defer ls.key_free(key)
-
-	cpath := strings.clone_to_cstring(path)
-	defer delete(cpath)
-	if ls.pki_export_privkey_file(key, nil, nil, nil, cpath) != ls.OK {
-		fmt.eprintln("otsh: failed to write host key to", path)
-		return false
-	}
-	// libssh writes with the process umask, which is usually 0644. A host key
-	// any local user can read is a host key any local user can impersonate you
-	// with, so tighten it immediately.
-	if posix.chmod(cpath, {.IRUSR, .IWUSR}) != .OK {
-		fmt.eprintfln("otsh: WARNING could not chmod 600 %s", path)
-	}
-	fmt.println("otsh: generated new ed25519 host key at", path)
-	return true
-}
 ```
 
 Ed25519 only — matches the key `ensure_host_key` generates.
 
-*ssh/server.odin:312*
+*ssh/server.odin:323*
 
 ### `DEFAULT_KEX`
 
@@ -408,39 +427,41 @@ DEFAULT_HOSTKEYS :: "ssh-ed25519"
 // Creates the host key if it does not exist yet — the SSH equivalent of a TLS
 // certificate. Clients pin it in ~/.ssh/known_hosts, so it must be stable
 // across restarts.
-ensure_host_key :: proc(path: string) -> bool {
+ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 	if os.exists(path) {
 		warn_if_world_readable(path)
+		// An existing key of the wrong type is a silent, total outage: key
+		// exchange fails for every client and nothing upstream logs a reason.
+		// Check it here, where we can say something useful.
+		cpath := strings.clone_to_cstring(path, context.temp_allocator)
+		key: ls.Key
+		if ls.pki_import_privkey_file(cpath, nil, nil, nil, &key) != ls.OK {
+			fmt.eprintfln("otsh: cannot read the host key at %s", path)
+			return false
+		}
+		defer ls.key_free(key)
+
+		name := ls.key_type_to_char(ls.key_type(key))
+		type_name := name == nil ? "unknown" : string(name)
+		if advertised != "-" && !contains(advertised, type_name) {
+			fmt.eprintfln(
+				"otsh: the host key at %s is %s, but the advertised host key\n" +
+				"      algorithms are %q. No client could complete key exchange.\n" +
+				"      Either use an %s key, or set Config.hostkey_algorithms to\n" +
+				"      include %s.",
+				path, type_name, advertised, advertised, type_name,
+			)
+			return false
+		}
 		return true
 	}
 	key: ls.Key
-	if ls.pki_generate(.Ed25519, 0, &key) != ls.OK {
-		fmt.eprintln("otsh: failed to generate host key")
-		return false
-	}
-	defer ls.key_free(key)
-
-	cpath := strings.clone_to_cstring(path)
-	defer delete(cpath)
-	if ls.pki_export_privkey_file(key, nil, nil, nil, cpath) != ls.OK {
-		fmt.eprintln("otsh: failed to write host key to", path)
-		return false
-	}
-	// libssh writes with the process umask, which is usually 0644. A host key
-	// any local user can read is a host key any local user can impersonate you
-	// with, so tighten it immediately.
-	if posix.chmod(cpath, {.IRUSR, .IWUSR}) != .OK {
-		fmt.eprintfln("otsh: WARNING could not chmod 600 %s", path)
-	}
-	fmt.println("otsh: generated new ed25519 host key at", path)
-	return true
-}
 ```
 
 Modern-only. Every one of these is an AEAD or an ETM MAC with a
 curve25519 exchange; nothing here depends on SHA-1, CBC, or NIST curves.
 
-*ssh/server.odin:306*
+*ssh/server.odin:317*
 
 ### `DEFAULT_LIMITS`
 
@@ -456,7 +477,7 @@ DEFAULT_LIMITS :: Limits {
 Applied to any `Limits` field left at zero. Deliberately conservative — raise
 them deliberately rather than discovering you had none.
 
-*ssh/limits.odin:31*
+*ssh/limits.odin:36*
 
 ### `DEFAULT_MACS`
 
@@ -468,9 +489,32 @@ DEFAULT_HOSTKEYS :: "ssh-ed25519"
 // Creates the host key if it does not exist yet — the SSH equivalent of a TLS
 // certificate. Clients pin it in ~/.ssh/known_hosts, so it must be stable
 // across restarts.
-ensure_host_key :: proc(path: string) -> bool {
+ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 	if os.exists(path) {
 		warn_if_world_readable(path)
+		// An existing key of the wrong type is a silent, total outage: key
+		// exchange fails for every client and nothing upstream logs a reason.
+		// Check it here, where we can say something useful.
+		cpath := strings.clone_to_cstring(path, context.temp_allocator)
+		key: ls.Key
+		if ls.pki_import_privkey_file(cpath, nil, nil, nil, &key) != ls.OK {
+			fmt.eprintfln("otsh: cannot read the host key at %s", path)
+			return false
+		}
+		defer ls.key_free(key)
+
+		name := ls.key_type_to_char(ls.key_type(key))
+		type_name := name == nil ? "unknown" : string(name)
+		if advertised != "-" && !contains(advertised, type_name) {
+			fmt.eprintfln(
+				"otsh: the host key at %s is %s, but the advertised host key\n" +
+				"      algorithms are %q. No client could complete key exchange.\n" +
+				"      Either use an %s key, or set Config.hostkey_algorithms to\n" +
+				"      include %s.",
+				path, type_name, advertised, advertised, type_name,
+			)
+			return false
+		}
 		return true
 	}
 	key: ls.Key
@@ -478,28 +522,11 @@ ensure_host_key :: proc(path: string) -> bool {
 		fmt.eprintln("otsh: failed to generate host key")
 		return false
 	}
-	defer ls.key_free(key)
-
-	cpath := strings.clone_to_cstring(path)
-	defer delete(cpath)
-	if ls.pki_export_privkey_file(key, nil, nil, nil, cpath) != ls.OK {
-		fmt.eprintln("otsh: failed to write host key to", path)
-		return false
-	}
-	// libssh writes with the process umask, which is usually 0644. A host key
-	// any local user can read is a host key any local user can impersonate you
-	// with, so tighten it immediately.
-	if posix.chmod(cpath, {.IRUSR, .IWUSR}) != .OK {
-		fmt.eprintfln("otsh: WARNING could not chmod 600 %s", path)
-	}
-	fmt.println("otsh: generated new ed25519 host key at", path)
-	return true
-}
 ```
 
 Encrypt-then-MAC only, SHA-2 only.
 
-*ssh/server.odin:310*
+*ssh/server.odin:321*
 
 ### `DEFAULT_PORT`
 
@@ -518,7 +545,7 @@ DEFAULT_HOST_KEY :: "hostkey"
 
 Port used when `Config.port` is zero.
 
-*ssh/server.odin:368*
+*ssh/server.odin:441*
 
 ### `ID_BYTES`
 
@@ -572,6 +599,49 @@ are re-offered later, which is the protocol's flow control.
 
 *ssh/server.odin:22*
 
+### `MAX_PTY_COLS`
+
+```odin
+MAX_PTY_COLS :: 1000
+MAX_PTY_ROWS :: 300
+
+// The terminal geometry the client asked for. No pseudo-terminal is actually
+// allocated — this is just what the client told us about its own.
+Pty :: struct {
+	term:    string, // borrowed from Session.term_buf
+	cols:    int,
+	rows:    int,
+	px:      int,
+	py:      int,
+	present: bool,
+}
+```
+
+Upper bounds on client-supplied terminal geometry, matching tui's own limits.
+pty-req and window-change both carry uint32 dimensions chosen by the client;
+unclamped they are an allocation-size overflow and a remote crash.
+
+*ssh/server.odin:88*
+
+### `MAX_PTY_ROWS`
+
+```odin
+MAX_PTY_ROWS :: 300
+
+// The terminal geometry the client asked for. No pseudo-terminal is actually
+// allocated — this is just what the client told us about its own.
+Pty :: struct {
+	term:    string, // borrowed from Session.term_buf
+	cols:    int,
+	rows:    int,
+	px:      int,
+	py:      int,
+	present: bool,
+}
+```
+
+*ssh/server.odin:89*
+
 ### `SECRET_SIZE`
 
 ```odin
@@ -599,14 +669,14 @@ Length of the identity secret, in bytes.
 ### `ensure_host_key`
 
 ```odin
-ensure_host_key :: proc(path: string) -> bool
+ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool
 ```
 
 Creates the host key if it does not exist yet — the SSH equivalent of a TLS
 certificate. Clients pin it in ~/.ssh/known_hosts, so it must be stable
 across restarts.
 
-*ssh/server.odin:317*
+*ssh/server.odin:328*
 
 ### `fingerprint`
 
@@ -617,7 +687,7 @@ fingerprint :: proc "contextless" (s: ^Session) -> string
 SHA256 fingerprint of the key the client authenticated with, or "" if they
 did not use one. Stable across connections — use it as an account id.
 
-*ssh/server.odin:174*
+*ssh/server.odin:183*
 
 ### `id`
 
@@ -629,7 +699,7 @@ Pseudonymous account id: HMAC(server secret, fingerprint). Empty unless an
 identity secret is configured and the client used a key. Store this, not the
 fingerprint. See identity.odin.
 
-*ssh/server.odin:187*
+*ssh/server.odin:196*
 
 ### `ids_equal`
 
@@ -640,7 +710,7 @@ ids_equal :: proc "contextless" (a, b: string) -> bool
 Compares two ids without leaking where they differ via timing. Use this
 rather than `==` when checking an id against a stored one.
 
-*ssh/identity.odin:80*
+*ssh/identity.odin:97*
 
 ### `key_type`
 
@@ -651,7 +721,7 @@ key_type :: proc "contextless" (s: ^Session) -> string
 The verified key's algorithm, e.g. "ssh-ed25519". Empty unless public-key
 auth was used.
 
-*ssh/server.odin:180*
+*ssh/server.odin:189*
 
 ### `load_or_create_secret`
 
@@ -676,7 +746,7 @@ Stable per-server id for a verified key fingerprint. Writes into `dst`
 (needs ID_SIZE bytes) and returns a string viewing it, so this allocates
 nothing and can run on a session thread without touching an allocator.
 
-*ssh/identity.odin:67*
+*ssh/identity.odin:84*
 
 ### `read`
 
@@ -692,7 +762,7 @@ actually block for us — it returns immediately every time, which would spin
 a core per session. So libssh gets to do the parsing while we do the waiting,
 on the session socket directly.
 
-*ssh/server.odin:212*
+*ssh/server.odin:223*
 
 ### `remote_addr`
 
@@ -702,7 +772,7 @@ remote_addr :: proc "contextless" (s: ^Session) -> string
 
 Numeric peer address, no reverse DNS.
 
-*ssh/server.odin:192*
+*ssh/server.odin:201*
 
 ### `ring_pop`
 
@@ -712,7 +782,7 @@ ring_pop :: proc "contextless" (r: ^Ring, dst: []u8) -> int
 
 Removes up to `len(dst)` bytes, returning how many were moved.
 
-*ssh/server.odin:149*
+*ssh/server.odin:158*
 
 ### `ring_push`
 
@@ -722,7 +792,7 @@ ring_push :: proc "contextless" (r: ^Ring, src: []u8) -> int
 
 Appends what fits, returning how many bytes were taken.
 
-*ssh/server.odin:139*
+*ssh/server.odin:148*
 
 ### `serve`
 
@@ -730,7 +800,7 @@ Appends what fits, returning how many bytes were taken.
 serve :: proc(cfg: Config) -> bool
 ```
 
-*ssh/server.odin:395*
+*ssh/server.odin:468*
 
 ### `size`
 
@@ -741,7 +811,7 @@ size :: proc "contextless" (s: ^Session) -> (cols, rows: int)
 Current terminal geometry in cells, falling back to 80x24 if the client never
 said.
 
-*ssh/server.odin:198*
+*ssh/server.odin:207*
 
 ### `take_resize`
 
@@ -751,7 +821,7 @@ take_resize :: proc "contextless" (s: ^Session) -> bool
 
 True exactly once after each window resize.
 
-*ssh/server.odin:270*
+*ssh/server.odin:281*
 
 ### `term`
 
@@ -761,7 +831,7 @@ term :: proc "contextless" (s: ^Session) -> string
 
 The client's `$TERM`, e.g. "xterm-256color". Empty if no pty was requested.
 
-*ssh/server.odin:168*
+*ssh/server.odin:177*
 
 ### `user`
 
@@ -772,7 +842,7 @@ user :: proc "contextless" (s: ^Session) -> string
 The username the client offered. Client-chosen and unverified — never use it
 as identity; use `id` instead.
 
-*ssh/server.odin:163*
+*ssh/server.odin:172*
 
 ### `warn_if_world_readable`
 
@@ -783,7 +853,7 @@ warn_if_world_readable :: proc(path: string)
 A host key or identity secret that other local users can read is not a
 secret. Say so loudly rather than failing silently.
 
-*ssh/identity.odin:106*
+*ssh/identity.odin:130*
 
 ### `write`
 
@@ -794,7 +864,7 @@ write :: proc(s: ^Session, data: []u8) -> int
 Sends bytes to the client. Returns how many were written, 0 once the
 connection is gone.
 
-*ssh/server.odin:252*
+*ssh/server.odin:263*
 
 ### `write_string`
 
@@ -804,4 +874,4 @@ write_string :: proc(s: ^Session, str: string) -> int
 
 `write` for a string.
 
-*ssh/server.odin:265*
+*ssh/server.odin:276*

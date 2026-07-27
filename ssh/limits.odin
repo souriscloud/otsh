@@ -22,7 +22,12 @@ Limits :: struct {
 	// the socket times out. Without this, a client that connects and then says
 	// nothing holds a thread indefinitely.
 	handshake_seconds: int,
-	// Failed authentication attempts before the connection is dropped.
+	// Failed `Authenticator` verdicts after which this connection stops being
+	// asked. It does NOT drop the connection, and it does NOT bound guessing
+	// across connections: the counter lives on the Session, so a client that
+	// reconnects gets a fresh budget. Measured at roughly 37 guesses/second from
+	// one address against a rejecting Authenticator. If you accept passwords,
+	// rate-limit them yourself — this is not that control.
 	max_auth_attempts: int,
 }
 

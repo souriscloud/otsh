@@ -147,7 +147,34 @@ ids_equal_compares_correctly :: proc(t: ^testing.T) {
 	testing.expect(t, ssh.ids_equal("abc123", "abc123"))
 	testing.expect(t, !ssh.ids_equal("abc123", "abc124"))
 	testing.expect(t, !ssh.ids_equal("abc", "abc123")) // length mismatch
-	testing.expect(t, ssh.ids_equal("", ""))
+}
+
+@(test)
+ids_equal_rejects_empty :: proc(t: ^testing.T) {
+	// An id is empty whenever the client did not authenticate with a key, or no
+	// identity secret is configured. Two empties must NOT compare equal, or an
+	// app checking against a record whose id was never populated would admit
+	// every anonymous client.
+	testing.expect(t, !ssh.ids_equal("", ""), "two empty ids must not match")
+	testing.expect(t, !ssh.ids_equal("", "abc123"))
+	testing.expect(t, !ssh.ids_equal("abc123", ""))
+}
+
+@(test)
+identity_secret_rejects_all_zero :: proc(t: ^testing.T) {
+	// An all-zero HMAC key is a published key: every id becomes computable by
+	// anyone holding the fingerprint, which voids the point of pseudonymising.
+	path := "/tmp/otsh_test_zero_secret"
+	os.remove(path)
+	defer os.remove(path)
+
+	zeros := make([]u8, ssh.SECRET_SIZE)
+	defer delete(zeros)
+	werr := os.write_entire_file(path, zeros)
+	testing.expect(t, werr == nil, "could not stage the zero-filled secret")
+
+	_, ok := ssh.load_or_create_secret(path)
+	testing.expect(t, !ok, "an all-zero identity secret must be refused")
 }
 
 // --- limits -----------------------------------------------------------------

@@ -41,12 +41,29 @@ Identity_Secret :: struct {
 // means every user looks like a new user.
 load_or_create_secret :: proc(path: string) -> (secret: Identity_Secret, ok: bool) {
 	if data, read_err := os.read_entire_file_from_path(path, context.allocator); read_err == nil {
-		defer delete(data)
+		// Zero it before freeing: this is the long-lived key every pseudonym
+		// derives from, and leaving it in the heap outlives any use of it.
+		defer {
+			crypto.zero_explicit(raw_data(data), len(data))
+			delete(data)
+		}
 		if len(data) < SECRET_SIZE {
 			fmt.eprintfln("otsh: identity secret %s is truncated; refusing to start", path)
 			return {}, false
 		}
 		copy(secret.bytes[:], data[:SECRET_SIZE])
+
+		// An all-zero secret is not a secret. It is reachable by a truncated
+		// write, a zero-filled restore, or a provisioning template that created
+		// the file with dd — and it makes every id computable by anyone holding
+		// the fingerprint, which is precisely what this key exists to prevent.
+		if crypto.is_zero_constant_time(secret.bytes[:]) == 1 {
+			fmt.eprintfln(
+				"otsh: identity secret %s is all zeroes; refusing to start.\n" +
+				"      Delete it to have a new one generated — note that doing so\n" +
+				"      re-pseudonymises every user.", path)
+			return {}, false
+		}
 		secret.loaded = true
 		warn_if_world_readable(path)
 		return secret, true
@@ -78,6 +95,13 @@ pseudonym :: proc(secret: ^Identity_Secret, fingerprint: string, dst: []u8) -> s
 // Compares two ids without leaking where they differ via timing. Use this
 // rather than `==` when checking an id against a stored one.
 ids_equal :: proc "contextless" (a, b: string) -> bool {
+	// Two empty ids are NOT the same user. An id is empty whenever the client
+	// did not authenticate with a key, or no identity secret is configured, so
+	// treating "" == "" as a match would let every anonymous client satisfy a
+	// comparison against any record whose id was never populated.
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
 	if len(a) != len(b) {
 		return false
 	}
