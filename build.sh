@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds an app against the otsh packages.
 #
-#   ./build.sh                      # builds examples/shop -> ./shop
+#   ./build.sh                      # builds examples/tracker -> ./tracker
 #   ./build.sh path/to/yourapp      # builds your app  -> ./<dirname>
 #
 # To build from your own project instead, copy the two flags below:
@@ -13,9 +13,15 @@ OTSH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ODIN="${ODIN:-odin}"
 command -v "$ODIN" >/dev/null || ODIN=/Users/souris/work/bench/odin/odin-lang/odin
 
-SRC="${1:-$OTSH/examples/shop}"
+SRC="${1:-$OTSH/examples/tracker}"
 shift || true
 OUT="$(basename "$SRC")"
+
+if [ ! -d "$SRC" ]; then
+	echo "build.sh: no such package directory: $SRC" >&2
+	echo "  usage: ./build.sh [path/to/package]   (default: examples/tracker)" >&2
+	exit 1
+fi
 
 # libssh is not on the default linker search path on macOS/Homebrew.
 if command -v pkg-config >/dev/null && pkg-config --exists libssh; then

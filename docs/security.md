@@ -435,8 +435,8 @@ Before exposing an `otsh` server to the internet:
 
 Three independent reviewers audited this code with no stake in it, along three
 lenses: memory and the C boundary, concurrency and lifecycle, and auth and
-crypto. They found eight confirmed defects the author had missed, including two
-remote crashes. All are fixed; the details are kept here because the *class* of
+crypto. Between them they found ten confirmed defects the author had missed,
+including two remote crashes. All are fixed; the details are kept here because the *class* of
 mistake is more useful than the patch.
 
 **Two were critical, both reachable by any client the default config accepts:**

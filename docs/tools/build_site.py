@@ -108,6 +108,45 @@ def highlight(code, lang):
     return "".join(out)
 
 
+# GitHub-flavored Markdown permits inline HTML, and a good landing page uses it
+# (image grids, badges side by side). Pass a conservative allowlist through
+# instead of escaping it — but never scripting, embedding, or event handlers.
+HTML_OK = {
+    "a", "b", "br", "code", "div", "em", "h1", "h2", "h3", "h4", "h5", "h6",
+    "hr", "i", "img", "kbd", "li", "ol", "p", "picture", "pre", "small",
+    "source", "span", "strong", "sub", "summary", "sup", "table", "tbody",
+    "td", "details", "th", "thead", "tr", "ul", "blockquote",
+}
+HTML_TAG = re.compile(r"</?([a-zA-Z][a-zA-Z0-9]*)((?:\s[^<>]*)?)/?>")
+
+
+def rewrite_path(href):
+    """Map a repo-relative path onto its place in the flat generated site."""
+    if href.startswith(("http", "https", "data:", "mailto:", "#")):
+        return href
+    if href.startswith("docs/"):
+        href = href[len("docs/"):]
+    if href.endswith(".odin") or "/examples/" in href:
+        rel = href[href.index("examples/"):] if "examples/" in href else href
+        return rel + ".txt" if rel.endswith(".odin") else rel
+    if href.rstrip("/").endswith("README.md"):
+        return "readme.html"
+    if href.endswith(".md"):
+        return os.path.basename(href)[:-3] + ".html"
+    if ".md#" in href:
+        base, _, frag = href.partition("#")
+        return os.path.basename(base)[:-3] + ".html#" + frag
+    return href
+
+
+def sanitize_html(tag_text, name, attrs):
+    """Drop anything with an event handler or a javascript: URL."""
+    low = attrs.lower()
+    if "javascript:" in low or re.search(r"\bon[a-z]+\s*=", low):
+        return None
+    return tag_text
+
+
 def slug(text):
     s = re.sub(r"<[^>]+>", "", text).lower()
     s = re.sub(r"[^\w\s-]", "", s)
@@ -124,7 +163,23 @@ def inline(text):
         return f"\x00{len(spans)-1}\x00"
 
     text = re.sub(r"`([^`]+)`", stash, text)
+
+    raw = []
+
+    def stash_html(m):
+        name = m.group(1).lower()
+        if name not in HTML_OK:
+            return m.group(0)
+        kept = sanitize_html(m.group(0), name, m.group(2) or "")
+        if kept is None:
+            return ""
+        raw.append(kept)
+        return f"\x01{len(raw)-1}\x01"
+
+    text = HTML_TAG.sub(stash_html, text)
     text = html.escape(text)
+    for i, t in enumerate(raw):
+        text = text.replace(f"\x01{i}\x01", t)
     # images before links — the pattern differs only by the leading !
     def image(m):
         src = m.group(2)
@@ -136,7 +191,8 @@ def inline(text):
 
     def link(m):
         label, href = m.group(1), m.group(2)
-        if ".odin" in href or "/examples/" in href:
+        href = rewrite_path(href)
+        if False:
             rel = href[href.index("examples/"):] if "examples/" in href else href
             return f'<a href="{rel}.txt">{label}</a>' if rel.endswith(".odin") \
                 else f'<a href="{rel}">{label}</a>'
@@ -160,6 +216,7 @@ def inline(text):
 
 def render(md):
     """Markdown -> (html, [(level, id, title)]) for the page outline."""
+    md = re.sub(r"<!--.*?-->", "", md, flags=re.S)  # comments are not content
     lines = md.split("\n")
     out, toc, i = [], [], 0
     while i < len(lines):
@@ -247,6 +304,22 @@ def render(md):
             out.append(f"<{tag}>" + "".join(f"<li>{x}</li>" for x in items) + f"</{tag}>")
             continue
 
+        # Raw HTML block: emit verbatim rather than wrapping it in <p>.
+        bm = re.match(r"^\s*<([a-zA-Z][a-zA-Z0-9]*)", line)
+        if bm and bm.group(1).lower() in HTML_OK and bm.group(1).lower() not in (
+            "code", "b", "i", "em", "strong", "sub", "sup", "kbd", "small", "span", "a"
+        ):
+            block = []
+            while i < len(lines) and lines[i].strip():
+                block.append(lines[i])
+                i += 1
+            joined = "\n".join(block)
+            # links and images inside the block still need path rewriting
+            joined = re.sub(r'(src|href)="([^"]+)"',
+                            lambda m: f'{m.group(1)}="{rewrite_path(m.group(2))}"', joined)
+            out.append(joined)
+            continue
+
         if not line.strip():
             i += 1
             continue
@@ -314,7 +387,9 @@ th{background:var(--code);font-weight:650}
 blockquote{margin:1.1em 0;padding:.5em 1em;border-left:3px solid var(--accent);
 background:var(--card);color:var(--muted);border-radius:0 6px 6px 0}
 hr{border:0;border-top:1px solid var(--line);margin:2.2em 0}
-img{max-width:100%;border-radius:9px;margin:1.1em 0;display:block}
+img{max-width:100%;vertical-align:middle}
+p>img:only-child,p>a:only-child>img{display:block;margin:1.1em 0;border-radius:9px}
+td img{border-radius:7px;margin:0}
 .navwrap>summary{display:none}
 .themetoggle{position:fixed;top:14px;right:18px;background:var(--card);
 border:1px solid var(--line);color:var(--muted);border-radius:7px;padding:5px 11px;
@@ -411,6 +486,12 @@ def build():
         shutil.rmtree(dst, ignore_errors=True)
         shutil.copytree(assets_src, dst)
 
+    # Repo-root files the README links to.
+    for extra in ("LICENSE",):
+        src = os.path.join(os.path.dirname(DOCS), extra)
+        if os.path.exists(src):
+            shutil.copyfile(src, os.path.join(OUT, extra))
+
     # Example sources, so links to them from the tutorials resolve offline.
     ex_src = os.path.join(os.path.dirname(DOCS), "examples")
     if os.path.isdir(ex_src):
@@ -476,9 +557,12 @@ def check():
                 continue
             if not os.path.exists(os.path.join(OUT, target.split("#")[0])):
                 problems.append(f"{name}: dead link -> {target}")
-        for m in re.finditer(r'<img src="([^"]+)"', doc):
-            if not os.path.exists(os.path.join(OUT, m.group(1))):
-                problems.append(f"{name}: missing image -> {m.group(1)}")
+        for m in re.finditer(r'<img [^>]*src="([^"]+)"', doc):
+            src = m.group(1)
+            if src.startswith(("http://", "https://", "data:")):
+                continue
+            if not os.path.exists(os.path.join(OUT, src)):
+                problems.append(f"{name}: missing image -> {src}")
 
         body = doc.split("<article>")[1] if "<article>" in doc else doc
         body = re.sub(r'<div class="code">.*?</div>', "", body, flags=re.S)
