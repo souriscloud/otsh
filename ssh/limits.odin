@@ -7,10 +7,8 @@
 package ssh
 
 import "base:runtime"
-import "core:c"
 import "core:mem"
 import "core:sync"
-import "core:sys/posix"
 
 // Per field: 0 means "use the default below", negative means "no limit".
 // That way the zero value of the whole struct is the safe default rather than
@@ -146,41 +144,4 @@ strings_clone :: proc(s: string, allocator: mem.Allocator) -> string {
 	b := make([]u8, len(s), allocator)
 	copy(b, s)
 	return string(b)
-}
-
-// Formats the peer address of `fd` into `dst`, returning a string viewing it.
-// Numeric only — no reverse DNS, which would leak the connection to a resolver
-// and block the thread while doing it.
-@(private)
-peer_address :: proc(fd: c.int, dst: []u8) -> string {
-	if fd < 0 || len(dst) < 46 {
-		return ""
-	}
-	ss: posix.sockaddr_storage
-	slen := posix.socklen_t(size_of(ss))
-	if posix.getpeername(posix.FD(fd), (^posix.sockaddr)(&ss), &slen) != .OK {
-		return ""
-	}
-
-	src: rawptr
-	af: posix.AF
-	#partial switch ss.ss_family {
-	case .INET:
-		sin := (^posix.sockaddr_in)(&ss)
-		src = &sin.sin_addr
-		af = .INET
-	case .INET6:
-		sin6 := (^posix.sockaddr_in6)(&ss)
-		src = &sin6.sin6_addr
-		af = .INET6
-	case:
-		return ""
-	}
-
-	if posix.inet_ntop(af, src, raw_data(dst), posix.socklen_t(len(dst))) == nil {
-		return ""
-	}
-	n := 0
-	for n < len(dst) && dst[n] != 0 {n += 1}
-	return string(dst[:n])
 }

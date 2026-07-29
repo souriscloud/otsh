@@ -33,17 +33,32 @@ if [ ! -d "$SRC" ]; then
 	exit 1
 fi
 
-# libssh is not on the default linker search path on macOS/Homebrew.
-if command -v pkg-config >/dev/null && pkg-config --exists libssh; then
-	LIBDIR="$(pkg-config --variable=libdir libssh)"
-elif [ -d /opt/homebrew/opt/libssh/lib ]; then
-	LIBDIR="/opt/homebrew/opt/libssh/lib"
-else
-	LIBDIR="/usr/local/lib"
-fi
+# libssh is not on the default linker search path on macOS/Homebrew, and on
+# Windows it is not on any path at all.
+case "$(uname -s)" in
+MINGW*|MSYS*|CYGWIN*)
+	# EXPERIMENTAL, and the only reason this branch exists is so CI can run the
+	# same script: vcpkg is the expected libssh provider on Windows, and the
+	# MSVC linker spells a library search path /LIBPATH:, not -L. There is no
+	# rpath equivalent — ssh.dll has to be on %PATH% at run time.
+	VCPKG="${VCPKG_ROOT:-${VCPKG_INSTALLATION_ROOT:-C:/vcpkg}}"
+	LIBDIR="${VCPKG}/installed/x64-windows/lib"
+	LDFLAGS="/LIBPATH:${LIBDIR}"
+	;;
+*)
+	if command -v pkg-config >/dev/null && pkg-config --exists libssh; then
+		LIBDIR="$(pkg-config --variable=libdir libssh)"
+	elif [ -d /opt/homebrew/opt/libssh/lib ]; then
+		LIBDIR="/opt/homebrew/opt/libssh/lib"
+	else
+		LIBDIR="/usr/local/lib"
+	fi
+	LDFLAGS="-L${LIBDIR} -Wl,-rpath,${LIBDIR}"
+	;;
+esac
 
 exec "$ODIN" build "$SRC" \
 	-out:"$OUT" \
 	-collection:otsh="$OTSH" \
-	-extra-linker-flags:"-L${LIBDIR} -Wl,-rpath,${LIBDIR}" \
+	-extra-linker-flags:"${LDFLAGS}" \
 	"$@"

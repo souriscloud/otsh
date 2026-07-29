@@ -18,15 +18,26 @@ if ! command -v "$ODIN" >/dev/null; then
 	exit 1
 fi
 
-if command -v pkg-config >/dev/null && pkg-config --exists libssh; then
-	LIBDIR="$(pkg-config --variable=libdir libssh)"
-elif [ -d /opt/homebrew/opt/libssh/lib ]; then
-	LIBDIR="/opt/homebrew/opt/libssh/lib"
-else
-	LIBDIR="/usr/local/lib"
-fi
+case "$(uname -s)" in
+MINGW*|MSYS*|CYGWIN*)
+	# See the same branch in build.sh: vcpkg, /LIBPATH:, no rpath. Experimental.
+	VCPKG="${VCPKG_ROOT:-${VCPKG_INSTALLATION_ROOT:-C:/vcpkg}}"
+	LIBDIR="${VCPKG}/installed/x64-windows/lib"
+	LDFLAGS="/LIBPATH:${LIBDIR}"
+	;;
+*)
+	if command -v pkg-config >/dev/null && pkg-config --exists libssh; then
+		LIBDIR="$(pkg-config --variable=libdir libssh)"
+	elif [ -d /opt/homebrew/opt/libssh/lib ]; then
+		LIBDIR="/opt/homebrew/opt/libssh/lib"
+	else
+		LIBDIR="/usr/local/lib"
+	fi
+	LDFLAGS="-L${LIBDIR} -Wl,-rpath,${LIBDIR}"
+	;;
+esac
 
 exec "$ODIN" test "$OTSH/tests" \
 	-collection:otsh="$OTSH" \
-	-extra-linker-flags:"-L${LIBDIR} -Wl,-rpath,${LIBDIR}" \
+	-extra-linker-flags:"${LDFLAGS}" \
 	"$@"

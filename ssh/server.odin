@@ -14,7 +14,6 @@ import "core:mem"
 import "core:os"
 import "core:strings"
 import "core:sync"
-import "core:sys/posix"
 import "core:thread"
 import ls "../libssh"
 
@@ -253,16 +252,15 @@ read :: proc(s: ^Session, buf: []u8, timeout_ms: int) -> (n: int, ok: bool) {
 	}
 
 	fd := ls.get_fd(s.sess)
-	if fd < 0 {
+	if !ls.socket_valid(fd) {
 		return 0, false
 	}
-	fds := [1]posix.pollfd{{fd = posix.FD(fd), events = {.IN}}}
-	rc := posix.poll(&fds[0], 1, c.int(timeout_ms))
-	if rc < 0 {
-		// A signal interrupted the wait; that is not a disconnect.
-		return 0, posix.errno() == .EINTR
+	// wait_readable is the one platform split in this file; see net_posix.odin.
+	readable, alive := wait_readable(fd, timeout_ms)
+	if !alive {
+		return 0, false
 	}
-	if rc == 0 {
+	if !readable {
 		return 0, true // timed out with nothing to read
 	}
 	if ls.event_dopoll(s.event, 0) == ls.ERROR {
@@ -402,11 +400,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 		os.remove(path)
 		return false
 	}
-	// Belt and braces: confirm the mode really is 0600 rather than assuming
-	// libssh left it alone.
-	if posix.chmod(cpath, {.IRUSR, .IWUSR}) != .OK {
-		fmt.eprintfln("otsh: WARNING could not chmod 600 %s", path)
-	}
+	ensure_private_mode(path)
 	fmt.println("otsh: generated new ed25519 host key at", path)
 	return true
 }

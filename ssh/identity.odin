@@ -16,8 +16,6 @@ import "core:crypto/hash"
 import "core:crypto/hmac"
 import "core:fmt"
 import "core:os"
-import "core:strings"
-import "core:sys/posix"
 
 // Length of the identity secret, in bytes.
 SECRET_SIZE :: 32
@@ -125,22 +123,4 @@ write_private_file :: proc(path: string, data: []u8) -> bool {
 		return false
 	}
 	return true
-}
-
-// A host key or identity secret that other local users can read is not a
-// secret. Say so loudly rather than failing silently.
-warn_if_world_readable :: proc(path: string) {
-	cpath := strings.clone_to_cstring(path, context.temp_allocator)
-	st: posix.stat_t
-	if posix.stat(cpath, &st) != .OK {
-		return
-	}
-	mode := transmute(posix.mode_t)(st.st_mode)
-	if .IRGRP in mode || .IWGRP in mode || .IROTH in mode || .IWOTH in mode {
-		fmt.eprintfln(
-			"otsh: WARNING %s is readable by other users; run: chmod 600 %s",
-			path,
-			path,
-		)
-	}
 }

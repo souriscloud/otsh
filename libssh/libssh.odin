@@ -9,8 +9,16 @@ import "core:c"
 
 when ODIN_OS == .Darwin || ODIN_OS == .Linux || ODIN_OS == .FreeBSD {
 	foreign import lib "system:ssh"
+} else when ODIN_OS == .Windows {
+	// vcpkg is the expected provider: `vcpkg install libssh:x64-windows` builds
+	// the import library as ssh.lib. The linker still needs its directory, e.g.
+	// -extra-linker-flags:"/LIBPATH:C:\\vcpkg\\installed\\x64-windows\\lib".
+	//
+	// Experimental: cross-type-checked and built in CI, never run by a human on
+	// real Windows. See docs/getting-started.md.
+	foreign import lib "system:ssh.lib"
 } else {
-	#panic("libssh bindings only support unix-likes")
+	#panic("libssh bindings support unix-likes and Windows")
 }
 
 // --- opaque handles ---------------------------------------------------------
@@ -21,6 +29,20 @@ Bind :: distinct rawptr
 Event :: distinct rawptr
 Key :: distinct rawptr
 Threads_Callbacks :: distinct rawptr
+
+// libssh's `socket_t`: a signed file descriptor on unix-likes, a Windows
+// `SOCKET` (an unsigned UINT_PTR) there. The widths differ, so binding it as
+// c.int everywhere would truncate the return of `get_fd` on 64-bit Windows.
+Socket :: uintptr when ODIN_OS == .Windows else c.int
+// libssh's SSH_INVALID_SOCKET, i.e. `(socket_t)-1`.
+INVALID_SOCKET :: ~Socket(0) when ODIN_OS == .Windows else Socket(-1)
+
+// True when `get_fd` handed back a real socket. Spelled as a helper because the
+// obvious `fd < 0` is silently always false on Windows, where socket_t is
+// unsigned.
+socket_valid :: proc "contextless" (s: Socket) -> bool {
+	return s != INVALID_SOCKET
+}
 
 // Builds a libssh version integer the way its SSH_VERSION_INT macro does.
 version_int :: proc "contextless" (major, minor, micro: int) -> c.int {
@@ -237,7 +259,7 @@ foreign lib {
 	@(link_name = "ssh_version")
 	version :: proc(req_version: c.int) -> cstring ---
 	@(link_name = "ssh_get_fd")
-	get_fd :: proc(s: Session) -> c.int ---
+	get_fd :: proc(s: Session) -> Socket ---
 
 	// event loop
 	@(link_name = "ssh_event_new")

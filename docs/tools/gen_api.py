@@ -75,7 +75,15 @@ def signature(lines, i):
 
 
 def parse(pkg):
-    out = []
+    """Every exported declaration in a package, one entry per name.
+
+    A platform-split package declares the same public name in more than one
+    file (tui/local.odin and tui/local_windows.odin, ssh/perm_posix.odin and
+    ssh/perm_windows.odin). One name is one API entry, so the first file in
+    sorted order wins — which is the POSIX one in every split here, and POSIX
+    is the platform this project actually supports.
+    """
+    out, seen = [], set()
     for path in sorted(glob.glob(os.path.join(ROOT, pkg, "*.odin"))):
         rel = os.path.relpath(path, ROOT)
         lines = open(path).read().split("\n")
@@ -102,8 +110,9 @@ def parse(pkg):
                     elif stripped.startswith("//"):
                         doc.insert(0, stripped[2:].strip())
                     j -= 1
-                if priv:
+                if priv or fm.group(1) in seen:
                     continue
+                seen.add(fm.group(1))
                 out.append({
                     "name": fm.group(1), "kind": "Procedures",
                     "sig": fm.group(2).replace(" ---", ""), "doc": " ".join(doc).strip(),
@@ -123,8 +132,9 @@ def parse(pkg):
                 elif lines[j].startswith("//"):
                     doc.insert(0, lines[j][2:].strip())
                 j -= 1
-            if priv:
+            if priv or name in seen:
                 continue
+            seen.add(name)
 
             out.append({
                 "name": name, "kind": classify(name, rhs),
