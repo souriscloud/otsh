@@ -76,12 +76,12 @@ Every exported declaration, with its exact signature and source location.
 Generated from the sources by `docs/tools/gen_api.py`, so it cannot drift from
 the code — run it after changing a doc comment.
 
-| Page | Symbols |
+| Page | Covers |
 | --- | --- |
-| [otsh:tui](api-tui.md) | 51 — screen, styles, drawing, input, the loop |
-| [otsh:ssh](api-ssh.md) | 44 — server, session, auth, limits, identity |
-| [otsh:sshtui](api-sshtui.md) | 9 — `Info`, `Config`, `serve`, `run_local`, `clone_info` |
-| [otsh:libssh](api-libssh.md) | 80 — raw libssh bindings; each entry names the C function it maps to |
+| [otsh:tui](api-tui.md) | screen, styles, drawing, input, the loop |
+| [otsh:ssh](api-ssh.md) | server, session, auth, limits, identity |
+| [otsh:sshtui](api-sshtui.md) | `Info`, `Config`, `serve`, `run_local`, `clone_info` |
+| [otsh:libssh](api-libssh.md) | raw libssh bindings; each entry names the C function it maps to |
 
 Use the guides to learn a subsystem, the API pages to look one thing up.
 
