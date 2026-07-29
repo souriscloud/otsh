@@ -92,6 +92,14 @@ Use the guides to learn a subsystem, the API pages to look one thing up.
 | [Security model](security.md) | How SSH public key auth actually works, why rejecting keys harvests them, pseudonymous identity, transport hardening, and an honest threat model |
 | [Architecture](architecture.md) | Internals: layering, connection lifecycle, the C callback boundary, the diff renderer, the `ssh_event_dopoll` blocking problem, concurrency and ownership |
 
+## Operations
+
+Running one for real, and the parts of that job the library cannot do for you.
+
+| Page | What it covers |
+| --- | --- |
+| [Deployment and abuse mitigation](deploy.md) | The layers that go in front of the process: a hardened systemd unit, fail2ban on the audit log, nftables/pf rate limiting — plus what none of them stop. Ships working configs in `deploy/` |
+
 ## The shape of an app
 
 Three procs and a config. Everything else is detail:

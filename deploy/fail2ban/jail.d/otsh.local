@@ -1,0 +1,80 @@
+# fail2ban jail for an otsh server.
+#
+# Install as /etc/fail2ban/jail.d/otsh.local, alongside
+# deploy/fail2ban/filter.d/otsh.conf as /etc/fail2ban/filter.d/otsh.conf, then:
+#
+#   fail2ban-client reload
+#   fail2ban-client status otsh
+#
+# A .local file in jail.d/ is the supported way to add a jail without editing
+# jail.conf, which the package manager owns and will overwrite.
+
+[otsh]
+enabled  = true
+filter   = otsh
+
+# Read the journal rather than a file: the unit in deploy/otsh.service sends
+# stderr to the journal, so there is no log file to tail and nothing to rotate.
+backend  = systemd
+# Only this unit's messages. If you run several otsh apps as separate units,
+# copy this jail per unit rather than widening the match — a ban derived from
+# one app's log should not be attributed to another's.
+# The unit also sets SyslogIdentifier=otsh, so
+# `journalmatch = SYSLOG_IDENTIFIER=otsh` is an equivalent alternative.
+journalmatch = _SYSTEMD_UNIT=otsh.service
+
+# APP-SPECIFIC: the port your app listens on (examples/tracker uses 2222).
+# This is what gets blocked, not what gets read.
+port     = 2222
+protocol = tcp
+
+# --- tuning ------------------------------------------------------------------
+#
+# 6 failures within 10 minutes earns a 1 hour ban. Conservative on purpose: a
+# ban here silently removes a real user's ability to reach the service, and
+# nothing in otsh can tell them why.
+maxretry = 6
+findtime = 10m
+bantime  = 1h
+
+# Read this before raising or lowering maxretry:
+#
+#   * Every honest OpenSSH connection to a publickey-only server (methods =
+#     {.Publickey}, as in examples/tracker) produces exactly ONE
+#     `event=auth ... method=none ... ok=false` line, because the client always
+#     tries the "none" method first. So with this filter, maxretry = 6 means
+#     roughly six reconnects in ten minutes, not six wrong keys. A user
+#     debugging their setup, or a flaky mobile link, hits that. If your users
+#     reconnect often, either raise maxretry to 12-20 or switch to the
+#     alt-failregex in the filter, which ignores method=none.
+#
+#   * A client with several keys in its agent produces one auth line per key
+#     tried before the accepted one. Four loaded identities is four lines on a
+#     single successful connection if the right key is offered last.
+#
+#   * `event=reject` fires when Limits refuses a connection. Under a real flood
+#     you will see many of these from many addresses — which is the case
+#     fail2ban is worst at, since each source may only trip the counter a few
+#     times. See docs/deploy.md.
+#
+#   * bantime.increment = true (a global setting in jail.local) makes repeat
+#     offenders escalate — 1h, then 2h, then 4h — while leaving a first-time
+#     mistake at 1h. Worth enabling globally rather than raising bantime here.
+
+# --- ban action --------------------------------------------------------------
+#
+# Leave commented to inherit the distribution default from jail.conf (usually
+# iptables-multiport, or nftables-multiport on a modern nftables-only system).
+# Set it explicitly if the default does not match your firewall:
+#
+#banaction = nftables-multiport
+#
+# fail2ban's nftables action manages its own table (`inet f2b-table`) and its
+# own sets. It does not touch, and is not touched by, the standing rate limits
+# in deploy/nftables-ratelimit.conf — the two layers coexist by design. Keep
+# them in separate tables so `nft flush table` on one never takes out the
+# other.
+
+# Notify a human. Ships in every fail2ban install; needs a working sendmail.
+#action = %(action_mw)s
+#destemail = ops@example.com

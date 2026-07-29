@@ -39,6 +39,7 @@ NAV_TITLES = {
     "api-libssh.md": "libssh",
     "security.md": "Security model",
     "architecture.md": "Architecture",
+    "deploy.md": "Deployment",
 }
 
 NAV = [
@@ -47,6 +48,7 @@ NAV = [
     ("Guides", ["cookbook.md", "tui.md", "ssh.md", "sshtui.md"]),
     ("API reference", ["api-tui.md", "api-ssh.md", "api-sshtui.md", "api-libssh.md"]),
     ("Understanding", ["security.md", "architecture.md"]),
+    ("Operations", ["deploy.md"]),
 ]
 
 ODIN_KW = r"""package|import|proc|struct|enum|union|bit_set|distinct|map|matrix|using|
@@ -129,6 +131,11 @@ def rewrite_path(href):
     if href.endswith(".odin") or "/examples/" in href:
         rel = href[href.index("examples/"):] if "examples/" in href else href
         return rel + ".txt" if rel.endswith(".odin") else rel
+    # Deployment configs are linked from the ops guide the same way example
+    # sources are linked from the tutorials: copied into the site as .txt so
+    # the link resolves offline.
+    if "deploy/" in href and not href.endswith(".md"):
+        return href[href.index("deploy/"):] + ".txt"
     if href.rstrip("/").endswith("README.md"):
         return "readme.html"
     if href.endswith(".md"):
@@ -499,6 +506,18 @@ def build():
             for name in files:
                 if not name.endswith(".odin"):
                     continue
+                rel = os.path.relpath(os.path.join(root, name), os.path.dirname(DOCS))
+                dst = os.path.join(OUT, rel + ".txt")
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copyfile(os.path.join(root, name), dst)
+
+    # Deployment configs, so the ops guide's links to them resolve offline.
+    # Same treatment as the example sources above: served as .txt rather than
+    # letting a browser try to download a .service or .conf.
+    dep_src = os.path.join(os.path.dirname(DOCS), "deploy")
+    if os.path.isdir(dep_src):
+        for root, _, files in os.walk(dep_src):
+            for name in files:
                 rel = os.path.relpath(os.path.join(root, name), os.path.dirname(DOCS))
                 dst = os.path.join(OUT, rel + ".txt")
                 os.makedirs(os.path.dirname(dst), exist_ok=True)

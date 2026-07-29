@@ -1,0 +1,187 @@
+# Hardened systemd unit for an otsh app.
+#
+# The worked example is examples/tracker. Lines marked APP-SPECIFIC are the
+# ones you change for your own binary; everything else is generic hardening
+# that applies to any otsh server.
+#
+#   install -D -m 0755 ./tracker /usr/local/lib/otsh/tracker
+#   install -D -m 0644 deploy/otsh.service /etc/systemd/system/otsh.service
+#   systemctl daemon-reload && systemctl enable --now otsh.service
+#   journalctl -u otsh -f
+#
+# Full walkthrough, including what to do before the first start:
+# docs/deploy.md.
+
+[Unit]
+Description=otsh terminal app over SSH (tracker)
+Documentation=https://github.com/otsh/otsh
+# The listener binds a socket, so wait for a routable address rather than for
+# the network stack merely existing.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+# APP-SPECIFIC: your binary. Built with ./build.sh examples/tracker, which
+# drops ./tracker in the repo root.
+ExecStart=/usr/local/lib/otsh/tracker
+
+# --- identity and state ------------------------------------------------------
+
+# No system account to create, and no account left behind to be reused or
+# logged into: systemd allocates a transient UID/GID for the lifetime of the
+# service. It also implies PrivateTmp=yes and RemoveIPC=yes.
+DynamicUser=yes
+
+# /var/lib/otsh (really /var/lib/private/otsh, 0700, chowned to the transient
+# UID on every start). This is the only writable place the service has.
+StateDirectory=otsh
+StateDirectoryMode=0700
+
+# ssh.serve resolves Config.host_key_path and Config.identity_secret against
+# the process working directory, and the tracker sets them to the relative
+# names "tracker_hostkey" and "tracker_secret" — so they are created inside
+# and read from the state directory only because the working directory points
+# there. %S expands to /var/lib. Pass absolute paths in your Config instead if
+# you would rather not depend on this.
+WorkingDirectory=%S/otsh
+
+# Both files are created 0600 by otsh itself (O_EXCL, before libssh ever opens
+# them). This makes anything else the app writes owner-only too.
+UMask=0077
+
+# --- restart policy ----------------------------------------------------------
+
+# A clean exit is a decision; a crash or an OOM kill is not. Only the latter
+# restarts.
+Restart=on-failure
+RestartSec=2s
+# Give up if it fails 5 times in 60s rather than crash-looping against the
+# journal — an otsh server that cannot bind its port will never recover on its
+# own.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# --- logging -----------------------------------------------------------------
+
+# ssh.audit_stderr writes one line per event to stderr; this is what puts those
+# lines in the journal where deploy/fail2ban/jail.d/otsh.local can read them.
+# Without Config.audit set in your app there is nothing here to read.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=otsh
+# Audit lines are the security record. Do not let a chatty app rate-limit them
+# out of the journal.
+LogRateLimitIntervalSec=0
+LogRateLimitBurst=0
+
+# --- resource ceilings -------------------------------------------------------
+#
+# Sized against ssh.DEFAULT_LIMITS (ssh/limits.odin): max_sessions = 256, and
+# otsh runs one OS thread per connection.
+#
+#   threads   256 sessions + the accept loop + main. TasksMax counts threads,
+#             not processes, so this has to clear 258.
+#   memory    256 x ~4.8 KB Session (docs/architecture.md; ~1 MB of that is the
+#             4 KiB input rings) = ~1.2 MB, plus libssh's per-connection state,
+#             plus your app's per-connection Model, plus resident thread stacks
+#             (glibc reserves 8 MiB of *address space* per thread, which
+#             MemoryMax does not count — only pages actually touched).
+#
+# 512M is therefore a backstop that turns a leak into a restart, not a measured
+# working set. Measure yours (systemctl show otsh -p MemoryPeak, or
+# systemd-cgtop) and set it near the real peak. Raise both together with
+# Limits.max_sessions, never one alone.
+TasksMax=300
+MemoryMax=512M
+MemoryAccounting=yes
+# Two descriptors per connection plus the listener, with room to spare; the
+# 1024 default is uncomfortably close to 256 sessions.
+LimitNOFILE=4096
+# A core dump of this process contains the host key, the identity secret and
+# every live session's traffic.
+LimitCORE=0
+
+# --- privilege ---------------------------------------------------------------
+
+# Nothing this process execs can gain privileges via setuid/setgid/fscaps.
+NoNewPrivileges=yes
+# It binds a high port (2222) and reads two files. It needs no capabilities at
+# all. To bind port 22 instead, add:
+#   AmbientCapabilities=CAP_NET_BIND_SERVICE
+#   CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=
+
+# --- filesystem --------------------------------------------------------------
+
+# The entire filesystem hierarchy is read-only except /dev, /proc, /sys and
+# what StateDirectory= grants. A code-execution bug cannot persist anything.
+ProtectSystem=strict
+# /home, /root and /run/user are invisible. An otsh app has no business
+# reading a user's ~/.ssh.
+ProtectHome=yes
+# Private /tmp and /var/tmp namespace, destroyed on stop: no leftover files, no
+# reading another service's temp data. (DynamicUser=yes already implies this;
+# stated so it survives someone turning DynamicUser off.)
+PrivateTmp=yes
+# Only pseudo-devices (/dev/null, /dev/urandom, ...). libssh's RNG needs
+# urandom and nothing else.
+PrivateDevices=yes
+# /proc shows only this service's own processes — no reading other services'
+# cmdlines or environ.
+ProtectProc=invisible
+ProcSubset=pid
+
+# --- kernel and system state -------------------------------------------------
+
+# /proc/sys, /sys and friends are read-only: no sysctl tampering.
+ProtectKernelTunables=yes
+# No module loading, ever.
+ProtectKernelModules=yes
+# No reading the kernel ring buffer (dmesg leaks addresses and other services'
+# activity).
+ProtectKernelLogs=yes
+# The service cannot rewrite its own or anyone else's cgroup limits — i.e. it
+# cannot lift the MemoryMax/TasksMax above.
+ProtectControlGroups=yes
+# No clock skew: audit line timestamps are only evidence if the clock is not
+# under the attacked process's control.
+ProtectClock=yes
+# The hostname cannot be changed out from under the rest of the system.
+ProtectHostname=yes
+# No setuid/setgid file creation.
+RestrictSUIDSGID=yes
+# No new user/mount/network namespaces — a common sandbox-escape primitive.
+RestrictNamespaces=yes
+# No SCHED_FIFO/SCHED_RR: a busy loop cannot starve the rest of the machine.
+RestrictRealtime=yes
+# execve cannot switch personality (e.g. to disable ASLR).
+LockPersonality=yes
+# No W+X mappings. Odin emits ahead-of-time code and libssh has no JIT, so
+# nothing here needs them — this closes the usual shellcode staging ground. If
+# the service ever fails to start with a mmap/mprotect error, this is the first
+# line to suspect.
+MemoryDenyWriteExecute=yes
+
+# --- syscalls and sockets ----------------------------------------------------
+
+# Only this machine's native ABI; blocks the 32-bit-syscall bypass of the
+# filter below.
+SystemCallArchitectures=native
+# The standard service syscall set, minus anything privileged. Denied calls
+# fail with EPERM rather than SIGSYS, so a probe is a failed call, not a crash.
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete
+SystemCallErrorNumber=EPERM
+# TCP over IPv4/IPv6 is the entire network surface of an SSH server: no unix
+# sockets, no AF_NETLINK, no AF_PACKET. Note that otsh does no DNS at all —
+# peer addresses are formatted with inet_ntop and never resolved. If you add
+# something to your app that does need a resolver, a syslog socket or D-Bus,
+# add AF_UNIX back here and say why.
+RestrictAddressFamilies=AF_INET AF_INET6
+# Only outbound-capable if your app makes connections; the listener itself does
+# not care. Left permissive on purpose — IPAddressDeny=any would also block
+# accept() on some kernels.
+
+[Install]
+WantedBy=multi-user.target
