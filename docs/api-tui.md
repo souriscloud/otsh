@@ -537,7 +537,7 @@ flush :: proc(s: ^Screen) -> []u8
 Produces the escape sequence stream that turns the previously rendered frame
 into the current one. Returns an empty slice when nothing changed.
 
-*tui/screen.odin:414*
+*tui/screen.odin:426*
 
 ### `key_name`
 
@@ -645,10 +645,21 @@ Blocks for the lifetime of the app.
 rune_width :: proc "contextless" (r: rune) -> int
 ```
 
-Display width in terminal columns. Covers the ranges that matter in
-practice: combining marks (0), CJK and emoji (2), everything else (1).
+Display width in terminal columns: 0 for combining marks and format
+characters, 2 for East Asian Wide and Fullwidth, 1 for everything else.
 
-*tui/screen.odin:304*
+The answer comes from `width_table.odin`, generated from the Unicode
+character database by `docs/tools/gen_width.py` — a hand-picked range list
+is wrong for whole scripts at a time, and one wrong width shifts every
+column after it on that line.
+
+Ambiguous-width characters (East Asian Width A) count as 1. Terminals
+overwhelmingly render them narrow, and the U+2500 box-drawing block this
+package draws its own borders from — `BORDER_ROUND` and friends, via
+`draw_box` — is ambiguous: at width 2 every border in every app would be
+twice as wide as the box it frames.
+
+*tui/screen.odin:315*
 
 ### `screen_clear`
 
@@ -723,7 +734,7 @@ text_width :: proc "contextless" (text: string) -> int
 Total display width of a string in terminal columns. Use this, never `len`,
 for centering or alignment.
 
-*tui/screen.odin:344*
+*tui/screen.odin:356*
 
 ### `with_attrs`
 
