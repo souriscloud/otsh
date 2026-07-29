@@ -327,7 +327,15 @@ across processes or machines, so it cannot stop a distributed flood — many
 source addresses each safely under `max_per_ip` can still collectively
 exceed what the host can serve. That has to be handled in front of `otsh`
 (a load balancer, a firewall, a rate limiter that sees the whole picture),
-not inside it.
+not inside it. Nothing added to `ssh/limits.odin` would change that: a
+per-process limiter cannot see what it cannot see.
+
+[`./deploy.md`](./deploy.md) is the mitigation path — kernel-level rate
+limiting, a fail2ban filter over the audit log, and a hardened systemd unit,
+shipped as working configuration in `deploy/`. It composes with the limits
+above rather than replacing them, and it is equally plain about its own
+ceiling: a genuinely distributed flood is refused, not absorbed, and a
+volumetric one needs filtering upstream of the machine.
 
 ## 8. Data handling
 
@@ -380,8 +388,13 @@ Stated plainly rather than left implicit:
 - **TOFU is still TOFU** (§6): a user's first connection trusts the host
   key without independent verification unless you've published its
   fingerprint somewhere they'll actually check.
-- **Distributed floods are not mitigated.** `Limiter` (§7) is
-  per-process, per-source-address only.
+- **Distributed floods are not mitigated by anything in this process.**
+  `Limiter` (§7) is per-process, per-source-address only, and no change to it
+  could be otherwise. What can be done is done in front of the process:
+  [`./deploy.md`](./deploy.md) ships a kernel rate limiter, a fail2ban filter
+  over the audit log, and a hardened unit, and says which part of the problem
+  each one actually solves. Past those, a volumetric flood is a matter for
+  your provider's filtering, not for this repository.
 - **The audit log is opt-in, and there is no session recording.**
   `Config.audit` records the listen, every accept, every limiter rejection,
   every key-exchange failure, every authentication attempt with its verdict,
@@ -421,9 +434,12 @@ Before exposing an `otsh` server to the internet:
 6. **Size `Limits` for your deployment** rather than taking the defaults on
    faith: `max_sessions`, `max_per_ip`, `handshake_seconds`,
    `max_auth_attempts`. Remember `0` = default, negative = unlimited (§7).
-7. **Put a network-level limiter or WAF in front of it** if a
-   distributed flood is in your threat model — `otsh`'s limiter cannot see
-   across source addresses (§7).
+7. **Put a network-level limiter in front of it** if a distributed flood is
+   in your threat model — `otsh`'s limiter cannot see across source
+   addresses (§7). [`./deploy.md`](./deploy.md) has the ruleset
+   (`deploy/nftables-ratelimit.conf`, with pf equivalents), a fail2ban filter
+   for the audit log, and a hardened systemd unit; it also states where that
+   stops being enough.
 8. **Decide whether you want an audit log**, then set `Config.audit` (or
    leave it `nil`) on purpose rather than by default. `ssh.audit_stderr`
    gives you one parseable line per connection, auth attempt and session,
