@@ -151,7 +151,7 @@ in `ssh/server.odin:session_thread` and `cb_channel_open`.
 ## Input flow and backpressure
 
 Every session owns a `Ring` (`ssh/server.odin`): a fixed `data: [MAX_INPUT]u8`
-with `start`/`count` cursors, where `MAX_INPUT :: 16 * 1024` (16 KiB).
+with `start`/`count` cursors, where `MAX_INPUT :: 4 * 1024` (4 KiB).
 `cb_channel_data` is the only writer:
 
 ```odin
@@ -374,11 +374,15 @@ already installed before any concurrent use touches its internal state.
 Reordering this would not fail loudly; it would show up as sporadic
 corruption once real concurrent connections arrive.
 
-**`Session` is about 17 KB, almost entirely the 16 KiB `Ring`.** The rest of
+**`Session` is about 4.8 KB, almost entirely the 4 KiB `Ring`.** The rest of
 the struct (six fixed identity/address buffers, the two libssh callback
 structs, `Pty`, assorted ints and bools) adds a few hundred bytes on top.
-That is negligible at the default `max_sessions = 256` (roughly 4 MB of ring
+That is negligible at the default `max_sessions = 256` (roughly 1 MB of ring
 buffers at full occupancy), but worth knowing before raising that limit or
 setting it negative to disable it — thousands of idle connections cost real,
 linearly-scaling memory, before the app's own per-connection `Model` is even
-counted.
+counted. The ring was 16 KiB, which put `Session` at 17 KB; since it is
+drained every frame and the flow control above makes an oversized paste
+arrive across several frames instead of being dropped, the extra 12 KiB per
+connection bought nothing. `tests/ssh_test.odin:session_stays_small` holds
+the size down so a new field cannot quietly give it back.

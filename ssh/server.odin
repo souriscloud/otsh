@@ -20,7 +20,15 @@ import ls "../libssh"
 
 // Per-session input buffer. Bytes beyond this stay in libssh's own buffer and
 // are re-offered later, which is the protocol's flow control.
-MAX_INPUT :: 16 * 1024
+//
+// 4 KiB, not 16, because this array lives inline in every Session and idle
+// connections are the common case. The ring drains once per frame, and
+// `cb_channel_data` returning less than it was offered makes libssh keep the
+// remainder and hand it over again — so a paste bigger than the ring still
+// arrives intact, just spread across successive frames. 4 KiB per frame at
+// 30 fps is ~120 KB/s of keystrokes, orders of magnitude above what a human
+// generates, and it puts a Session under 5 KB instead of ~17 KB.
+MAX_INPUT :: 4 * 1024
 
 // Handler runs on its own thread, one per connection, and owns the session for
 // as long as it runs. When it returns the connection is torn down.
@@ -568,7 +576,7 @@ serve :: proc(cfg: Config) -> bool {
 
 		// Check the limits here, before committing a thread. Doing it inside the
 		// session thread meant a rejected connection still cost a pthread and a
-		// ~17 KB Session first, so the limiter protected memory but not the
+		// whole Session first, so the limiter protected memory but not the
 		// accept path itself.
 		addr := peer_address(ls.get_fd(s.sess), s.addr_buf[:])
 		s.addr_len = len(addr)
