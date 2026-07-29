@@ -17,6 +17,7 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:sync"
+import "core:time"
 import "core:unicode/utf8"
 import "otsh:sshtui"
 import "otsh:tui"
@@ -52,10 +53,22 @@ Issue :: struct {
 	author:   string, // owned; pseudonymous id, never a fingerprint
 	state:    Issue_State,
 	comments: int,
-	// Seconds since this issue last changed. Drives the "just changed" fade,
-	// so a session can see edits made by somebody else land in real time.
-	touched:  f64,
+	// When this issue last changed; drives the "just changed" marker, so a
+	// session can see edits made by somebody else land in real time. A wall
+	// clock reading, NOT an accumulated per-frame age: every connected session
+	// runs its own update loop against this shared struct, so summing each
+	// session's dt into it would age the marker N× too fast with N sessions.
+	// The zero value reads as "long ago", which is what seeded issues want.
+	touched:  time.Tick,
 }
+
+// A shared board on a public port must not grow without bound — without a cap,
+// anyone holding an SSH key can grow this process's memory until the OS kills
+// it. Evicting old issues instead would be wrong here: sessions hold snapshot
+// copies whose strings borrow the board's allocations, so freeing an evicted
+// issue's strings would dangle every snapshot that still shows it. Refusing is
+// both safer and simpler.
+MAX_ISSUES :: 500
 
 board: struct {
 	mu:        sync.Mutex,
@@ -76,7 +89,6 @@ seed_board :: proc() {
 				author = strings.clone("otsh"),
 				state = state,
 				comments = comments,
-				touched = 999,
 			},
 		)
 	}
@@ -109,15 +121,21 @@ edit_issue :: proc(id: int, edit: proc(issue: ^Issue)) {
 	for &issue in board.issues {
 		if issue.id == id {
 			edit(&issue)
-			issue.touched = 0
+			issue.touched = time.tick_now()
 			return
 		}
 	}
 }
 
-file_issue :: proc(title, author: string) -> int {
+// Files a new issue. ok is false when the board is at MAX_ISSUES; the check
+// lives under the same lock as the append, so two sessions racing to file the
+// last slot cannot both win.
+file_issue :: proc(title, author: string) -> (id: int, ok: bool) {
 	sync.lock(&board.mu)
 	defer sync.unlock(&board.mu)
+	if len(board.issues) >= MAX_ISSUES {
+		return 0, false
+	}
 	board.next_id += 1
 	append(
 		&board.issues,
@@ -127,20 +145,19 @@ file_issue :: proc(title, author: string) -> int {
 			body = strings.clone("(no description yet)"),
 			author = strings.clone(author),
 			state = .Open,
-			touched = 0,
+			touched = time.tick_now(),
 		},
 	)
-	return board.next_id
+	return board.next_id, true
 }
 
-// Ages every issue's change marker. Called once per tick by whichever session
-// is drawing; `dt` is that session's frame delta.
-age_issues :: proc(dt: f64) {
-	sync.lock(&board.mu)
-	defer sync.unlock(&board.mu)
-	for &issue in board.issues {
-		issue.touched += dt
+// True while the issue's "just changed" marker should show. The zero Tick of
+// a seeded issue never reads as recent.
+just_changed :: proc(issue: Issue) -> bool {
+	if issue.touched == (time.Tick{}) {
+		return false
 	}
+	return time.duration_seconds(time.tick_since(issue.touched)) < 2.0
 }
 
 // Copies the issues matching `filter` into `dst`. Callers work from the copy so
@@ -241,7 +258,6 @@ update :: proc(p: ^tui.Program, msg: tui.Msg) {
 	switch e in msg {
 	case tui.Tick:
 		m.spinner += e.dt
-		age_issues(e.dt)
 		snapshot(&m.rows, m.filter)
 		clamp_view(m, p.screen.h)
 		if m.toast_ttl > 0 {
@@ -348,7 +364,11 @@ key_compose :: proc(p: ^tui.Program, m: ^Model, k: tui.Key) {
 			set_toast(m, "title cannot be empty")
 			return
 		}
-		id := file_issue(title, m.who)
+		id, filed := file_issue(title, m.who)
+		if !filed {
+			set_toast(m, fmt.tprintf("the board is full (%d issues)", MAX_ISSUES))
+			return
+		}
 		m.compose_n = 0
 		m.view = .List
 		set_toast(m, fmt.tprintf("filed #%d", id))
@@ -484,7 +504,7 @@ draw_list :: proc(m: ^Model, s: ^tui.Screen) {
 
 		// Anything changed in the last two seconds gets a marker — that is how
 		// you notice somebody else's edit arriving.
-		if issue.touched < 2.0 {
+		if just_changed(issue) {
 			tui.set_cell(s, split - 10, y, '●', tui.Style{fg = C_ACCENT, bg = st.bg})
 		}
 	}
@@ -633,7 +653,10 @@ draw_footer :: proc(m: ^Model, s: ^tui.Screen) {
 	}
 }
 
-// Greedy word wrap. Returns the row after the last one drawn.
+// Greedy word wrap. Returns the row after the last one drawn. Words wider
+// than the pane are clipped to it — drawn unclipped they would run past the
+// pane edge into whatever is right of it, since the screen only clips at its
+// own boundary.
 wrap :: proc(s: ^tui.Screen, x, y, w, limit: int, text: string, style: tui.Style) -> int {
 	if w <= 0 || y >= limit {
 		return y
@@ -650,7 +673,7 @@ wrap :: proc(s: ^tui.Screen, x, y, w, limit: int, text: string, style: tui.Style
 		if col > 0 {
 			col += 1
 		}
-		tui.draw_text(s, x + col, line, word, style)
+		tui.draw_text_clipped(s, x + col, line, w - col, word, style)
 		col += ww
 	}
 	return line + 1

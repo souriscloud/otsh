@@ -327,11 +327,11 @@ parse_sgr_mouse :: proc(buf: []u8) -> (ev: Input, n: int, ok: bool) {
 			btn := vals[0]
 			// The wire values are attacker-controlled and accumulate without a
 			// digit cap, so they can arrive absurd or wrapped. tui itself clips,
-			// but apps index arrays with these — clamp to the largest screen
-			// this package will ever allocate.
+			// but apps index arrays with these — clamp to the last valid cell of
+			// the largest screen this package will ever allocate.
 			m := Mouse {
-				x     = clamp(vals[1] - 1, 0, MAX_COLS),
-				y     = clamp(vals[2] - 1, 0, MAX_ROWS),
+				x     = clamp(vals[1] - 1, 0, MAX_COLS - 1),
+				y     = clamp(vals[2] - 1, 0, MAX_ROWS - 1),
 				shift = btn & 4 != 0,
 				alt   = btn & 8 != 0,
 				ctrl  = btn & 16 != 0,

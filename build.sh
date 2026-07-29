@@ -10,8 +10,18 @@
 set -euo pipefail
 
 OTSH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Compiler resolution: $ODIN if set, else a gitignored .odin-path file next to
+# this script (for machines where the compiler is not on PATH), else `odin`.
+if [ -z "${ODIN:-}" ] && [ -f "$OTSH/.odin-path" ]; then
+	ODIN="$(cat "$OTSH/.odin-path")"
+fi
 ODIN="${ODIN:-odin}"
-command -v "$ODIN" >/dev/null || ODIN=/Users/souris/work/bench/odin/odin-lang/odin
+if ! command -v "$ODIN" >/dev/null; then
+	echo "build.sh: odin compiler not found (tried '$ODIN')." >&2
+	echo "  Install Odin (https://odin-lang.org), set ODIN=/path/to/odin, or write" >&2
+	echo "  the path into $OTSH/.odin-path" >&2
+	exit 1
+fi
 
 SRC="${1:-$OTSH/examples/tracker}"
 shift || true

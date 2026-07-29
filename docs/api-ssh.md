@@ -112,7 +112,7 @@ Config :: struct {
 How to run the server. Every field has a documented default, so the zero value
 is a working — if wide open — public server on port 2222.
 
-*ssh/server.odin:304*
+*ssh/server.odin:309*
 
 ### `Handler`
 
@@ -137,7 +137,7 @@ Identity_Secret :: struct {
 The per-server HMAC key behind `Session.id`. Back it up with the host key:
 losing it re-pseudonymises every user, so everyone looks new.
 
-*ssh/identity.odin:33*
+*ssh/identity.odin:32*
 
 ### `Limits`
 
@@ -336,7 +336,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 
 AEAD ciphers only: no CBC, no stream ciphers with separate MACs.
 
-*ssh/server.odin:332*
+*ssh/server.odin:337*
 
 ### `DEFAULT_HOST`
 
@@ -358,7 +358,7 @@ DEFAULT_HOST_KEY :: "hostkey"
 Defaults applied to a zero-valued Config field. sshtui fills these in too;
 they live here as well so calling ssh.serve directly cannot bind port 0.
 
-*ssh/server.odin:452*
+*ssh/server.odin:457*
 
 ### `DEFAULT_HOST_KEY`
 
@@ -375,7 +375,7 @@ DEFAULT_HOST_KEY :: "hostkey"
 
 Host key path used when `Config.host_key_path` is empty.
 
-*ssh/server.odin:456*
+*ssh/server.odin:461*
 
 ### `DEFAULT_HOSTKEYS`
 
@@ -423,7 +423,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 
 Ed25519 only — matches the key `ensure_host_key` generates.
 
-*ssh/server.odin:336*
+*ssh/server.odin:341*
 
 ### `DEFAULT_KEX`
 
@@ -473,7 +473,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 Modern-only. Every one of these is an AEAD or an ETM MAC with a
 curve25519 exchange; nothing here depends on SHA-1, CBC, or NIST curves.
 
-*ssh/server.odin:330*
+*ssh/server.odin:335*
 
 ### `DEFAULT_LIMITS`
 
@@ -538,7 +538,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 
 Encrypt-then-MAC only, SHA-2 only.
 
-*ssh/server.odin:334*
+*ssh/server.odin:339*
 
 ### `DEFAULT_PORT`
 
@@ -557,7 +557,7 @@ DEFAULT_HOST_KEY :: "hostkey"
 
 Port used when `Config.port` is zero.
 
-*ssh/server.odin:454*
+*ssh/server.odin:459*
 
 ### `ID_BYTES`
 
@@ -577,7 +577,7 @@ Identity_Secret :: struct {
 128 bits of id. Collisions are not a practical concern and the shorter
 string is easier to eyeball in logs.
 
-*ssh/identity.odin:27*
+*ssh/identity.odin:26*
 
 ### `ID_SIZE`
 
@@ -594,7 +594,7 @@ Identity_Secret :: struct {
 
 Length of a pseudonymous id as hex text.
 
-*ssh/identity.odin:29*
+*ssh/identity.odin:28*
 
 ### `MAX_INPUT`
 
@@ -674,7 +674,7 @@ Identity_Secret :: struct {
 
 Length of the identity secret, in bytes.
 
-*ssh/identity.odin:24*
+*ssh/identity.odin:23*
 
 ## Procedures
 
@@ -688,7 +688,7 @@ Creates the host key if it does not exist yet — the SSH equivalent of a TLS
 certificate. Clients pin it in ~/.ssh/known_hosts, so it must be stable
 across restarts.
 
-*ssh/server.odin:341*
+*ssh/server.odin:346*
 
 ### `fingerprint`
 
@@ -722,7 +722,7 @@ ids_equal :: proc "contextless" (a, b: string) -> bool
 Compares two ids without leaking where they differ via timing. Use this
 rather than `==` when checking an id against a stored one.
 
-*ssh/identity.odin:97*
+*ssh/identity.odin:99*
 
 ### `key_type`
 
@@ -746,7 +746,7 @@ exactly like the host key: back it up, keep it 0600, never commit it.
 Losing it does not leak anything — it just re-pseudonymises everybody, which
 means every user looks like a new user.
 
-*ssh/identity.odin:42*
+*ssh/identity.odin:41*
 
 ### `pseudonym`
 
@@ -758,7 +758,7 @@ Stable per-server id for a verified key fingerprint. Writes into `dst`
 (needs ID_SIZE bytes) and returns a string viewing it, so this allocates
 nothing and can run on a session thread without touching an allocator.
 
-*ssh/identity.odin:84*
+*ssh/identity.odin:83*
 
 ### `read`
 
@@ -812,7 +812,7 @@ Appends what fits, returning how many bytes were taken.
 serve :: proc(cfg: Config) -> bool
 ```
 
-*ssh/server.odin:481*
+*ssh/server.odin:486*
 
 ### `size`
 
@@ -833,7 +833,7 @@ take_resize :: proc "contextless" (s: ^Session) -> bool
 
 True exactly once after each window resize.
 
-*ssh/server.odin:294*
+*ssh/server.odin:299*
 
 ### `term`
 
@@ -865,7 +865,7 @@ warn_if_world_readable :: proc(path: string)
 A host key or identity secret that other local users can read is not a
 secret. Say so loudly rather than failing silently.
 
-*ssh/identity.odin:130*
+*ssh/identity.odin:132*
 
 ### `write`
 
@@ -876,7 +876,7 @@ write :: proc(s: ^Session, data: []u8) -> int
 Sends bytes to the client. Returns how many were written, 0 once the
 connection is gone.
 
-*ssh/server.odin:276*
+*ssh/server.odin:281*
 
 ### `write_string`
 
@@ -886,4 +886,4 @@ write_string :: proc(s: ^Session, str: string) -> int
 
 `write` for a string.
 
-*ssh/server.odin:289*
+*ssh/server.odin:294*

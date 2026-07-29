@@ -265,10 +265,15 @@ read :: proc(s: ^Session, buf: []u8, timeout_ms: int) -> (n: int, ok: bool) {
 	if rc == 0 {
 		return 0, true // timed out with nothing to read
 	}
-	if ls.event_dopoll(s.event, 0) == ls.ERROR || s.eof {
+	if ls.event_dopoll(s.event, 0) == ls.ERROR {
 		return 0, false
 	}
-	return ring_pop(&s.input, buf), true
+	// EOF can arrive in the same poll as the client's final keystrokes. Hand
+	// the bytes over first; the EOF is still there to report on the next call.
+	if s.input.count > 0 {
+		return ring_pop(&s.input, buf), true
+	}
+	return 0, !s.eof
 }
 
 // Sends bytes to the client. Returns how many were written, 0 once the
@@ -803,12 +808,8 @@ derive_id :: proc "contextless" (s: ^Session) {
 	if !s.server.secret.loaded || s.fp_len == 0 {
 		return
 	}
+	// pseudonym allocates nothing; the context is only for the crypto calls.
 	context = runtime.default_context()
-	// Scope the scratch space instead of calling free_all: that would wipe the
-	// whole thread's temp arena, including anything an Authenticator allocated
-	// earlier in the same connection.
-	scratch := runtime.default_temp_allocator_temp_begin()
-	defer runtime.default_temp_allocator_temp_end(scratch)
 	s.id_len = len(pseudonym(&s.server.secret, fingerprint(s), s.id_buf[:]))
 }
 

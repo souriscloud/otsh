@@ -14,7 +14,6 @@ package ssh
 import "core:crypto"
 import "core:crypto/hash"
 import "core:crypto/hmac"
-import "core:encoding/hex"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -87,8 +86,11 @@ pseudonym :: proc(secret: ^Identity_Secret, fingerprint: string, dst: []u8) -> s
 	}
 	mac: [32]u8
 	hmac.sum(hash.Algorithm.SHA256, mac[:], transmute([]u8)fingerprint, secret.bytes[:])
-	encoded := hex.encode(mac[:ID_BYTES], context.temp_allocator)
-	copy(dst[:ID_SIZE], encoded)
+	hex_digits := "0123456789abcdef"
+	for b, i in mac[:ID_BYTES] {
+		dst[i * 2] = hex_digits[b >> 4]
+		dst[i * 2 + 1] = hex_digits[b & 0xf]
+	}
 	return string(dst[:ID_SIZE])
 }
 

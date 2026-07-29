@@ -34,7 +34,7 @@ rm -f tracker whoami members guestbook stopwatch
 
 echo "tests"
 if out=$(./test.sh 2>&1); then
-	printf '  ok    %s\n' "$(echo "$out" | grep -oE 'Finished [0-9]+ tests[^.]*\.' | tail -1)"
+	printf '  ok    %s\n' "$(echo "$out" | grep -o 'Finished [0-9]* test.*' | tail -1)"
 else
 	printf '  FAIL  test suite\n'
 	echo "$out" | grep -E "FAIL|expected|Error" | head -12 | sed 's/^/          /'

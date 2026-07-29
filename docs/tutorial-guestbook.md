@@ -497,12 +497,33 @@ message_at :: proc(i: int) -> (Message, bool) {
 	return messages[i], true
 }
 
-add_message :: proc(author, text: string) {
+// Shared state on a public port must be bounded, or anyone with an SSH key
+// can grow this process's memory without limit.
+MAX_MESSAGES :: 500
+
+add_message :: proc(author, text: string) -> bool {
 	sync.lock(&messages_mu)
 	defer sync.unlock(&messages_mu)
+	if len(messages) >= MAX_MESSAGES {
+		return false
+	}
 	append(&messages, Message{author = strings.clone(author), text = strings.clone(text)})
+	return true
 }
 ```
+
+Two things about `add_message` deserve a closer look. The cap first: the
+moment `messages` moved to package scope it became state fed by *anyone who
+can reach the port*, and unbounded shared state on a listening socket is a
+memory-growth endpoint — one scripted client posting in a loop grows the
+process until the OS kills it. A cap turns that into a "guestbook is full"
+notice instead. Second, where the cap's check sits: *inside* the lock, in the
+same critical section as the `append`. Checked outside — say,
+`message_count() >= MAX_MESSAGES` before calling — two sessions racing for
+the last slot could both pass the check and push past the cap. Same lesson as
+the rest of this step, applied to a limit rather than a list.
+(`commit_message` ignores the returned `bool` for now; step 8's footer
+feedback surfaces it.)
 
 Every other connection's `view` reads through `message_count`/`message_at`,
 never by indexing `messages` directly, and `commit_message` writes through
@@ -941,20 +962,26 @@ Model :: struct {
 	offset:      int,
 	buf:         [240]u8,
 	buf_len:     int,
-	confirm_ttl: f64, // seconds left to show "message posted"
+	confirm_ttl: f64, // seconds left to show the post-commit notice
+	posted:      bool, // whether the last commit was accepted or the book was full
 	blink:       f64, // accumulator driving the input cursor blink
 }
 
 commit_message :: proc(m: ^Model) {
 	text := strings.trim_space(string(m.buf[:m.buf_len]))
 	if text != "" {
-		add_message(m.who, text)
+		m.posted = add_message(m.who, text)
 		m.confirm_ttl = 1.5
 	}
 	m.buf_len = 0
 	m.mode = .Browse
 }
 ```
+
+This is also where step 5's ignored return value gets its job: `posted`
+records whether `add_message` accepted the message or refused because the
+book hit `MAX_MESSAGES`, and the footer below picks its notice accordingly —
+silent refusal would look like a lost message.
 
 Count both `confirm_ttl` and the blink accumulator down and up from
 `tui.Tick`, which carries `dt` — real elapsed seconds since the previous
@@ -986,7 +1013,9 @@ draw_footer :: proc(sc: ^tui.Screen, m: ^Model, l: Layout) {
 	switch m.mode {
 	case .Browse:
 		if m.confirm_ttl > 0 {
-			tui.draw_text_clipped(sc, l.list_x, l.footer_y, l.list_w, "message posted", tui.Style{fg = tui.ansi(10), attrs = {.Bold}})
+			notice := m.posted ? "message posted" : "the guestbook is full"
+			color := m.posted ? tui.ansi(10) : tui.ansi(11)
+			tui.draw_text_clipped(sc, l.list_x, l.footer_y, l.list_w, notice, tui.Style{fg = color, attrs = {.Bold}})
 		} else {
 			tui.draw_text_clipped(sc, l.list_x, l.footer_y, l.list_w, "↑↓/jk move · enter write · q quit", tui.Style{fg = tui.ansi(8)})
 		}
@@ -1086,6 +1115,12 @@ Message :: struct {
 messages: [dynamic]Message
 messages_mu: sync.Mutex
 
+// Shared state on a public port must be bounded, or anyone with an SSH key can
+// grow this process's memory until the OS kills it. Refusing at the cap is the
+// right shape here — evicting old messages would free strings that another
+// session's view may be reading at that very moment.
+MAX_MESSAGES :: 500
+
 message_count :: proc() -> int {
 	sync.lock(&messages_mu)
 	defer sync.unlock(&messages_mu)
@@ -1104,10 +1139,18 @@ message_at :: proc(i: int) -> (Message, bool) {
 // Clones both strings before storing them. author/text may point into a
 // per-connection buffer that is about to be reused or freed — see step 5 and
 // step 6 of the tutorial for why this is not optional.
-add_message :: proc(author, text: string) {
+//
+// Returns false when the book is full. The check lives under the same lock as
+// the append: checked outside it, two sessions racing for the last slot could
+// both pass and push the list past the cap.
+add_message :: proc(author, text: string) -> bool {
 	sync.lock(&messages_mu)
 	defer sync.unlock(&messages_mu)
+	if len(messages) >= MAX_MESSAGES {
+		return false
+	}
 	append(&messages, Message{author = strings.clone(author), text = strings.clone(text)})
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -1127,7 +1170,8 @@ Model :: struct {
 	offset:      int, // index of the first visible row
 	buf:         [MAX_MSG_BYTES]u8,
 	buf_len:     int,
-	confirm_ttl: f64, // seconds left to show "message posted"
+	confirm_ttl: f64, // seconds left to show the post-commit notice
+	posted:      bool, // whether the last commit was accepted or the book was full
 	blink:       f64, // accumulator driving the input cursor blink
 }
 
@@ -1183,7 +1227,7 @@ insert_rune :: proc(m: ^Model, r: rune) {
 commit_message :: proc(m: ^Model) {
 	text := strings.trim_space(string(m.buf[:m.buf_len]))
 	if text != "" {
-		add_message(m.who, text)
+		m.posted = add_message(m.who, text)
 		m.confirm_ttl = 1.5
 	}
 	m.buf_len = 0
@@ -1393,13 +1437,15 @@ draw_footer :: proc(sc: ^tui.Screen, m: ^Model, l: Layout) {
 	switch m.mode {
 	case .Browse:
 		if m.confirm_ttl > 0 {
+			notice := m.posted ? "message posted" : "the guestbook is full"
+			color := m.posted ? tui.ansi(10) : tui.ansi(11)
 			tui.draw_text_clipped(
 				sc,
 				l.list_x,
 				l.footer_y,
 				l.list_w,
-				"message posted",
-				tui.Style{fg = tui.ansi(10), attrs = {.Bold}},
+				notice,
+				tui.Style{fg = color, attrs = {.Bold}},
 			)
 		} else {
 			tui.draw_text_clipped(

@@ -24,6 +24,11 @@ id_rsa*
 # Rebuild with: python3 docs/tools/build_site.py
 docs/site/
 
+# --- local machine config ----------------------------------------------------
+# Optional path to the odin compiler, read by build.sh/test.sh when odin is not
+# on PATH. Machine-specific by nature.
+.odin-path
+
 # --- editors / OS ------------------------------------------------------------
 .DS_Store
 *.swp

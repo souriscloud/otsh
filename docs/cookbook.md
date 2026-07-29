@@ -304,25 +304,12 @@ into your own state, never off `frame`:
 // examples/tracker/main.odin
 case tui.Tick:
 	m.spinner += e.dt
-	age_issues(e.dt)   // every issue's "changed N seconds ago" counter
 ```
 
 ```odin
 // draw_header, examples/tracker/main.odin — m.spinner turned into motion
 dots := [4]string{"·  ", "·· ", "···", " ··"}
 tui.draw_text(s, 9, 0, dots[int(m.spinner * 2) % 4], tui.Style{fg = C_DIM})
-```
-
-The same accumulator drives a second, more useful effect: `age_issues` adds
-`dt` to every issue's `touched` field, and the list marks anything changed in
-the last two seconds. That is how a session notices somebody *else's* edit
-arriving, without polling anything:
-
-```odin
-// draw_list, examples/tracker/main.odin
-if issue.touched < 2.0 {
-	tui.set_cell(s, split - 10, y, '●', tui.Style{fg = C_ACCENT, bg = st.bg})
-}
 ```
 
 The reason `frame` can't stand in for elapsed time: `frame` only means a
@@ -334,10 +321,35 @@ slack under budget, but it never speeds up to make up lost time, and a slow
 change how much real time one increment of `frame` represents. `dt` is
 measured directly (`time.tick_diff` between two `time.tick_now()` calls in
 `tui.run`), so `m.spinner += e.dt` keeps the animation's *speed* constant no
-matter what the actual frame timing did — and, more importantly, keeps
-`touched` in real seconds rather than in frames. `m.spinner += 1` per tick
-would drift with every hiccup, and a "changed 2 seconds ago" marker measured
-in frames would mean different things on a fast and a slow connection.
+matter what the actual frame timing did. `m.spinner += 1` per tick would
+drift with every hiccup.
+
+**One boundary: `dt` belongs to per-connection state only.** Every session
+runs its own update loop, so every session has its own stream of ticks. The
+tracker's issues are *shared* — one board, seen by every connection — and
+each issue carries a `touched` marker so a session notices somebody else's
+edit landing in real time. Summing each session's `dt` into that shared field
+would advance it once per session per frame — N sessions age the marker N×
+too fast. (An earlier version of the tracker did exactly this.) Shared state
+wants a wall-clock reading instead: stamp the change with `time.tick_now()`,
+compare with `time.tick_since` when drawing:
+
+```odin
+// examples/tracker/main.odin — edit_issue stamps, draw_list compares
+issue.touched = time.tick_now()
+
+just_changed :: proc(issue: Issue) -> bool {
+	if issue.touched == (time.Tick{}) {
+		return false // seeded issues: the zero Tick never reads as recent
+	}
+	return time.duration_seconds(time.tick_since(issue.touched)) < 2.0
+}
+
+// draw_list — anything changed in the last two seconds gets a marker
+if just_changed(issue) {
+	tui.set_cell(s, split - 10, y, '●', tui.Style{fg = C_ACCENT, bg = st.bg})
+}
+```
 
 ## 7. A transient status message ("toast") that expires
 
