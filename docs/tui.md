@@ -441,10 +441,44 @@ rune_width :: proc "contextless" (r: rune) -> int
 text_width :: proc "contextless" (text: string) -> int
 ```
 
-`rune_width` returns how many terminal columns one rune occupies: `0` for
-combining marks, zero-width joiners, and variation selectors; `2` for CJK
-ideographs, Hangul, fullwidth forms, and most emoji ranges; `1` for
-everything else. `text_width` sums `rune_width` over a whole string.
+`rune_width` returns how many terminal columns one rune occupies, and
+`text_width` sums it over a whole string. The answer comes from
+`tui/width_table.odin` — sorted, disjoint rune ranges generated from the
+Unicode character database by `docs/tools/gen_width.py`, which reads Python's
+own `unicodedata` module, so there is no vendored copy of the UCD and no
+network fetch. ASCII is answered before the table is touched; everything else
+is a binary search over the ranges. The file's header records which Unicode
+version it was generated from.
+
+The policy the generator applies:
+
+- East Asian Width **W** and **F** are `2`: CJK ideographs, Hangul syllables,
+  fullwidth forms, most emoji.
+- Combining marks (categories `Mn`, `Me`) and format characters (`Cf`,
+  which covers U+200B–U+200F and the U+FE00–U+FE0F variation selectors) are
+  `0`. U+00AD soft hyphen is the exception — terminals draw it, so it is `1`,
+  as `wcwidth` has it.
+- East Asian Width **A** (ambiguous) is `1`. That is a deliberate choice, not
+  a reading of the standard: terminals overwhelmingly render ambiguous-width
+  characters narrow, and the U+2500 box-drawing block that `BORDER_ROUND` and
+  the other borders are built from is ambiguous. At `2` every box `draw_box`
+  drew would be twice the width of the box it frames, and every column after
+  it on the line would shift. So is `…`, the character `draw_text_clipped`
+  appends.
+- C0 controls, DEL, and the C1 controls U+0080–U+009F are `0`, so `set_cell`
+  drops them rather than letting a control byte reach the escape stream.
+  `wcwidth` reports these as an error; `rune_width` has no error channel.
+- Everything else is `1`, including private use (ambiguous) and unassigned
+  code points outside the blocks Unicode gives a wide default to.
+
+What is still approximate is grapheme clustering: there is none. Width is
+measured per rune, so a ZWJ emoji sequence measures as its parts — 👨 + ZWJ +
+👩 is `2 + 0 + 2 = 4` — and so does a skin-tone modifier (`2 + 2`). A terminal
+that composes those into one glyph occupies 2 columns and will disagree.
+Conjoining Hangul jamo are counted individually rather than composed into the
+syllable they form, where `wcwidth` gives the medial and trailing jamo
+U+1160–U+11FF a width of `0`. Precomposed Hangul, which is what text almost
+always arrives as, is right.
 
 This matters more than it looks like it should, because column position is
 the coordinate system the whole rest of the package draws in. `draw_text`

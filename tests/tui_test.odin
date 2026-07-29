@@ -36,6 +36,80 @@ rune_width_zero :: proc(t: ^testing.T) {
 	testing.expect_value(t, tui.rune_width(tui.WIDE_CONT), 0)
 }
 
+// The widths below come from the generated table in tui/width_table.odin
+// (docs/tools/gen_width.py). They are the cases a hand-written range list gets
+// wrong, and each wrong answer shifts every column after it on the line.
+
+@(test)
+rune_width_wide_from_table :: proc(t: ^testing.T) {
+	testing.expect_value(t, tui.rune_width('世'), 2)          // CJK unified ideograph
+	testing.expect_value(t, tui.rune_width('한'), 2)          // hangul syllable
+	testing.expect_value(t, tui.rune_width(rune(0x1f600)), 2) // grinning face
+	testing.expect_value(t, tui.rune_width('Ａ'), 2)          // fullwidth latin A
+	testing.expect_value(t, tui.rune_width('　'), 2)          // ideographic space
+}
+
+@(test)
+rune_width_zero_from_table :: proc(t: ^testing.T) {
+	testing.expect_value(t, tui.rune_width(rune(0x0301)), 0) // combining acute accent
+	testing.expect_value(t, tui.rune_width(rune(0x200d)), 0) // zero-width joiner
+	testing.expect_value(t, tui.rune_width(rune(0x0591)), 0) // hebrew accent etnahta
+	testing.expect_value(t, tui.rune_width(rune(0x0e31)), 0) // thai mai han akat
+	// Not every mark is invisible: U+0E33 is a spacing letter, not a mark.
+	testing.expect_value(t, tui.rune_width(rune(0x0e33)), 1)
+}
+
+@(test)
+rune_width_ambiguous_is_narrow :: proc(t: ^testing.T) {
+	// East Asian Width A. The package's own borders live in this block, so
+	// width 2 here would double every box `draw_box` draws.
+	testing.expect_value(t, tui.rune_width('─'), 1)
+	testing.expect_value(t, tui.rune_width('│'), 1)
+	testing.expect_value(t, tui.rune_width('╭'), 1)
+	testing.expect_value(t, tui.rune_width('…'), 1) // the clipping ellipsis
+	testing.expect_value(t, tui.rune_width('±'), 1)
+}
+
+@(test)
+rune_width_ascii_and_controls :: proc(t: ^testing.T) {
+	for r in rune(0x20) ..= rune(0x7e) {
+		testing.expectf(t, tui.rune_width(r) == 1, "printable ASCII %v is not one column", r)
+	}
+	testing.expect_value(t, tui.rune_width(rune(0x00)), 0)
+	testing.expect_value(t, tui.rune_width(rune(0x1b)), 0) // ESC
+	// DEL and the C1 controls are dropped like the C0 ones: a control byte in
+	// the grid would be written straight into the escape stream.
+	testing.expect_value(t, tui.rune_width(rune(0x7f)), 0)
+	testing.expect_value(t, tui.rune_width(rune(0x9b)), 0)
+	testing.expect_value(t, tui.rune_width(rune(0x00ad)), 1) // soft hyphen: Cf, but drawn
+}
+
+@(test)
+text_width_mixes_widths :: proc(t: ^testing.T) {
+	// "cafe" + combining acute + space + CJK + emoji: 4 + 0 + 1 + 2 + 2.
+	testing.expect_value(t, tui.text_width("cafe\u0301 \u4e16\U0001F600"), 9)
+}
+
+@(test)
+draw_box_borders_are_one_column :: proc(t: ^testing.T) {
+	// The concrete consequence of ambiguous -> 1: a box is exactly as wide as
+	// it was asked to be, with no continuation cells anywhere in it.
+	s: tui.Screen
+	tui.screen_init(&s, 12, 4)
+	defer tui.screen_destroy(&s)
+
+	tui.draw_box(&s, 0, 0, 10, 4, {})
+	testing.expect_value(t, s.cur[0].r, '╭')
+	testing.expect_value(t, s.cur[9].r, '╮')  // top-right corner, not shifted
+	testing.expect_value(t, s.cur[10].r, ' ') // nothing past the box
+	for y in 0 ..< s.h {
+		for x in 0 ..< s.w {
+			testing.expectf(t, s.cur[y * s.w + x].r != tui.WIDE_CONT,
+				"border glyph claimed two columns at (%d,%d)", x, y)
+		}
+	}
+}
+
 @(test)
 text_width_is_not_byte_length :: proc(t: ^testing.T) {
 	// The whole point: len() counts bytes, text_width counts columns.

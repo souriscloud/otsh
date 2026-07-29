@@ -299,9 +299,22 @@ set_cursor :: proc(s: ^Screen, x, y: int) {
 
 // --- text metrics -----------------------------------------------------------
 
-// Display width in terminal columns. Covers the ranges that matter in
-// practice: combining marks (0), CJK and emoji (2), everything else (1).
+// Display width in terminal columns: 0 for combining marks and format
+// characters, 2 for East Asian Wide and Fullwidth, 1 for everything else.
+//
+// The answer comes from `width_table.odin`, generated from the Unicode
+// character database by `docs/tools/gen_width.py` — a hand-picked range list
+// is wrong for whole scripts at a time, and one wrong width shifts every
+// column after it on that line.
+//
+// Ambiguous-width characters (East Asian Width A) count as 1. Terminals
+// overwhelmingly render them narrow, and the U+2500 box-drawing block this
+// package draws its own borders from — `BORDER_ROUND` and friends, via
+// `draw_box` — is ambiguous: at width 2 every border in every app would be
+// twice as wide as the box it frames.
 rune_width :: proc "contextless" (r: rune) -> int {
+	// ASCII is nearly every cell of nearly every frame, and this runs per cell
+	// per frame, so answer it before touching the table.
 	switch {
 	case r == WIDE_CONT:
 		return 0
@@ -309,32 +322,31 @@ rune_width :: proc "contextless" (r: rune) -> int {
 		return 0
 	case r < 0x7f:
 		return 1
-	case r >= 0x0300 && r <= 0x036f:
-		return 0 // combining diacriticals
-	case r >= 0x200b && r <= 0x200f:
-		return 0 // zero-width space/joiners
-	case r == 0xfe0f || r == 0xfe0e:
-		return 0 // variation selectors
-	case r >= 0x1100 && r <= 0x115f:
-		return 2 // hangul jamo
-	case r >= 0x2e80 && r <= 0xa4cf:
-		return 2 // CJK radicals … yi
-	case r >= 0xac00 && r <= 0xd7a3:
-		return 2 // hangul syllables
-	case r >= 0xf900 && r <= 0xfaff:
-		return 2 // CJK compatibility ideographs
-	case r >= 0xfe30 && r <= 0xfe6f:
-		return 2 // CJK compatibility forms
-	case r >= 0xff00 && r <= 0xff60:
-		return 2 // fullwidth forms
-	case r >= 0xffe0 && r <= 0xffe6:
-		return 2
-	case r >= 0x1f300 && r <= 0x1f64f:
-		return 2 // emoji
-	case r >= 0x1f900 && r <= 0x1f9ff:
-		return 2
-	case r >= 0x20000 && r <= 0x3fffd:
-		return 2
+	case r <= 0x9f:
+		// DEL and the C1 controls, treated like the C0 controls above. Nothing
+		// good comes of putting one in the grid — `flush` writes cell runes
+		// straight into the escape stream — and 0 is what keeps it out, since
+		// `set_cell` drops zero-width runes. wcwidth reports these as an error
+		// instead; this proc has no error channel, so it drops.
+		return 0
+	case r < WIDTH_TABLE_LO || r > WIDTH_TABLE_HI:
+		return 1
+	}
+
+	// Binary search: the ranges are sorted and disjoint, so the first one that
+	// contains `r` is the only one that can.
+	lo, hi := 0, len(WIDTH_RANGES)
+	for lo < hi {
+		mid := lo + (hi - lo) / 2
+		e := WIDTH_RANGES[mid]
+		switch {
+		case r < e.lo:
+			hi = mid
+		case r > e.hi:
+			lo = mid + 1
+		case:
+			return int(e.w)
+		}
 	}
 	return 1
 }
