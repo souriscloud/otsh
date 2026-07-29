@@ -34,6 +34,14 @@ Config :: struct {
 	// client's agent. Authorize inside your app instead.
 	authenticate:  ssh.Authenticator, // nil accepts everyone
 	methods:       ssh.Auth_Methods, // zero means all
+	// Machine-readable audit log of listens, accepts, limiter rejections, auth
+	// attempts and sessions. nil — the zero value — records nothing, which is
+	// deliberate: every audit line carries the client's numeric address, so
+	// logging it is a privacy decision the operator makes on purpose.
+	// `ssh.audit_stderr` is a ready-made sink; its line format is documented in
+	// `ssh/audit.odin`. Unlike the hooks below, it also sees the connections
+	// that never became sessions.
+	audit:         ssh.Audit_Sink,
 	on_connect:    proc(info: Info), // optional logging hooks
 	on_disconnect: proc(info: Info),
 }
@@ -116,6 +124,14 @@ Config :: struct {
 	// client's agent. Authorize inside your app instead.
 	authenticate:  ssh.Authenticator, // nil accepts everyone
 	methods:       ssh.Auth_Methods, // zero means all
+	// Machine-readable audit log of listens, accepts, limiter rejections, auth
+	// attempts and sessions. nil — the zero value — records nothing, which is
+	// deliberate: every audit line carries the client's numeric address, so
+	// logging it is a privacy decision the operator makes on purpose.
+	// `ssh.audit_stderr` is a ready-made sink; its line format is documented in
+	// `ssh/audit.odin`. Unlike the hooks below, it also sees the connections
+	// that never became sessions.
+	audit:         ssh.Audit_Sink,
 	on_connect:    proc(info: Info), // optional logging hooks
 	on_disconnect: proc(info: Info),
 }
@@ -169,7 +185,7 @@ run_local :: proc(cfg: Config) -> bool
 Runs the same App against the local terminal. Handy during development:
 one flag switches between `--local` and serving.
 
-*sshtui/sshtui.odin:183*
+*sshtui/sshtui.odin:192*
 
 ### `serve`
 
@@ -179,4 +195,4 @@ serve :: proc(cfg: Config) -> bool
 
 Blocks, serving connections until the process exits.
 
-*sshtui/sshtui.odin:110*
+*sshtui/sshtui.odin:118*

@@ -1,10 +1,13 @@
 // Tests for the pure logic in otsh:ssh — the input ring, pseudonymous
-// identity, and resource limits. Nothing here opens a socket.
+// identity, resource limits, and audit line formatting. Nothing here opens a
+// socket.
 package otsh_tests
 
 import "core:os"
 import "core:testing"
+import "core:time"
 import "otsh:ssh"
+import "otsh:sshtui"
 
 // --- ring buffer ------------------------------------------------------------
 
@@ -227,6 +230,266 @@ server_defaults_are_usable :: proc(t: ^testing.T) {
 	testing.expect_value(t, ssh.DEFAULT_PORT, 2222)
 	testing.expect(t, ssh.DEFAULT_HOST != "", "expected a default bind address")
 	testing.expect(t, ssh.DEFAULT_HOST_KEY != "", "expected a default host key path")
+}
+
+// --- audit ------------------------------------------------------------------
+//
+// The line format is a contract — log filters are written against it — so these
+// assert whole lines byte for byte, not just that something was emitted.
+
+// A fixed instant, so every expected line below can spell its own timestamp.
+@(private = "file")
+AUDIT_TS :: "2026-07-29T12:00:00Z"
+
+// The width of a real pseudonymous id (ssh.ID_SIZE hex characters).
+@(private = "file")
+AUDIT_ID :: "0123456789abcdef0123456789abcdef"
+
+// Client text past the 32-byte cap, and what must survive it.
+@(private = "file")
+AUDIT_LONG_USER :: AUDIT_LONG_USER_CAP + "GHIJKLMNOPQRSTUVWXYZ"
+@(private = "file")
+AUDIT_LONG_USER_CAP :: "abcdefghijklmnopqrstuvwxyzABCDEF"
+
+@(private = "file")
+audit_at :: proc() -> time.Time {
+	t, _ := time.components_to_time(2026, 7, 29, 12, 0, 0)
+	return t
+}
+
+// `audit_stderr` is this plus a newline and one write; testing the format proc
+// tests the line every sink produces, without a socket or a captured fd.
+@(private = "file")
+audit_line :: proc(buf: []u8, e: ssh.Audit_Event) -> string {
+	e := e
+	e.at = audit_at()
+	return ssh.audit_format(e, buf)
+}
+
+@(test)
+audit_lines_are_exact :: proc(t: ^testing.T) {
+	buf: [ssh.AUDIT_LINE_MAX]u8
+
+	testing.expect_value(
+		t,
+		audit_line(buf[:], ssh.Audit_Event{kind = .Listen, host = "0.0.0.0", port = 2229}),
+		"otsh: audit ts=" + AUDIT_TS + " event=listen host=0.0.0.0 port=2229",
+	)
+	testing.expect_value(
+		t,
+		audit_line(buf[:], ssh.Audit_Event{kind = .Accept, addr = "203.0.113.7"}),
+		"otsh: audit ts=" + AUDIT_TS + " event=accept addr=203.0.113.7",
+	)
+	testing.expect_value(
+		t,
+		audit_line(buf[:], ssh.Audit_Event{kind = .Kex_Fail, addr = "203.0.113.7"}),
+		"otsh: audit ts=" + AUDIT_TS + " event=kex_fail addr=203.0.113.7",
+	)
+	testing.expect_value(
+		t,
+		audit_line(
+			buf[:],
+			ssh.Audit_Event{kind = .Reject, addr = "203.0.113.7", limit = .Per_Ip},
+		),
+		"otsh: audit ts=" + AUDIT_TS + " event=reject addr=203.0.113.7 limit=per_ip",
+	)
+	testing.expect_value(
+		t,
+		audit_line(
+			buf[:],
+			ssh.Audit_Event{kind = .Reject, addr = "203.0.113.7", limit = .Sessions},
+		),
+		"otsh: audit ts=" + AUDIT_TS + " event=reject addr=203.0.113.7 limit=sessions",
+	)
+	// The line the task's example spells out, and the one a filter keys on.
+	testing.expect_value(
+		t,
+		audit_line(
+			buf[:],
+			ssh.Audit_Event {
+				kind = .Auth,
+				addr = "203.0.113.7",
+				method = .Publickey,
+				user = "git",
+				ok = false,
+			},
+		),
+		"otsh: audit ts=" + AUDIT_TS +
+		" event=auth addr=203.0.113.7 method=publickey user=git ok=false",
+	)
+	testing.expect_value(
+		t,
+		audit_line(
+			buf[:],
+			ssh.Audit_Event {
+				kind = .Session_Start,
+				addr = "203.0.113.7",
+				user = "git",
+				term = "xterm-256color",
+				cols = 120,
+				rows = 40,
+				id = AUDIT_ID,
+			},
+		),
+		"otsh: audit ts=" + AUDIT_TS +
+		" event=session_start addr=203.0.113.7 user=git term=xterm-256color cols=120 rows=40 id=" +
+		AUDIT_ID,
+	)
+	testing.expect_value(
+		t,
+		audit_line(
+			buf[:],
+			ssh.Audit_Event {
+				kind = .Session_End,
+				addr = "203.0.113.7",
+				id = AUDIT_ID,
+				duration = 12_345_678_901,
+			},
+		),
+		"otsh: audit ts=" + AUDIT_TS +
+		" event=session_end addr=203.0.113.7 secs=12.345 id=" + AUDIT_ID,
+	)
+}
+
+@(test)
+audit_timestamp_shape :: proc(t: ^testing.T) {
+	// A filter matches on the ts field's shape, so it is fixed: exactly 20
+	// characters of RFC 3339 in UTC, second resolution, zero-padded.
+	buf: [ssh.AUDIT_LINE_MAX]u8
+	line := audit_line(buf[:], ssh.Audit_Event{kind = .Accept, addr = "203.0.113.7"})
+
+	prefix := "otsh: audit ts="
+	ts := line[len(prefix):len(prefix) + len(AUDIT_TS)]
+	testing.expect_value(t, len(ts), 20)
+	testing.expect_value(t, ts, AUDIT_TS)
+	for c, i in transmute([]u8)ts {
+		switch i {
+		case 4, 7:
+			testing.expect_value(t, c, '-')
+		case 10:
+			testing.expect_value(t, c, 'T')
+		case 13, 16:
+			testing.expect_value(t, c, ':')
+		case 19:
+			testing.expect_value(t, c, 'Z')
+		case:
+			testing.expect(t, c >= '0' && c <= '9', "expected a digit")
+		}
+	}
+
+	// A single-digit component must still be padded, or the field changes width.
+	early, _ := time.components_to_time(2026, 1, 2, 3, 4, 5)
+	line = ssh.audit_format(ssh.Audit_Event{kind = .Accept, addr = "1.2.3.4", at = early}, buf[:])
+	testing.expect_value(
+		t,
+		line,
+		"otsh: audit ts=2026-01-02T03:04:05Z event=accept addr=1.2.3.4",
+	)
+}
+
+@(test)
+audit_scrubs_client_text :: proc(t: ^testing.T) {
+	// A username is whatever the client typed. Left alone it could inject a
+	// space, an '=' or a newline and forge fields — or whole extra records — in
+	// somebody else's log.
+	buf: [ssh.AUDIT_LINE_MAX]u8
+	line := audit_line(
+		buf[:],
+		ssh.Audit_Event {
+			kind = .Auth,
+			addr = "203.0.113.7",
+			method = .Password,
+			user = "ev il=x\nok=true",
+			ok = false,
+		},
+	)
+	testing.expect_value(
+		t,
+		line,
+		"otsh: audit ts=" + AUDIT_TS +
+		" event=auth addr=203.0.113.7 method=password user=ev?il?x?ok?true ok=false",
+	)
+
+	// Over-long client text is capped, not allowed to push the line around.
+	line = audit_line(
+		buf[:],
+		ssh.Audit_Event {
+			kind = .Auth,
+			addr = "203.0.113.7",
+			method = .None,
+			user = AUDIT_LONG_USER,
+			ok = true,
+		},
+	)
+	testing.expect_value(
+		t,
+		line,
+		"otsh: audit ts=" + AUDIT_TS +
+		" event=auth addr=203.0.113.7 method=none user=" + AUDIT_LONG_USER_CAP + " ok=true",
+	)
+}
+
+@(test)
+audit_missing_values_are_marked :: proc(t: ^testing.T) {
+	// A field a parser expects is never simply absent: an unknown value is "-",
+	// so `addr=` always has something after it. Only `id` is ever omitted, and
+	// only from the end of the line.
+	buf: [ssh.AUDIT_LINE_MAX]u8
+	testing.expect_value(
+		t,
+		audit_line(buf[:], ssh.Audit_Event{kind = .Kex_Fail}),
+		"otsh: audit ts=" + AUDIT_TS + " event=kex_fail addr=-",
+	)
+	// IPv6, including a zone id, must survive scrubbing intact.
+	testing.expect_value(
+		t,
+		audit_line(buf[:], ssh.Audit_Event{kind = .Accept, addr = "fe80::1%en0"}),
+		"otsh: audit ts=" + AUDIT_TS + " event=accept addr=fe80::1%en0",
+	)
+}
+
+@(test)
+audit_line_fits_the_buffer :: proc(t: ^testing.T) {
+	// AUDIT_LINE_MAX is what `audit_stderr` puts on the stack, and it holds one
+	// byte back for the newline. The worst case is session_start with every
+	// field at its cap.
+	buf: [ssh.AUDIT_LINE_MAX]u8
+	wide := "0123456789012345678901234567890123456789012345678901234567890123" // 64
+	line := audit_line(
+		buf[:ssh.AUDIT_LINE_MAX - 1],
+		ssh.Audit_Event {
+			kind = .Session_Start,
+			addr = wide,
+			user = wide,
+			term = wide,
+			cols = 1000,
+			rows = 300,
+			id = wide,
+		},
+	)
+	testing.expectf(
+		t,
+		len(line) < ssh.AUDIT_LINE_MAX - 1,
+		"the widest line is %d bytes, which fills AUDIT_LINE_MAX (%d)",
+		len(line),
+		ssh.AUDIT_LINE_MAX,
+	)
+}
+
+@(test)
+audit_is_off_by_default :: proc(t: ^testing.T) {
+	// The zero value must keep the pre-audit behaviour exactly: nothing is
+	// recorded unless an operator opts in, because every line carries a peer
+	// address.
+	cfg: ssh.Config
+	testing.expect(t, cfg.audit == nil, "ssh.Config must not audit by default")
+
+	tui_cfg: sshtui.Config
+	testing.expect(t, tui_cfg.audit == nil, "sshtui.Config must not audit by default")
+
+	// And the sink that ships is a real one, so opting in is one assignment.
+	cfg.audit = ssh.audit_stderr
+	testing.expect(t, cfg.audit != nil)
 }
 
 @(test)

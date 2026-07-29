@@ -102,6 +102,14 @@ Config :: struct {
 	// client's agent. Authorize inside your app instead.
 	authenticate:  ssh.Authenticator, // nil accepts everyone
 	methods:       ssh.Auth_Methods, // zero means all
+	// Machine-readable audit log of listens, accepts, limiter rejections, auth
+	// attempts and sessions. nil — the zero value — records nothing, which is
+	// deliberate: every audit line carries the client's numeric address, so
+	// logging it is a privacy decision the operator makes on purpose.
+	// `ssh.audit_stderr` is a ready-made sink; its line format is documented in
+	// `ssh/audit.odin`. Unlike the hooks below, it also sees the connections
+	// that never became sessions.
+	audit:         ssh.Audit_Sink,
 	on_connect:    proc(info: Info), // optional logging hooks
 	on_disconnect: proc(info: Info),
 }
@@ -128,6 +136,7 @@ serve :: proc(cfg: Config) -> bool {
 			methods = c.methods,
 			identity_secret = c.identity_secret,
 			limits = c.limits,
+			audit = c.audit,
 			handler = on_session,
 			user_data = c,
 		},

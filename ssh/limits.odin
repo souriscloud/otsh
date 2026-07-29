@@ -83,22 +83,25 @@ limiter_init :: proc(l: ^Limiter, limits: Limits) {
 	l.inited = true
 }
 
-// Reserves a slot for `addr`. Returns false when a limit is hit, in which case
-// nothing was reserved and the caller must drop the connection.
+// Reserves a slot for `addr`. Returns ok=false when a limit is hit, in which
+// case nothing was reserved and the caller must drop the connection. `tripped`
+// names which limit refused it, because "we dropped you" and "we dropped you
+// because one host already holds every slot" are different operational facts
+// and the audit log has to be able to tell them apart.
 @(private)
-limiter_acquire :: proc(l: ^Limiter, addr: string) -> bool {
+limiter_acquire :: proc(l: ^Limiter, addr: string) -> (ok: bool, tripped: Audit_Limit) {
 	if !l.inited {
-		return true
+		return true, .None
 	}
 	sync.lock(&l.mu)
 	defer sync.unlock(&l.mu)
 
 	if l.limits.max_sessions > 0 && l.total >= l.limits.max_sessions {
-		return false
+		return false, .Sessions
 	}
 	if l.limits.max_per_ip > 0 && addr != "" {
 		if l.per_ip[addr] >= l.limits.max_per_ip {
-			return false
+			return false, .Per_Ip
 		}
 	}
 
@@ -112,7 +115,7 @@ limiter_acquire :: proc(l: ^Limiter, addr: string) -> bool {
 			l.per_ip[strings_clone(addr, l.allocator)] = 1
 		}
 	}
-	return true
+	return true, .None
 }
 
 @(private)

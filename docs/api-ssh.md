@@ -6,13 +6,100 @@ Generated from `ssh/*.odin` by `docs/tools/gen_api.py`. For how these fit togeth
 
 ## Contents
 
-**Types** — [`Auth_Method`](#auth-method), [`Auth_Methods`](#auth-methods), [`Auth_Request`](#auth-request), [`Authenticator`](#authenticator), [`Config`](#config), [`Handler`](#handler), [`Identity_Secret`](#identity-secret), [`Limits`](#limits), [`Pty`](#pty), [`Ring`](#ring), [`Server`](#server), [`Session`](#session)
+**Types** — [`Audit_Event`](#audit-event), [`Audit_Kind`](#audit-kind), [`Audit_Limit`](#audit-limit), [`Audit_Sink`](#audit-sink), [`Auth_Method`](#auth-method), [`Auth_Methods`](#auth-methods), [`Auth_Request`](#auth-request), [`Authenticator`](#authenticator), [`Config`](#config), [`Handler`](#handler), [`Identity_Secret`](#identity-secret), [`Limits`](#limits), [`Pty`](#pty), [`Ring`](#ring), [`Server`](#server), [`Session`](#session)
 
-**Constants** — [`ALL_AUTH`](#all-auth), [`DEFAULT_CIPHERS`](#default-ciphers), [`DEFAULT_HOST`](#default-host), [`DEFAULT_HOST_KEY`](#default-host-key), [`DEFAULT_HOSTKEYS`](#default-hostkeys), [`DEFAULT_KEX`](#default-kex), [`DEFAULT_LIMITS`](#default-limits), [`DEFAULT_MACS`](#default-macs), [`DEFAULT_PORT`](#default-port), [`ID_BYTES`](#id-bytes), [`ID_SIZE`](#id-size), [`MAX_INPUT`](#max-input), [`MAX_PTY_COLS`](#max-pty-cols), [`MAX_PTY_ROWS`](#max-pty-rows), [`SECRET_SIZE`](#secret-size)
+**Constants** — [`ALL_AUTH`](#all-auth), [`AUDIT_LINE_MAX`](#audit-line-max), [`DEFAULT_CIPHERS`](#default-ciphers), [`DEFAULT_HOST`](#default-host), [`DEFAULT_HOST_KEY`](#default-host-key), [`DEFAULT_HOSTKEYS`](#default-hostkeys), [`DEFAULT_KEX`](#default-kex), [`DEFAULT_LIMITS`](#default-limits), [`DEFAULT_MACS`](#default-macs), [`DEFAULT_PORT`](#default-port), [`ID_BYTES`](#id-bytes), [`ID_SIZE`](#id-size), [`MAX_INPUT`](#max-input), [`MAX_PTY_COLS`](#max-pty-cols), [`MAX_PTY_ROWS`](#max-pty-rows), [`SECRET_SIZE`](#secret-size)
 
-**Procedures** — [`ensure_host_key`](#ensure-host-key), [`fingerprint`](#fingerprint), [`id`](#id), [`ids_equal`](#ids-equal), [`key_type`](#key-type), [`load_or_create_secret`](#load-or-create-secret), [`pseudonym`](#pseudonym), [`read`](#read), [`remote_addr`](#remote-addr), [`ring_pop`](#ring-pop), [`ring_push`](#ring-push), [`serve`](#serve), [`size`](#size), [`take_resize`](#take-resize), [`term`](#term), [`user`](#user), [`warn_if_world_readable`](#warn-if-world-readable), [`write`](#write), [`write_string`](#write-string)
+**Procedures** — [`audit_format`](#audit-format), [`audit_stderr`](#audit-stderr), [`ensure_host_key`](#ensure-host-key), [`fingerprint`](#fingerprint), [`id`](#id), [`ids_equal`](#ids-equal), [`key_type`](#key-type), [`load_or_create_secret`](#load-or-create-secret), [`pseudonym`](#pseudonym), [`read`](#read), [`remote_addr`](#remote-addr), [`ring_pop`](#ring-pop), [`ring_push`](#ring-push), [`serve`](#serve), [`size`](#size), [`take_resize`](#take-resize), [`term`](#term), [`user`](#user), [`warn_if_world_readable`](#warn-if-world-readable), [`write`](#write), [`write_string`](#write-string)
 
 ## Types
+
+### `Audit_Event`
+
+```odin
+Audit_Event :: struct {
+	kind:     Audit_Kind,
+	// Stamped by the emitter rather than the call site, so every line's clock
+	// comes from one place. UTC.
+	at:       time.Time,
+	// Numeric peer address. Present on every kind except `.Listen` — this is
+	// the field a fail2ban-style filter keys on.
+	addr:     string,
+	host:     string,       // .Listen: the bind address
+	port:     int,          // .Listen
+	limit:    Audit_Limit,  // .Reject: which limit tripped
+	user:     string,       // .Auth, .Session_Start: client-offered, unverified
+	method:   Auth_Method,  // .Auth
+	ok:       bool,         // .Auth: the verdict
+	// Pseudonymous account id, empty when there is none. Carried by `.Auth`,
+	// `.Session_Start` and `.Session_End`. Never the fingerprint.
+	id:       string,
+	term:     string,       // .Session_Start: client-reported $TERM
+	cols:     int,          // .Session_Start
+	rows:     int,          // .Session_Start
+	duration: time.Duration, // .Session_End: how long the handler ran
+}
+```
+
+One auditable thing that happened.
+
+A flat struct rather than a tagged union: this is copied on the accept path
+and on every session thread, and a struct of borrowed strings copies without
+a branch and without an allocator. Fields that a kind does not carry stay
+zero and are not formatted.
+
+Every string here borrows memory owned by the connection and dies with it.
+A sink that keeps an event past its own return must copy what it keeps.
+
+*ssh/audit.odin:45*
+
+### `Audit_Kind`
+
+```odin
+Audit_Kind :: enum u8 {
+	Listen,        // the port is bound and the accept loop is running
+	Accept,        // a TCP connection was accepted, before any crypto
+	Reject,        // a connection was dropped by Limits, before any crypto
+	Kex_Fail,      // key exchange failed; there is no client identity yet
+	Auth,          // one authentication attempt, accepted or refused
+	Session_Start, // authenticated, pty requested, shell granted
+	Session_End,   // the handler returned and the connection is closing
+}
+```
+
+What happened. One value per line handed to the sink.
+
+*ssh/audit.odin:19*
+
+### `Audit_Limit`
+
+```odin
+Audit_Limit :: enum u8 {
+	None,
+	Sessions, // Limits.max_sessions, the process-wide cap
+	Per_Ip,   // Limits.max_per_ip, the per-source-address cap
+}
+```
+
+Which limit refused a connection. Only meaningful on `.Reject`.
+
+*ssh/audit.odin:30*
+
+### `Audit_Sink`
+
+```odin
+Audit_Sink :: #type proc(e: Audit_Event)
+```
+
+Where audit events go. Set it on `Config.audit`; nil disables auditing.
+
+Called from the accept loop, from every session thread, and from inside
+libssh's authentication callbacks — concurrently, and on the connection's
+critical path. A sink must therefore be thread-safe, must not block, and
+should not allocate. `audit_stderr` satisfies all three; a sink that writes
+to a database or a network service wants a queue in front of it.
+
+*ssh/audit.odin:75*
 
 ### `Auth_Method`
 
@@ -26,7 +113,7 @@ Auth_Method :: enum u8 {
 
 The SSH authentication methods this server understands.
 
-*ssh/server.odin:37*
+*ssh/server.odin:38*
 
 ### `Auth_Methods`
 
@@ -37,7 +124,7 @@ Auth_Methods :: distinct bit_set[Auth_Method;u8]
 A set of `Auth_Method`. Note that offering `.None` means an OpenSSH client
 authenticates before ever offering a key, leaving `Session.id` empty.
 
-*ssh/server.odin:44*
+*ssh/server.odin:45*
 
 ### `Auth_Request`
 
@@ -59,7 +146,7 @@ Auth_Request :: struct {
 What an `Authenticator` is told. For `.Publickey`, the key's signature has
 already been verified — unverified probes never reach application code.
 
-*ssh/server.odin:51*
+*ssh/server.odin:52*
 
 ### `Authenticator`
 
@@ -79,7 +166,7 @@ If you want a members-only app, do not reject here. Accept the key, take the
 inside the app. They are equally excluded and you learn exactly one key.
 See examples/members.
 
-*ssh/server.odin:75*
+*ssh/server.odin:76*
 
 ### `Config`
 
@@ -99,6 +186,13 @@ Config :: struct {
 	identity_secret:   string,
 	// Per-field: 0 uses the default, negative disables that limit.
 	limits:            Limits,
+	// Where connection, authentication and session events go. nil — the zero
+	// value — means no auditing at all, which is deliberate: every audit line
+	// carries the client's numeric address, and keeping a record of who
+	// connected and when is a privacy decision the operator must make on
+	// purpose. `audit_stderr` is a ready-made sink; audit.odin documents the
+	// line format it produces.
+	audit:             Audit_Sink,
 	// Algorithm allow-lists, in libssh's comma-separated format. Empty means
 	// the hardened defaults below; set to "-" to accept libssh's own defaults,
 	// which are broader and include things like RSA/SHA-1-era compatibility.
@@ -112,7 +206,7 @@ Config :: struct {
 How to run the server. Every field has a documented default, so the zero value
 is a working — if wide open — public server on port 2222.
 
-*ssh/server.odin:315*
+*ssh/server.odin:321*
 
 ### `Handler`
 
@@ -123,7 +217,7 @@ Handler :: #type proc(s: ^Session)
 Handler runs on its own thread, one per connection, and owns the session for
 as long as it runs. When it returns the connection is torn down.
 
-*ssh/server.odin:34*
+*ssh/server.odin:35*
 
 ### `Identity_Secret`
 
@@ -183,7 +277,7 @@ Pty :: struct {
 The terminal geometry the client asked for. No pseudo-terminal is actually
 allocated — this is just what the client told us about its own.
 
-*ssh/server.odin:113*
+*ssh/server.odin:115*
 
 ### `Ring`
 
@@ -198,7 +292,7 @@ Ring :: struct {
 Fixed-size byte ring for incoming keystrokes. Fixed so that libssh callbacks,
 which run without an Odin context, never touch an allocator.
 
-*ssh/server.odin:161*
+*ssh/server.odin:167*
 
 ### `Server`
 
@@ -210,6 +304,7 @@ Server :: struct {
 	methods:      Auth_Methods,
 	secret:       Identity_Secret,
 	limiter:      Limiter,
+	audit:        Audit_Sink,
 	user_data:    rawptr,
 	// The allocator per-connection state is created and destroyed with.
 	//
@@ -233,7 +328,7 @@ Server :: struct {
 Server-wide state, shared by every connection. Internal; reach it through
 `Session.server` only if you know what you are doing.
 
-*ssh/server.odin:79*
+*ssh/server.odin:80*
 
 ### `Session`
 
@@ -251,6 +346,10 @@ Session :: struct {
 	shell:         bool,
 	eof:           bool,
 	auth_method:   string,
+	// When the shell was granted, for the session_end audit duration. Written
+	// by this connection's own session thread just before it calls the handler,
+	// and read only by that same thread — it never crosses a thread boundary.
+	started:       time.Time,
 
 	// fixed storage so libssh callbacks never touch an allocator
 	user_buf:      [64]u8,
@@ -275,7 +374,7 @@ One connection. Created and freed by the accept loop; your `Handler` owns it
 for the duration of the call. All its string accessors borrow memory that
 dies with the session.
 
-*ssh/server.odin:125*
+*ssh/server.odin:127*
 
 ## Constants
 
@@ -287,7 +386,34 @@ ALL_AUTH :: Auth_Methods{.None, .Password, .Publickey}
 
 Every method. The default when `Config.methods` is left zero.
 
-*ssh/server.odin:47*
+*ssh/server.odin:48*
+
+### `AUDIT_LINE_MAX`
+
+```odin
+AUDIT_LINE_MAX :: 320
+
+// A ready-made `Audit_Sink` writing the format above to stderr, one line per
+// event.
+//
+// The line is assembled in a stack buffer and handed to a single `os.write`,
+// because events fire from the accept loop and from every session thread at
+// once: two partial writes would interleave into a line no filter can parse.
+// Nothing here allocates, so it is safe on the connection's critical path.
+audit_stderr :: proc(e: Audit_Event) {
+	buf: [AUDIT_LINE_MAX]u8
+	// One byte held back so the newline always fits, even in the (unreachable)
+	// case of a line that filled the buffer.
+	n := len(audit_format(e, buf[:AUDIT_LINE_MAX - 1]))
+	buf[n] = '\n'
+	os.write(os.stderr, buf[:n + 1])
+}
+```
+
+Upper bound on one formatted line, newline included. The longest line is a
+session_start with every field at its cap.
+
+*ssh/audit.odin:165*
 
 ### `DEFAULT_CIPHERS`
 
@@ -336,7 +462,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 
 AEAD ciphers only: no CBC, no stream ciphers with separate MACs.
 
-*ssh/server.odin:343*
+*ssh/server.odin:356*
 
 ### `DEFAULT_HOST`
 
@@ -358,7 +484,7 @@ DEFAULT_HOST_KEY :: "hostkey"
 Defaults applied to a zero-valued Config field. sshtui fills these in too;
 they live here as well so calling ssh.serve directly cannot bind port 0.
 
-*ssh/server.odin:459*
+*ssh/server.odin:472*
 
 ### `DEFAULT_HOST_KEY`
 
@@ -375,7 +501,7 @@ DEFAULT_HOST_KEY :: "hostkey"
 
 Host key path used when `Config.host_key_path` is empty.
 
-*ssh/server.odin:463*
+*ssh/server.odin:476*
 
 ### `DEFAULT_HOSTKEYS`
 
@@ -423,7 +549,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 
 Ed25519 only — matches the key `ensure_host_key` generates.
 
-*ssh/server.odin:347*
+*ssh/server.odin:360*
 
 ### `DEFAULT_KEX`
 
@@ -473,7 +599,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 Modern-only. Every one of these is an AEAD or an ETM MAC with a
 curve25519 exchange; nothing here depends on SHA-1, CBC, or NIST curves.
 
-*ssh/server.odin:341*
+*ssh/server.odin:354*
 
 ### `DEFAULT_LIMITS`
 
@@ -538,7 +664,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 
 Encrypt-then-MAC only, SHA-2 only.
 
-*ssh/server.odin:345*
+*ssh/server.odin:358*
 
 ### `DEFAULT_PORT`
 
@@ -557,7 +683,7 @@ DEFAULT_HOST_KEY :: "hostkey"
 
 Port used when `Config.port` is zero.
 
-*ssh/server.odin:461*
+*ssh/server.odin:474*
 
 ### `ID_BYTES`
 
@@ -617,7 +743,7 @@ arrives intact, just spread across successive frames. 4 KiB per frame at
 30 fps is ~120 KB/s of keystrokes, orders of magnitude above what a human
 generates, and it puts a Session under 5 KB instead of ~17 KB.
 
-*ssh/server.odin:30*
+*ssh/server.odin:31*
 
 ### `MAX_PTY_COLS`
 
@@ -641,7 +767,7 @@ Upper bounds on client-supplied terminal geometry, matching tui's own limits.
 pty-req and window-change both carry uint32 dimensions chosen by the client;
 unclamped they are an allocation-size overflow and a remote crash.
 
-*ssh/server.odin:108*
+*ssh/server.odin:110*
 
 ### `MAX_PTY_ROWS`
 
@@ -660,7 +786,7 @@ Pty :: struct {
 }
 ```
 
-*ssh/server.odin:109*
+*ssh/server.odin:111*
 
 ### `SECRET_SIZE`
 
@@ -686,6 +812,36 @@ Length of the identity secret, in bytes.
 
 ## Procedures
 
+### `audit_format`
+
+```odin
+audit_format :: proc "contextless" (e: Audit_Event, buf: []u8) -> string
+```
+
+Formats `e` into `buf` and returns a string viewing the bytes written. No
+newline is appended — `audit_stderr` adds one so it can write the whole line
+in a single call. Allocates nothing and needs no context, so a sink can run
+it on a stack buffer from anywhere. Output is truncated rather than
+overflowing if `buf` is shorter than AUDIT_LINE_MAX.
+
+*ssh/audit.odin:122*
+
+### `audit_stderr`
+
+```odin
+audit_stderr :: proc(e: Audit_Event)
+```
+
+A ready-made `Audit_Sink` writing the format above to stderr, one line per
+event.
+
+The line is assembled in a stack buffer and handed to a single `os.write`,
+because events fire from the accept loop and from every session thread at
+once: two partial writes would interleave into a line no filter can parse.
+Nothing here allocates, so it is safe on the connection's critical path.
+
+*ssh/audit.odin:174*
+
 ### `ensure_host_key`
 
 ```odin
@@ -696,7 +852,7 @@ Creates the host key if it does not exist yet — the SSH equivalent of a TLS
 certificate. Clients pin it in ~/.ssh/known_hosts, so it must be stable
 across restarts.
 
-*ssh/server.odin:352*
+*ssh/server.odin:365*
 
 ### `fingerprint`
 
@@ -707,7 +863,7 @@ fingerprint :: proc "contextless" (s: ^Session) -> string
 SHA256 fingerprint of the key the client authenticated with, or "" if they
 did not use one. Stable across connections — use it as an account id.
 
-*ssh/server.odin:203*
+*ssh/server.odin:209*
 
 ### `id`
 
@@ -719,7 +875,7 @@ Pseudonymous account id: HMAC(server secret, fingerprint). Empty unless an
 identity secret is configured and the client used a key. Store this, not the
 fingerprint. See identity.odin.
 
-*ssh/server.odin:216*
+*ssh/server.odin:222*
 
 ### `ids_equal`
 
@@ -741,7 +897,7 @@ key_type :: proc "contextless" (s: ^Session) -> string
 The verified key's algorithm, e.g. "ssh-ed25519". Empty unless public-key
 auth was used.
 
-*ssh/server.odin:209*
+*ssh/server.odin:215*
 
 ### `load_or_create_secret`
 
@@ -782,7 +938,7 @@ actually block for us — it returns immediately every time, which would spin
 a core per session. So libssh gets to do the parsing while we do the waiting,
 on the session socket directly.
 
-*ssh/server.odin:243*
+*ssh/server.odin:249*
 
 ### `remote_addr`
 
@@ -792,7 +948,7 @@ remote_addr :: proc "contextless" (s: ^Session) -> string
 
 Numeric peer address, no reverse DNS.
 
-*ssh/server.odin:221*
+*ssh/server.odin:227*
 
 ### `ring_pop`
 
@@ -802,7 +958,7 @@ ring_pop :: proc "contextless" (r: ^Ring, dst: []u8) -> int
 
 Removes up to `len(dst)` bytes, returning how many were moved.
 
-*ssh/server.odin:178*
+*ssh/server.odin:184*
 
 ### `ring_push`
 
@@ -812,7 +968,7 @@ ring_push :: proc "contextless" (r: ^Ring, src: []u8) -> int
 
 Appends what fits, returning how many bytes were taken.
 
-*ssh/server.odin:168*
+*ssh/server.odin:174*
 
 ### `serve`
 
@@ -820,7 +976,7 @@ Appends what fits, returning how many bytes were taken.
 serve :: proc(cfg: Config) -> bool
 ```
 
-*ssh/server.odin:488*
+*ssh/server.odin:501*
 
 ### `size`
 
@@ -831,7 +987,7 @@ size :: proc "contextless" (s: ^Session) -> (cols, rows: int)
 Current terminal geometry in cells, falling back to 80x24 if the client never
 said.
 
-*ssh/server.odin:227*
+*ssh/server.odin:233*
 
 ### `take_resize`
 
@@ -841,7 +997,7 @@ take_resize :: proc "contextless" (s: ^Session) -> bool
 
 True exactly once after each window resize.
 
-*ssh/server.odin:305*
+*ssh/server.odin:311*
 
 ### `term`
 
@@ -851,7 +1007,7 @@ term :: proc "contextless" (s: ^Session) -> string
 
 The client's `$TERM`, e.g. "xterm-256color". Empty if no pty was requested.
 
-*ssh/server.odin:197*
+*ssh/server.odin:203*
 
 ### `user`
 
@@ -862,7 +1018,7 @@ user :: proc "contextless" (s: ^Session) -> string
 The username the client offered. Client-chosen and unverified — never use it
 as identity; use `id` instead.
 
-*ssh/server.odin:192*
+*ssh/server.odin:198*
 
 ### `warn_if_world_readable`
 
@@ -884,7 +1040,7 @@ write :: proc(s: ^Session, data: []u8) -> int
 Sends bytes to the client. Returns how many were written, 0 once the
 connection is gone.
 
-*ssh/server.odin:287*
+*ssh/server.odin:293*
 
 ### `write_string`
 
@@ -894,4 +1050,4 @@ write_string :: proc(s: ^Session, str: string) -> int
 
 `write` for a string.
 
-*ssh/server.odin:300*
+*ssh/server.odin:306*
