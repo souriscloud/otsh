@@ -336,8 +336,8 @@ Per-session state lives in fixed-size fields on `Session`, filled by
 from the client is silently truncated, not overflowed and not rejected:
 `user_buf: [64]u8`, `term_buf: [32]u8`, `fp_buf: [96]u8`, `kt_buf: [32]u8`,
 `id_buf: [ID_SIZE]u8`, `addr_buf: [64]u8`. Input from the channel goes into
-`Session.input`, a `Ring` backed by `[MAX_INPUT]u8` where `MAX_INPUT :: 16
-* 1024` — 16 KiB per session, not a growable buffer.
+`Session.input`, a `Ring` backed by `[MAX_INPUT]u8` where `MAX_INPUT :: 4
+* 1024` — 4 KiB per session, not a growable buffer.
 
 On teardown, `session_thread`'s deferred cleanup explicitly zeroes two of
 those buffers — `s.fp_buf = {}` and `s.id_buf = {}` — with the reasoning

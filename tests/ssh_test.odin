@@ -70,6 +70,25 @@ ring_wraps_around :: proc(t: ^testing.T) {
 	testing.expect_value(t, string(out[:n]), "wrapped")
 }
 
+@(test)
+session_stays_small :: proc(t: ^testing.T) {
+	// One Session is allocated per accepted connection and the Ring lives inline
+	// in it, so this size is multiplied by max_sessions — it used to be 17184
+	// bytes with a 16 KiB ring, which is why the ring is 4 KiB now.
+	//
+	// A ceiling rather than an exact value: field order, alignment and padding
+	// are the compiler's business and a new bool must not fail the suite. What
+	// must fail is somebody re-growing the ring or parking a large buffer in
+	// Session. 6 KiB leaves ~1.2 KB of headroom over the 4896 bytes measured
+	// when this was written.
+	testing.expectf(
+		t,
+		size_of(ssh.Session) <= 6 * 1024,
+		"Session is %d bytes, past its 6 KiB budget; check what was added and whether it belongs inline",
+		size_of(ssh.Session),
+	)
+}
+
 // --- pseudonymous identity --------------------------------------------------
 
 @(test)

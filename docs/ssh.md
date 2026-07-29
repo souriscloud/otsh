@@ -127,7 +127,7 @@ Blocks for up to `timeout_ms` waiting for input, then returns. The contract:
 - `ok == false` — the connection is gone (closed, errored, or EOF). Stop
   reading; the `Handler` should return soon after.
 
-Input is buffered in a fixed 16 KiB ring per session (`MAX_INPUT`); `read`
+Input is buffered in a fixed 4 KiB ring per session (`MAX_INPUT`); `read`
 never allocates. `write` and `write_string` push bytes out over the channel
 immediately and return the number of bytes written (`0` if the connection is
 already gone or `data`/`str` was empty).
