@@ -345,6 +345,31 @@ own synchronization; nothing here provides it for free.
 
 ## Known rough edges
 
+**The handshake can deadlock, and the cause is inside libssh.** Under CPU
+load, roughly one connection in three never gets past key exchange: the
+client sits waiting for a reply, the session thread sits in `poll(2)`, and
+after `handshake_seconds` the socket times out and the connection dies
+without a byte of application output. It reproduces on builds predating any
+of this repo's recent changes, so it is longstanding rather than new.
+
+The mechanism, read out of libssh 0.12's `socket.c` and confirmed against
+thread stacks from a stalled process: a socket read can pull more than the
+kex packets into `in_buffer` — the client's `service-request` and
+`userauth-request` often share a TCP segment with its last kex message — and
+that buffer is drained *only* from the `POLLIN` branch of
+`ssh_socket_pollcallback`. With its request already sent, the client has
+nothing further to write, so the socket never becomes readable again, and
+both ends wait on each other.
+
+What makes this awkward to work around is that no public entry point drains
+the buffer: `ssh_event_dopoll`, `ssh_handle_packets` and `ssh_message_get`
+all go to `poll(2)` first and none of them inspect `in_buffer`.
+`ssh_get_status()` will happily report `SSH_READ_PENDING` while offering no
+way to act on it. An attempted workaround — calling `ssh_message_get` on a
+non-blocking session after `handle_key_exchange`, and again at the top of
+`ssh.read` — still stalled 12 of 30 runs under load, because it too polls.
+A real fix belongs upstream.
+
 **`exec` and `subsystem` are refused by design, not by oversight.**
 `cb_exec_request` (`ssh/server.odin`) unconditionally returns `ls.ERROR` —
 "this server only speaks TUI." Subsystem requests are refused differently:

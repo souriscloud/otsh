@@ -20,13 +20,21 @@ What this does:
     for lines whose client-controlled fields are doing their best to look like
     an address.
 
-What it cannot check, because fail2ban is not installed: that fail2ban's real
-`<HOST>` regex behaves like the approximation below, that `datepattern` is
-converted to the regex fail2ban expects, and that the jail's systemd backend
-hands the filter the line shape assumed here. Those are noted as caveats rather
-than claimed as verified. The approximation is deliberately *more* permissive
-than any real `<HOST>`: if a host cannot be shifted out of position under a
-looser pattern, it cannot be shifted under a tighter one.
+One behavior here is modeled from measurement, not guessed: a real fail2ban
+locates the line's date and EXCISES that text before failregex runs, so
+"ts=2026-01-02T03:04:05Z event=…" reaches the regex as "ts= event=…" — unless
+a syslog prefix carried its own date at line start, in which case that one is
+excised and ours survives. Measured with fail2ban-regex 1.1.0 (Alpine), where
+the current failregexes match exactly the failure lines of this corpus, both
+IPv4 and IPv6, prefixed and bare. Every line below is therefore tested in
+BOTH shapes: as written, and with the RFC 3339 timestamp text excised.
+
+Still not checkable here: the exact MESSAGE shape a live journald hands the
+systemd backend (journalmatch was never run against a real journal), and
+fail2ban 0.9, whose <HOST> cannot match IPv6 at all. The <HOST> approximation
+below is deliberately *more* permissive than the real one: if a host cannot
+be shifted out of position under a looser pattern, it cannot be shifted under
+a tighter one.
 """
 import configparser
 import os
@@ -233,6 +241,14 @@ def addr_field(line):
     return m.group(1) if m else None
 
 
+def excise_ts(line):
+    """What fail2ban's date detector does to the line before failregex runs:
+    the matched datetime text — including the trailing Z, consumed as a zone
+    offset — is cut out, leaving the literal `ts=` behind. Measured with
+    fail2ban-regex 1.1.0."""
+    return re.sub(r"(?<=ts=)\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", "", line)
+
+
 def match(regexes, line):
     """fail2ban tries each failregex with .search(); first hit wins."""
     for i, rx in enumerate(regexes):
@@ -256,15 +272,24 @@ def main():
     failures = []
 
     def check(label, line, want_match, want_host):
-        idx, host = match(compiled, line)
-        got_match = idx is not None
-        ok = got_match == want_match and (not want_match or host == want_host)
-        # An extracted host must always be the line's own addr= value.
-        if got_match and want_match and want_host is not None:
-            declared = addr_field(line)
-            if declared is not None and host != declared and want_host == declared:
-                ok = False
-        verdict = "MATCH#%d host=%s" % (idx, host) if got_match else "no match"
+        # Both shapes a real fail2ban can present: the line as written (its
+        # own ts survives because a prefix date was excised instead), and the
+        # line with the ts text excised (the common case).
+        ok = True
+        verdicts = []
+        for shape, shaped in (("intact", line), ("excised", excise_ts(line))):
+            idx, host = match(compiled, shaped)
+            got_match = idx is not None
+            shape_ok = got_match == want_match and (not want_match or host == want_host)
+            # An extracted host must always be the line's own addr= value.
+            if got_match and want_match and want_host is not None:
+                declared = addr_field(line)
+                if declared is not None and host != declared and want_host == declared:
+                    shape_ok = False
+            ok = ok and shape_ok
+            verdicts.append("MATCH#%d host=%s" % (idx, host) if got_match else "no match")
+        verdict = verdicts[0] if verdicts[0] == verdicts[1] else (
+            "intact: %s / excised: %s" % tuple(verdicts))
         print("  %-6s %-62s %s" % ("ok" if ok else "FAIL", label, verdict))
         if not ok:
             failures.append(label)
@@ -308,25 +333,31 @@ def main():
                 failures.append(label)
     print()
 
-    # datepattern: the strftime half can be checked here; fail2ban's conversion
-    # of it into a regex cannot.
-    print("g) datepattern")
-    for pat in datepattern:
-        i = pat.find("%Y")
-        fmt = pat[i:] if i >= 0 else pat
-        try:
-            parsed = datetime.strptime(TS, fmt)
-            ok = fmt == "%Y-%m-%dT%H:%M:%SZ" and len(TS) == 20
-            print("  %-6s %-62s -> %s" % ("ok" if ok else "FAIL", pat.strip(), parsed))
-        except ValueError as e:
-            ok = False
-            print("  %-6s %-62s -> %s" % ("FAIL", pat.strip(), e))
-        if not ok:
-            failures.append("datepattern " + pat.strip())
+    # The filter deliberately sets no datepattern — fail2ban's default
+    # detectors were what actually worked under fail2ban-regex 1.1.0, and an
+    # explicit pattern matched nothing. Guard both halves of that decision:
+    # the filter must stay datepattern-free, and the contract's ts must stay
+    # the exactly-20-character RFC 3339 UTC form those defaults recognise.
+    print("g) date handling (no datepattern by design; defaults are verified)")
+    ok = not datepattern
+    print("  %-6s %-62s %s" % ("ok" if ok else "FAIL",
+                               "filter sets no datepattern",
+                               "none" if ok else "; ".join(datepattern)))
+    if not ok:
+        failures.append("unexpected datepattern in filter")
+    try:
+        parsed = datetime.strptime(TS, "%Y-%m-%dT%H:%M:%SZ")
+        ok = len(TS) == 20
+    except ValueError:
+        parsed, ok = None, False
+    print("  %-6s %-62s -> %s" % ("ok" if ok else "FAIL",
+                                  "contract ts is 20-char RFC 3339 UTC", parsed))
+    if not ok:
+        failures.append("contract ts shape")
     print()
 
     total = (len(CAPTURE) + len(CONTRACT) + len(PREFIXED) + len(HOSTILE) + 1
-             + (2 if alt_compiled else 0) + len(datepattern))
+             + (2 if alt_compiled else 0) + 2)
     if failures:
         print("%d of %d checks FAILED:" % (len(failures), total))
         for f in failures:
@@ -334,13 +365,13 @@ def main():
         return 1
     print("all %d checks passed" % total)
     print()
-    print("not verified here (no fail2ban on this machine):")
-    print("  * fail2ban's real <HOST> regex. IPv6 needs fail2ban >= 0.10; on")
-    print("    0.9 the v6 lines above match nothing and no ban is issued.")
-    print("  * the datepattern -> regex conversion fail2ban performs.")
-    print("  * the exact line shape the systemd backend produces.")
-    print("  Run `fail2ban-regex <logfile> filter.d/otsh.conf` where fail2ban")
-    print("  is installed to close those three.")
+    print("verified against a real fail2ban-regex 1.1.0 (Alpine): the current")
+    print("failregexes match exactly the failure lines of this corpus, v4 and")
+    print("v6, bare and prefixed, extracting addr= every time.")
+    print("still not verified anywhere:")
+    print("  * the exact MESSAGE shape a live journald hands the systemd")
+    print("    backend (journalmatch has not run against a real journal);")
+    print("  * fail2ban 0.9, whose <HOST> cannot match IPv6 at all.")
     return 0
 
 

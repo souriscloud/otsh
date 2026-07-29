@@ -18,6 +18,12 @@ Documentation=https://github.com/otsh/otsh
 # The listener binds a socket, so wait for a routable address rather than for
 # the network stack merely existing.
 After=network-online.target
+# Give up if it fails 5 times in 60s rather than crash-looping against the
+# journal — an otsh server that cannot bind its port will never recover on its
+# own. These two must be in [Unit]: in [Service] they are ignored (verified
+# with systemd-analyze 257, which only warns).
+StartLimitIntervalSec=60
+StartLimitBurst=5
 Wants=network-online.target
 
 [Service]
@@ -53,14 +59,11 @@ UMask=0077
 # --- restart policy ----------------------------------------------------------
 
 # A clean exit is a decision; a crash or an OOM kill is not. Only the latter
-# restarts.
+# restarts. The companion StartLimit* rate limit lives in [Unit] — in
+# [Service] systemd ignores those keys with only a warning, which is a
+# crash-loop with no ceiling.
 Restart=on-failure
 RestartSec=2s
-# Give up if it fails 5 times in 60s rather than crash-looping against the
-# journal — an otsh server that cannot bind its port will never recover on its
-# own.
-StartLimitIntervalSec=60
-StartLimitBurst=5
 
 # --- logging -----------------------------------------------------------------
 

@@ -66,7 +66,9 @@ earlier.
 ## Layer 1: kernel rate limiting
 
 [`../deploy/nftables-ratelimit.conf`](../deploy/nftables-ratelimit.conf) is a
-standalone nftables table. It loads as-is:
+standalone nftables table. It passes `nft -c` (checked against nftables 1.1 —
+which is also how a syntax error in an earlier draft was caught), but it has
+not run against live traffic; load it, then watch its counters:
 
 ```sh
 nft -c -f deploy/nftables-ratelimit.conf   # syntax check, changes nothing
@@ -239,12 +241,20 @@ username doing its best to look like an address (`user=addr?1.2.3.4`) cannot
 shift the extracted host. It is not wired into `check.sh`; it is documentation
 you can execute.
 
-Three things it cannot check, and says so when it runs: fail2ban's real
-`<HOST>` regex, the `datepattern`-to-regex conversion, and the exact line shape
-the systemd backend produces. Note in particular that `<HOST>` only matches
-IPv6 addresses on fail2ban 0.10 and newer — on 0.9 an IPv6 audit line matches
-nothing, silently. Check `fail2ban-client version` before assuming your v6
-listener is covered.
+The filter has also been run through a **real `fail2ban-regex` 1.1.0**: on a
+13-line corpus (the capture plus IPv6, journal- and syslog-prefixed, and
+forged-field variants) it matches exactly the 7 failure lines, misses the 6
+benign ones, and extracts the `addr=` value every time. That run is also how
+the filter's one non-obvious construction was found: fail2ban excises the
+matched timestamp text from the line before `failregex` runs, so the regexes
+match a timestamp *slot* (`ts=\S*\s+`), never the timestamp itself — a filter
+that spells out the `ts=` value matches nothing, silently.
+
+Still unverified anywhere: the exact `MESSAGE` shape a live journald hands the
+systemd backend (`journalmatch` has not run against a real journal), and
+fail2ban 0.9, whose `<HOST>` cannot match IPv6 at all — on 0.9 an IPv6 audit
+line matches nothing, silently. Check `fail2ban-client version` before
+assuming your v6 listener is covered.
 
 ## Layer 3: the built-in `Limits`
 
@@ -353,6 +363,12 @@ Remember that the fail2ban layer does nothing until your app sets
 `Config.audit` — the stock tracker does not.
 
 ### Checking it works
+
+The unit itself lints clean — `systemd-analyze verify` under systemd 257
+reports nothing once the binary exists (and that check is how a silently
+ignored `StartLimitIntervalSec` in the wrong section was caught). It has not
+supervised a real workload; these are the commands that tell you how yours is
+doing:
 
 ```sh
 systemctl status otsh                      # running, and under which limits

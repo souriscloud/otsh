@@ -112,8 +112,8 @@ seed_board :: proc() {
 	     "The fix lives where the issue said it must: in front of the process. deploy/ ships nftables/pf rate limits, a fail2ban filter over the audit log, and a hardened systemd unit; docs/deploy.md walks the layering. The process itself still cannot stop a spread-out flood, and the docs keep saying so.", 1)
 	seed(.Closed, "wide glyphs need a real width table",
 	     "rune_width is generated from Unicode East Asian Width data (docs/tools/gen_width.py), ambiguous-width narrow so box borders survive. Grapheme clustering stays out of scope: ZWJ sequences measure as their parts.", 6)
-	seed(.Open, "intermittent: silent 15 s stall before the banner",
-	     "Roughly one pty-harness run in three, the TCP connect succeeds but the server sends nothing for 15+ seconds. Reproduced on builds predating the ring shrink, so it is longstanding. Suspect the accept-to-session-thread handoff; needs isolating with libssh logging.", 0)
+	seed(.Open, "handshake can deadlock: libssh only drains its read buffer on POLLIN",
+	     "Under CPU load, 1 connection in 3 hangs after key exchange: the client waits, the session thread sits in poll(2). Cause is in libssh — a socket read can pull the client's post-kex packets into in_buffer, but that buffer is only processed from the POLLIN branch of ssh_socket_pollcallback. With nothing further to send, the client never makes the socket readable again and both sides wait forever. ssh_event_dopoll, ssh_handle_packets and ssh_message_get all poll first and none inspect in_buffer, so no public API drains it — an attempted ssh_message_get workaround still stalled 12 of 30 runs. Needs an upstream fix or a libssh-internal workaround.", 0)
 }
 
 // Applies `edit` to the issue with `id`, under the lock, and marks it changed.
