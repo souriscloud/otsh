@@ -39,6 +39,60 @@ jobs:
       - name: Run tests
         run: ./test.sh
 
+      # The Windows job below is allowed to fail, so this is the only Windows
+      # guarantee that actually gates a merge: the platform-split files still
+      # type-check for windows_amd64. Type-checking needs no libssh and no
+      # Windows runner, so it is cheap and it is trustworthy.
+      - name: Cross-type-check every package and example for Windows
+        if: runner.os == 'Linux'
+        run: |
+          for pkg in libssh ssh tui sshtui; do
+            odin check "$pkg" -collection:otsh=. -target:windows_amd64 -no-entry-point
+          done
+          for ex in examples/*/; do
+            odin check "$ex" -collection:otsh=. -target:windows_amd64
+          done
+
+  # EXPERIMENTAL — nobody has run otsh on real Windows yet. This job exists to
+  # find out whether the Windows code paths build and whether the tests pass
+  # there; until one of those has actually been green it must not be able to
+  # block a merge. Flip continue-on-error off once it has been green in
+  # practice, not before.
+  windows:
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        # Git Bash, so build.sh and test.sh run unmodified. Their Windows
+        # branch keys off `uname -s` reporting MINGW64.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # vcpkg is preinstalled on the windows runner image, at
+      # $VCPKG_INSTALLATION_ROOT, which is where build.sh looks.
+      - name: Install libssh (vcpkg)
+        run: vcpkg install libssh:x64-windows
+
+      - name: Install Odin
+        uses: laytan/setup-odin@v2
+        with:
+          release: false
+          branch: master
+
+      # The linker finds ssh.lib through /LIBPATH:. There is no rpath on
+      # Windows, so ssh.dll has to be on PATH for anything built here to start.
+      - name: Put the libssh DLL on PATH
+        run: echo "$VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin" >> "$GITHUB_PATH"
+
+      - name: Build packages and every example
+        run: |
+          ./build.sh
+          for ex in examples/*/; do ./build.sh "$ex"; done
+
+      - name: Run tests
+        run: ./test.sh
+
   docs:
     runs-on: ubuntu-latest
     steps:

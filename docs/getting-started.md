@@ -14,9 +14,9 @@ before you expose anything here to the network.
 - **libssh ≥ 0.10.** `brew install libssh` on macOS, `apt install libssh-dev`
   on Debian/Ubuntu. otsh does not vendor libssh — `otsh:libssh` is bindings
   against your system copy.
-- **macOS or Linux.** The local backend (`tui/local.odin`) uses `termios` and
-  `ioctl(TIOCGWINSZ)` directly; Windows would need a different local backend
-  and a libssh build, neither of which exist here.
+- **macOS, Linux or FreeBSD.** Windows has an experimental port that nobody
+  has run yet — see [Platform support](#platform-support) immediately below
+  before you rely on it.
 
 `build.sh` looks for an `odin` binary via the `$ODIN` environment variable,
 then on your `$PATH`. If neither resolves, it falls back to a hardcoded path
@@ -24,6 +24,61 @@ used by this checkout's development environment
 (`/Users/souris/work/bench/odin/odin-lang/odin`) — that fallback only matters
 if you're working in this exact repo instance; set `$ODIN` or put `odin` on
 your `$PATH` anywhere else.
+
+## Platform support
+
+**macOS, Linux and FreeBSD are the supported platforms.** They are what the
+library is developed and tested on, and what CI builds and runs the test suite
+on.
+
+**Windows support is experimental and has never been validated by a human on
+real Windows.** Here is exactly what does and does not stand behind it:
+
+- What exists: every package and example type-checks for `windows_amd64`
+  (`odin check tui -collection:otsh=. -target:windows_amd64`, and the same for
+  each of `libssh`, `ssh`, `sshtui` and every `examples/` directory), and CI
+  runs that check on every push as a blocking step. A separate `windows-latest`
+  job installs libssh through vcpkg, builds the packages and examples, and runs
+  the test suite.
+- What does not exist: anybody having run an otsh server, or the `--local`
+  loop, on a Windows machine. The `windows-latest` job is marked
+  `continue-on-error`, so at the time of writing it may never have been green.
+  Treat "it compiles" as the whole of the evidence.
+
+To build on Windows you need libssh from vcpkg (`vcpkg install
+libssh:x64-windows`, which produces `ssh.lib`) and `ssh.dll` on your `%PATH%`
+at run time — there is no rpath equivalent, so a binary that links fine will
+still refuse to start without it. `build.sh` and `test.sh` detect Git Bash and
+pass `/LIBPATH:` instead of `-L`/`-rpath`.
+
+Caveats specific to the Windows build, all of them accepted deliberately:
+
+- **The local backend is a different implementation.** `tui/local_windows.odin`
+  uses the console API where `tui/local.odin` uses `termios`: raw mode clears
+  `ENABLE_LINE_INPUT`/`ENABLE_ECHO_INPUT`/`ENABLE_PROCESSED_INPUT` and sets
+  `ENABLE_VIRTUAL_TERMINAL_INPUT`, so keystrokes arrive as the same escape
+  sequences `tui/key.odin` already parses; output gets
+  `ENABLE_VIRTUAL_TERMINAL_PROCESSING`; both console code pages are set to
+  UTF-8 and restored on exit. The public API (`Local`, `local_backend`,
+  `local_enter_raw`, `local_exit_raw`) is identical on both platforms.
+- **Mouse reporting does not work on the local backend on Windows.**
+  `Program.mouse` is ignored there. Over SSH it is unaffected — mouse events
+  come from the client's terminal, not from this process's console.
+- **Polling fidelity.** `WaitForSingleObject` wakes for any console input
+  record, but `ReadFile` in virtual-terminal-input mode only returns once it has
+  bytes, so records that translate to nothing — key-up, focus changes, lone
+  modifier keys — are drained first and reported as an empty poll. A key-down
+  that produces no escape sequence and is not a plain modifier (a dead key, an
+  IME composition) can still leave `ReadFile` blocking until the next real
+  keystroke. That costs late frames, not input.
+- **The private-key permission guarantee is weaker on Windows.** On POSIX the
+  host key and the identity secret are created `0600` with `O_EXCL`, verified
+  afterwards, and warned about if they are group- or world-readable.
+  `ssh/perm_windows.odin` implements none of that: Windows decides access by
+  ACL, and there is no ACL code here. Both files inherit whatever the parent
+  directory's ACL gives them, `warn_if_world_readable` never warns, and nothing
+  tightens the mode after libssh writes the key. Keep them in a directory only
+  the service account can read and treat that as the whole of the protection.
 
 ## Build and run the examples
 

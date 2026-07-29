@@ -34,3 +34,7 @@ docs/site/
 *.swp
 .idea/
 .vscode/
+
+# --- agent scratch ------------------------------------------------------------
+# Worktrees the orchestration tooling creates inside the repo.
+.claude/

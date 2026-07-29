@@ -1,7 +1,12 @@
+#+build !windows
 // A Backend backed by the local terminal.
 //
 // Not needed to serve over SSH — it exists so the exact same App can be run
 // with `otsh --local` during development, without opening a connection.
+//
+// This is the POSIX half. local_windows.odin declares the same four public
+// names against the Windows console API; the two must stay signature-identical
+// or an app that builds on one platform stops building on the other.
 package tui
 
 import "core:c"

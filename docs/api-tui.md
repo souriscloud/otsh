@@ -216,7 +216,7 @@ Local :: struct {
 Saved terminal state for a local session, so raw mode can be undone. Zero
 value is fine; pass the same one to enter/exit/backend.
 
-*tui/local.odin:32*
+*tui/local.odin:37*
 
 ### `Mouse`
 
@@ -557,7 +557,7 @@ local_backend :: proc(l: ^Local) -> Backend
 
 A `Backend` over this process's own stdin/stdout.
 
-*tui/local.odin:38*
+*tui/local.odin:43*
 
 ### `local_enter_raw`
 
@@ -569,7 +569,7 @@ Puts the terminal into raw mode: no line buffering, no echo, no signal
 generation from Ctrl+C. Over SSH the *client* does this for us, which is why
 the server side never needs termios at all.
 
-*tui/local.odin:69*
+*tui/local.odin:74*
 
 ### `local_exit_raw`
 
@@ -580,7 +580,7 @@ local_exit_raw :: proc(l: ^Local)
 Restores the terminal settings saved by `local_enter_raw`. Safe to call twice;
 always `defer` it, or the user's shell is left in raw mode.
 
-*tui/local.odin:88*
+*tui/local.odin:93*
 
 ### `no_color`
 
