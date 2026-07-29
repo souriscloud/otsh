@@ -102,16 +102,18 @@ seed_board :: proc() {
 	     "view paints a full frame with no erase step, so drawing a short toast over a longer help string left the tail of the help text on screen. The footer now picks one string and draws only that.", 1)
 	seed(.Closed, "lone ESC is ambiguous",
 	     "ESC is both a key and the start of every escape sequence. Resolved with the usual timeout: an ESC still alone after two frames is reported as the Escape key.", 3)
-	seed(.Open, "Session is ~17 KB because of the ring buffer",
-	     "MAX_INPUT is 16 KiB and lives inline in Session, so thousands of idle connections cost real memory. Worth making the buffer growable, or shrinking it for sessions that never paste.", 2)
+	seed(.Closed, "Session is ~17 KB because of the ring buffer",
+	     "MAX_INPUT shrank to 4 KiB, cutting Session under 5 KB. Bigger pastes ride libssh's re-offer flow control and arrive across successive frames — proven with an 8 KiB burst over a live session — and a size regression test pins it.", 3)
 	seed(.Open, "no Windows local backend",
-	     "tui/local.odin uses termios and TIOCGWINSZ directly. Windows needs a console-API backend and a libssh build; neither exists here.", 0)
-	seed(.Open, "no audit log",
-	     "Nothing records connections, auth attempts or disconnects beyond the optional on_connect hook. Anyone running this in earnest wants a real log.", 1)
-	seed(.Open, "distributed floods are not mitigated",
-	     "Limiter is per-process and per-IP, which does nothing against a spread-out flood. That needs to live in front of the process.", 0)
-	seed(.Open, "wide glyphs need a real width table",
-	     "rune_width covers the ranges that matter in practice, not the full Unicode East Asian Width property. A wrong width corrupts every column after it on the line.", 5)
+	     "A console-API backend and a Windows build path now exist, cross-type-check for windows_amd64, and have a CI job. Still open because none of it has executed on real Windows; closes when that CI job has been green in practice.", 2)
+	seed(.Closed, "no audit log",
+	     "Config.audit takes a sink; audit_stderr emits one machine-parseable line per event — accept, auth, limiter reject, kex failure, session lifecycle — with client text scrubbed so a username cannot forge fields. Opt-in, because every line carries a peer address.", 2)
+	seed(.Closed, "distributed floods are not mitigated",
+	     "The fix lives where the issue said it must: in front of the process. deploy/ ships nftables/pf rate limits, a fail2ban filter over the audit log, and a hardened systemd unit; docs/deploy.md walks the layering. The process itself still cannot stop a spread-out flood, and the docs keep saying so.", 1)
+	seed(.Closed, "wide glyphs need a real width table",
+	     "rune_width is generated from Unicode East Asian Width data (docs/tools/gen_width.py), ambiguous-width narrow so box borders survive. Grapheme clustering stays out of scope: ZWJ sequences measure as their parts.", 6)
+	seed(.Open, "intermittent: silent 15 s stall before the banner",
+	     "Roughly one pty-harness run in three, the TCP connect succeeds but the server sends nothing for 15+ seconds. Reproduced on builds predating the ring shrink, so it is longstanding. Suspect the accept-to-session-thread handoff; needs isolating with libssh logging.", 0)
 }
 
 // Applies `edit` to the issue with `id`, under the lock, and marks it changed.

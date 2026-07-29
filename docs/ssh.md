@@ -351,7 +351,9 @@ otsh: audit ts=2026-07-29T12:00:00Z event=auth addr=203.0.113.7 method=publickey
 ```
 
 This grammar is a contract — log filters are written against it, so treat a
-change to it as a breaking change. What a parser may rely on:
+change to it as a breaking change. A ready-made fail2ban filter for these
+lines ships in `deploy/` and is walked through in
+[Deployment and abuse mitigation](deploy.md). What a parser may rely on:
 
 - The line always begins with the literal `otsh: audit `.
 - `ts` is RFC 3339 in UTC at second resolution, always exactly the 20
