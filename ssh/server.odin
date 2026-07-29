@@ -15,6 +15,7 @@ import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:thread"
+import "core:time"
 import ls "../libssh"
 
 // Per-session input buffer. Bytes beyond this stay in libssh's own buffer and
@@ -83,6 +84,7 @@ Server :: struct {
 	methods:      Auth_Methods,
 	secret:       Identity_Secret,
 	limiter:      Limiter,
+	audit:        Audit_Sink,
 	user_data:    rawptr,
 	// The allocator per-connection state is created and destroyed with.
 	//
@@ -135,6 +137,10 @@ Session :: struct {
 	shell:         bool,
 	eof:           bool,
 	auth_method:   string,
+	// When the shell was granted, for the session_end audit duration. Written
+	// by this connection's own session thread just before it calls the handler,
+	// and read only by that same thread — it never crosses a thread boundary.
+	started:       time.Time,
 
 	// fixed storage so libssh callbacks never touch an allocator
 	user_buf:      [64]u8,
@@ -327,6 +333,13 @@ Config :: struct {
 	identity_secret:   string,
 	// Per-field: 0 uses the default, negative disables that limit.
 	limits:            Limits,
+	// Where connection, authentication and session events go. nil — the zero
+	// value — means no auditing at all, which is deliberate: every audit line
+	// carries the client's numeric address, and keeping a record of who
+	// connected and when is a privacy decision the operator must make on
+	// purpose. `audit_stderr` is a ready-made sink; audit.odin documents the
+	// line format it produces.
+	audit:             Audit_Sink,
 	// Algorithm allow-lists, in libssh's comma-separated format. Empty means
 	// the hardened defaults below; set to "-" to accept libssh's own defaults,
 	// which are broader and include things like RSA/SHA-1-era compatibility.
@@ -510,6 +523,7 @@ serve :: proc(cfg: Config) -> bool {
 	srv.handler = cfg.handler
 	srv.authenticate = cfg.authenticate
 	srv.methods = cfg.methods == {} ? ALL_AUTH : cfg.methods
+	srv.audit = cfg.audit
 	srv.user_data = cfg.user_data
 	srv.host = cfg.host
 	srv.port = cfg.port
@@ -549,6 +563,7 @@ serve :: proc(cfg: Config) -> bool {
 
 	srv.running = true
 	fmt.printfln("otsh: listening on %s:%d  →  ssh -p %d %s", cfg.host, cfg.port, cfg.port, cfg.host)
+	audit_emit(srv, Audit_Event{kind = .Listen, host = cfg.host, port = cfg.port})
 
 	for srv.running {
 		s := new(Session, srv.allocator)
@@ -574,7 +589,9 @@ serve :: proc(cfg: Config) -> bool {
 		// accept path itself.
 		addr := peer_address(ls.get_fd(s.sess), s.addr_buf[:])
 		s.addr_len = len(addr)
-		if !limiter_acquire(&srv.limiter, addr) {
+		audit_emit(srv, Audit_Event{kind = .Accept, addr = addr})
+		if ok, tripped := limiter_acquire(&srv.limiter, addr); !ok {
+			audit_emit(srv, Audit_Event{kind = .Reject, addr = addr, limit = tripped})
 			ls.disconnect(s.sess)
 			ls.free_session(s.sess)
 			free(s, srv.allocator)
@@ -630,6 +647,7 @@ session_thread :: proc(s: ^Session) {
 
 	// Key exchange: negotiates ciphers and proves we own the host key.
 	if ls.handle_key_exchange(s.sess) != ls.OK {
+		audit_emit(s.server, Audit_Event{kind = .Kex_Fail, addr = remote_addr(s)})
 		return
 	}
 
@@ -664,6 +682,13 @@ session_thread :: proc(s: ^Session) {
 		return
 	}
 
+	cols, rows := size(s)
+	s.started = time.now()
+	audit_session(s, Audit_Event{kind = .Session_Start, term = term(s), cols = cols, rows = rows})
+	// Declared after the start event so it runs before the teardown block above,
+	// while the address and id buffers are still populated.
+	defer audit_session(s, Audit_Event{kind = .Session_End, duration = time.since(s.started)})
+
 	if s.server.handler != nil {
 		s.server.handler(s)
 	}
@@ -690,33 +715,49 @@ set_user :: proc "contextless" (s: ^Session, u: cstring) {
 // be enforced here or `methods = {.Publickey}` means nothing.
 @(private)
 allow :: proc "contextless" (s: ^Session, req: Auth_Request) -> bool {
-	if req.method not_in s.server.methods {
-		return false
-	}
-	if s.server.limiter.limits.max_auth_attempts > 0 &&
-	   s.auth_failures >= s.server.limiter.limits.max_auth_attempts {
-		return false
-	}
-	if s.server.authenticate == nil {
-		return true
-	}
-
+	// The Authenticator and the audit sink are both ordinary Odin procs, so a
+	// context has to exist before either can be called.
 	context = runtime.default_context()
-	ok := s.server.authenticate(req)
-	if !ok {
-		s.auth_failures += 1
-		// One-shot across all connections. Atomic because every session thread
-		// can reach it; the exchange makes exactly one of them print.
-		if req.method == .Publickey &&
-		   !sync.atomic_exchange(&s.server.warned_enum, true) {
-			fmt.eprintln(
-				"otsh: NOTE an Authenticator rejected a public key. The client will now\n" +
-				"      offer its next key, and the next — a rejecting server learns every\n" +
-				"      key in the user's agent. Prefer accepting the key and refusing\n" +
-				"      inside the app (see examples/members).",
-			)
+
+	ok := true
+	switch {
+	case req.method not_in s.server.methods:
+		ok = false
+	case s.server.limiter.limits.max_auth_attempts > 0 &&
+	     s.auth_failures >= s.server.limiter.limits.max_auth_attempts:
+		ok = false
+	case s.server.authenticate != nil:
+		ok = s.server.authenticate(req)
+		if !ok {
+			s.auth_failures += 1
+			// One-shot across all connections. Atomic because every session
+			// thread can reach it; the exchange makes exactly one of them print.
+			if req.method == .Publickey &&
+			   !sync.atomic_exchange(&s.server.warned_enum, true) {
+				fmt.eprintln(
+					"otsh: NOTE an Authenticator rejected a public key. The client will now\n" +
+					"      offer its next key, and the next — a rejecting server learns every\n" +
+					"      key in the user's agent. Prefer accepting the key and refusing\n" +
+					"      inside the app (see examples/members).",
+				)
+			}
 		}
 	}
+
+	// Every outcome is audited, including the two policy refusals above that
+	// never reach an Authenticator — a client hammering a method this server
+	// does not offer is exactly what a log filter needs to see.
+	audit_emit(
+		s.server,
+		Audit_Event {
+			kind = .Auth,
+			addr = req.remote_addr,
+			user = req.user,
+			method = req.method,
+			ok = ok,
+			id = req.id,
+		},
+	)
 	return ok
 }
 

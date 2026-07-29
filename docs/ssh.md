@@ -62,6 +62,7 @@ set false from outside — there is no exported stop function today). Returns
 | `methods` | `Auth_Methods` | `{}` is replaced with `ALL_AUTH` (all three methods offered). |
 | `identity_secret` | `string` | `""` disables pseudonymous ids — `ssh.id(s)` is always `""`. Non-empty loads the secret from that path, creating it on first run. |
 | `limits` | `Limits` | The zero-valued struct resolves to `DEFAULT_LIMITS` field-by-field — see Limits below. |
+| `audit` | `Audit_Sink` | `nil` records nothing. Auditing is opt-in because every line carries a peer address — see Audit below. |
 | `key_exchange` | `string` | `""` uses `DEFAULT_KEX`. `"-"` leaves libssh's own (broader) default alone. |
 | `ciphers` | `string` | `""` uses `DEFAULT_CIPHERS`, applied to both directions (`Ciphers_C_S` and `Ciphers_S_C`). `"-"` opts out. |
 | `macs` | `string` | `""` uses `DEFAULT_MACS`, applied to both directions (`Hmac_C_S` and `Hmac_S_C`). `"-"` opts out. |
@@ -288,6 +289,140 @@ lookups against a stored id don't leak where the strings differed through
 timing. Use it, not `==`, whenever you check a session's `id` against one
 you have on file. Full rationale: [`./security.md`](./security.md).
 
+## Audit
+
+```odin
+Audit_Sink :: #type proc(e: Audit_Event)
+
+audit_stderr :: proc(e: Audit_Event)
+audit_format :: proc "contextless" (e: Audit_Event, buf: []u8) -> string
+
+AUDIT_LINE_MAX :: 320
+```
+
+Set `Config.audit` and the server records what happens to every connection:
+the listen, each accept, each limiter rejection, each key-exchange failure,
+every authentication attempt with its verdict, and every session's start and
+end. `ssh.audit_stderr` is a ready-made sink; anything matching `Audit_Sink`
+works.
+
+```odin
+ssh.serve(ssh.Config{handler = handle, audit = ssh.audit_stderr})
+```
+
+**`nil` — the zero value — records nothing at all**, so a `Config` written
+before this existed behaves exactly as it did. That is deliberate, not an
+oversight: every line carries the client's numeric address, and keeping a
+record of who talked to your server and when is a privacy decision the
+operator has to make on purpose, not one a library should make for them.
+
+Two things are never logged, whatever sink you use: passwords, and the
+client's public key fingerprint. The fingerprint is a *global* identifier
+(see Identity above), so audit lines carry the pseudonymous `id` instead —
+present only when `identity_secret` is set and the client used a key.
+
+### Events
+
+| `event=` | Fires when | Fields, in order |
+| --- | --- | --- |
+| `listen` | The port is bound and the accept loop is running. | `host` `port` |
+| `accept` | A TCP connection was accepted, before any crypto. | `addr` |
+| `reject` | `Limits` refused the connection, before any crypto. | `addr` `limit` |
+| `kex_fail` | Key exchange failed; there is no client identity yet. | `addr` |
+| `auth` | One authentication attempt resolved, either way. | `addr` `method` `user` `ok` `[id]` |
+| `session_start` | Authenticated, pty requested, shell granted — just before your `Handler` runs. | `addr` `user` `term` `cols` `rows` `[id]` |
+| `session_end` | Your `Handler` returned. | `addr` `secs` `[id]` |
+
+`limit` is `sessions` (the process-wide `max_sessions`) or `per_ip`
+(`max_per_ip`). `method` is `none`, `password` or `publickey`. `ok` is `true`
+or `false`. `secs` is the session's duration in seconds with three decimals.
+
+Note that `auth` fires for *every* outcome, including the two the server
+decides on its own: a method that is not in `Config.methods`, and an attempt
+past `max_auth_attempts`. A client hammering a method you do not offer is
+exactly what a log filter needs to see.
+
+### The line format
+
+One event, one line, never wrapped or continued:
+
+```
+otsh: audit ts=2026-07-29T12:00:00Z event=auth addr=203.0.113.7 method=publickey user=git ok=false
+```
+
+This grammar is a contract — log filters are written against it, so treat a
+change to it as a breaking change. What a parser may rely on:
+
+- The line always begins with the literal `otsh: audit `.
+- `ts` is RFC 3339 in UTC at second resolution, always exactly the 20
+  characters `YYYY-MM-DDTHH:MM:SSZ`.
+- Fields are separated by exactly one space, appear in the fixed order given
+  in the table above, and no key repeats within a line.
+- A field whose value is unknown or empty is written as `-`. The only
+  optional field is `id`, which is omitted entirely when absent and is always
+  last on the line.
+- `addr` is present on every event except `listen`, and holds the peer
+  address in numeric form — an IPv4 dotted quad, or an IPv6 address with an
+  optional `%zone`. **Every failure record a filter cares about — `reject`,
+  `kex_fail`, and `auth` with `ok=false` — carries `addr`.**
+- Values never contain a space, an `=`, or a control character. Every byte
+  outside `[A-Za-z0-9.:_@/+,%-]` is replaced with `?`, and values are capped:
+  `addr` and `host` at 64 bytes, `user`, `term` and `id` at 32. `user` and
+  `term` are client-controlled text, so without this a client could forge
+  fields — or whole extra lines — in your log.
+
+A real capture, from a connection that authenticated with a key and quit
+after a few seconds:
+
+```
+otsh: audit ts=2026-07-29T19:34:20Z event=listen host=0.0.0.0 port=2229
+otsh: audit ts=2026-07-29T19:34:21Z event=accept addr=127.0.0.1
+otsh: audit ts=2026-07-29T19:34:21Z event=auth addr=127.0.0.1 method=none user=souris ok=false
+otsh: audit ts=2026-07-29T19:34:21Z event=auth addr=127.0.0.1 method=publickey user=souris ok=true id=8550aab27bd698618495ca868215c5b7
+otsh: audit ts=2026-07-29T19:34:21Z event=session_start addr=127.0.0.1 user=souris term=xterm-ghostty cols=120 rows=40 id=8550aab27bd698618495ca868215c5b7
+otsh: audit ts=2026-07-29T19:34:24Z event=session_end addr=127.0.0.1 secs=3.412 id=8550aab27bd698618495ca868215c5b7
+```
+
+The `method=none ok=false` line is the OpenSSH client trying the `none`
+method first, as it always does; this server was configured with
+`methods = {.Publickey}`, so it refused and the client offered its key.
+
+### Writing your own sink
+
+```odin
+Audit_Event :: struct {
+	kind:     Audit_Kind,
+	at:       time.Time,     // stamped by the emitter, UTC
+	addr:     string,
+	host:     string,        // .Listen
+	port:     int,           // .Listen
+	limit:    Audit_Limit,   // .Reject
+	user:     string,        // .Auth, .Session_Start
+	method:   Auth_Method,   // .Auth
+	ok:       bool,          // .Auth
+	id:       string,        // pseudonymous id, when there is one
+	term:     string,        // .Session_Start
+	cols:     int,           // .Session_Start
+	rows:     int,           // .Session_Start
+	duration: time.Duration, // .Session_End
+}
+```
+
+A sink is called from the accept loop, from every session thread, and from
+inside libssh's authentication callbacks — concurrently, and on the
+connection's critical path. So it must be thread-safe, must not block, and
+should not allocate; a sink that writes to a database or a network service
+wants a queue in front of it. Every string in an `Audit_Event` is borrowed
+from the connection and dies with it, so copy anything you keep past your own
+return.
+
+`audit_stderr` is the reference implementation of all three constraints: it
+formats into a stack buffer and hands the whole line to a single `os.write`,
+because two partial writes from two threads would interleave into a line no
+filter can parse. If you want the same line somewhere else, call
+`audit_format` — it needs no context and no allocator, and writes into a
+buffer you own (`AUDIT_LINE_MAX` bytes is always enough, newline included).
+
 ## Host key
 
 ```odin
@@ -352,5 +487,6 @@ the connection as soon as `handle` returns. This builds as-is with
   of writing raw bytes yourself.
 - [`./security.md`](./security.md) — the full rationale behind the auth and
   identity design above.
-- `examples/whoami` — smallest full `sshtui` app, shows the auth hook.
+- `examples/whoami` — smallest full `sshtui` app, shows the auth hook and the
+  audit log.
 - `examples/members` — the "accept the key, gate inside the app" pattern.

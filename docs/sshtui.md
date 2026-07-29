@@ -99,6 +99,7 @@ Config :: struct {
 	limits:        ssh.Limits,
 	authenticate:  ssh.Authenticator, // nil accepts everyone
 	methods:       ssh.Auth_Methods, // zero means all
+	audit:         ssh.Audit_Sink, // nil records nothing
 	on_connect:    proc(info: Info), // optional logging hooks
 	on_disconnect: proc(info: Info),
 }
@@ -121,6 +122,7 @@ about `Config{create = create}` alone is an error, it just serves on
 | `limits` | `ssh.DEFAULT_LIMITS` | `ssh.Limits`: max concurrent sessions, max per source IP, handshake timeout, max failed auth attempts. Per field, `0` takes the default and a negative value disables that one limit. |
 | `authenticate` | everyone is accepted | `ssh.Authenticator`. Read its doc comment before setting one — rejecting a public key here makes the client offer its next one, which lets a rejecting server enumerate every key in the client's agent. Prefer authorizing inside your app with `Info.id`, as in `examples/members/main.odin`. See [./security.md](./security.md). |
 | `methods` | all of `ssh.ALL_AUTH` (`.None`, `.Password`, `.Publickey`) are offered | If you depend on `Info.id`, set this to `{.Publickey}` — every OpenSSH client tries `.None` first, and if the server accepts it the client never offers a key at all, so `Info.id` stays empty. |
+| `audit` | nothing is recorded | `ssh.Audit_Sink`, passed straight through to `ssh.Config.audit`. `ssh.audit_stderr` writes one machine-parseable line per listen, accept, limiter rejection, key-exchange failure, auth attempt and session. Opt-in because every line carries the client's numeric address. Unlike the hooks below it also sees connections that never became sessions. Format: [./ssh.md](./ssh.md#audit). |
 | `on_connect` | no hook runs | See "Connection hooks" below. |
 | `on_disconnect` | no hook runs | |
 
@@ -308,6 +310,12 @@ Log `info.id`, not `info.fingerprint`, and never a raw key. A fingerprint is
 stable and global — it correlates your logs with any other service that saw
 the same key — while `id` is meaningless outside your own server. See
 [./security.md](./security.md) for why.
+
+These hooks only see connections that got as far as a session. If you want the
+ones that did not — rejections, failed key exchanges, refused authentication —
+set `Config.audit` instead: `ssh.audit_stderr` writes one parseable line per
+event and already logs `id` rather than the fingerprint. The two compose; a
+hook is for your application's own record, `audit` for the operator's.
 
 ## Worked example: per-user state from `Info.id`
 

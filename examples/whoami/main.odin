@@ -1,10 +1,13 @@
 // whoami — the smallest useful otsh app: shows who connected and how.
 //
-// Also demonstrates the auth hook. This server requires public-key auth, so
-// `info.fingerprint` is always populated.
+// Also demonstrates the auth hook and the audit log. This server requires
+// public-key auth, so `info.fingerprint` is always populated.
 //
 //	./build.sh examples/whoami && ./whoami
 //	ssh -p 2223 localhost
+//
+// Audit lines go to stderr, one per event, so `./whoami 2>audit.log` keeps the
+// record separate from the app's own chatter on stdout.
 package main
 
 import "core:fmt"
@@ -71,6 +74,10 @@ destroy :: proc(app: tui.App) {
 
 // Called during authentication, before the app exists. Return false to reject.
 // A real app would look the fingerprint up in a database here.
+//
+// This prints the fingerprint because the whole point of the example is to show
+// it to you. An audit trail you keep should not: `audit` below logs the
+// pseudonymous id instead, which does not correlate with any other service.
 gate :: proc(req: ssh.Auth_Request) -> bool {
 	fmt.printfln("whoami: auth attempt user=%s method=%v key=%s", req.user, req.method, req.fingerprint)
 	return true
@@ -85,6 +92,7 @@ main :: proc() {
 			destroy       = destroy,
 			authenticate  = gate,
 			methods       = {.Publickey}, // no anonymous access
+			audit         = ssh.audit_stderr, // one parseable line per event
 		},
 	)
 }

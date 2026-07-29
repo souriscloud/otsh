@@ -382,9 +382,15 @@ Stated plainly rather than left implicit:
   fingerprint somewhere they'll actually check.
 - **Distributed floods are not mitigated.** `Limiter` (§7) is
   per-process, per-source-address only.
-- **There is no audit log and no session recording.** Nothing in `otsh`
-  records who connected when, beyond whatever `on_connect`/`on_disconnect`
-  hooks an application chooses to add itself.
+- **The audit log is opt-in, and there is no session recording.**
+  `Config.audit` records the listen, every accept, every limiter rejection,
+  every key-exchange failure, every authentication attempt with its verdict,
+  and every session's start and end — one machine-parseable line each, format
+  documented in [`./ssh.md`](./ssh.md#audit). But it is `nil` by default and
+  a `nil` sink records nothing, because every line carries the client's
+  numeric address and keeping that record is the operator's decision to make.
+  Nothing anywhere records what was typed or drawn inside a session, and
+  nothing logs a password or a key fingerprint.
 - **There is no account recovery.** Identity is the key. A user who loses
   their private key is, as far as `Info.id` is concerned, a new person —
   there is no mechanism here for re-linking them to their old id. Decide
@@ -418,14 +424,20 @@ Before exposing an `otsh` server to the internet:
 7. **Put a network-level limiter or WAF in front of it** if a
    distributed flood is in your threat model — `otsh`'s limiter cannot see
    across source addresses (§7).
-8. **Use `ssh.ids_equal`, never `==`,** for any comparison against a
+8. **Decide whether you want an audit log**, then set `Config.audit` (or
+   leave it `nil`) on purpose rather than by default. `ssh.audit_stderr`
+   gives you one parseable line per connection, auth attempt and session,
+   which is what a log filter or an incident review needs — at the cost of
+   a file recording every peer address that reached your server. Both
+   choices are defensible; drifting into one is not (§9).
+9. **Use `ssh.ids_equal`, never `==`,** for any comparison against a
    stored id (§4).
-9. **Never treat `Info.user` as identity or authorization** — it is
-   client-chosen text, not a verified claim (§9).
-10. **Decide what happens to a user who loses their key** — there is no
+10. **Never treat `Info.user` as identity or authorization** — it is
+    client-chosen text, not a verified claim (§9).
+11. **Decide what happens to a user who loses their key** — there is no
     recovery path in `otsh` — before it happens in production, not after
     (§9).
-11. **Keep libssh patched.** It is the transport; its vulnerabilities are
+12. **Keep libssh patched.** It is the transport; its vulnerabilities are
     yours (§9).
 12. **Do not expect `exec` or `subsystem` to work, and do not add them
     without understanding why they were left out** — this server's
