@@ -65,6 +65,20 @@ UMask=0077
 Restart=on-failure
 RestartSec=2s
 
+# --- stopping ----------------------------------------------------------------
+
+# otsh handles SIGTERM itself: it stops accepting, tells every connected
+# session its input has finished so each app restores its client's terminal
+# (leaving the alternate screen, showing the cursor), waits for them, and
+# exits 0. Measured at ~0.55s with sessions attached. Without that, every
+# connected user is left staring at a terminal still in the alternate screen
+# after a restart.
+#
+# So the default KillMode=control-group is right and KillSignal stays SIGTERM.
+# TimeoutStopSec only has to exceed the app's Config.shutdown_seconds (default
+# 5); past it systemd escalates to SIGKILL and the graceful path is lost.
+TimeoutStopSec=20
+
 # --- logging -----------------------------------------------------------------
 
 # ssh.audit_stderr writes one line per event to stderr; this is what puts those

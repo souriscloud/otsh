@@ -100,7 +100,13 @@ Server :: struct {
 	allocator:    mem.Allocator,
 	host:         string,
 	port:         int,
+	// Cleared to stop the accept loop; read atomically by it.
 	running:      bool,
+	// Set once shutdown begins. Every session's `read` returns "connection
+	// gone" while this is set, which is what walks an app's own loop back out
+	// through its Handler so the connection tears down through the ordinary
+	// path instead of being severed. Read atomically from every session thread.
+	draining:     bool,
 	warned_enum:  bool, // one-shot enumeration warning; touched atomically
 }
 
@@ -247,6 +253,13 @@ size :: proc "contextless" (s: ^Session) -> (cols, rows: int) {
 // a core per session. So libssh gets to do the parsing while we do the waiting,
 // on the session socket directly.
 read :: proc(s: ^Session, buf: []u8, timeout_ms: int) -> (n: int, ok: bool) {
+	// A draining server reports every session as finished. An app's loop is
+	// built to exit when its input dies, so this is what turns "stop the
+	// server" into each app running its own teardown — restoring the client's
+	// terminal, freeing its model — rather than having the socket yanked.
+	if sync.atomic_load(&s.server.draining) {
+		return 0, false
+	}
 	if s.input.count > 0 {
 		return ring_pop(&s.input, buf), true
 	}
@@ -347,7 +360,22 @@ Config :: struct {
 	ciphers:           string,
 	macs:              string,
 	hostkey_algorithms: string,
+	// Seconds `serve` waits for connected sessions to finish once shutdown
+	// starts. 0 uses DEFAULT_SHUTDOWN_SECONDS; negative returns immediately
+	// without waiting, which leaves clients' terminals in the alternate
+	// screen and is only sensible when you are about to exec or _exit anyway.
+	shutdown_seconds:  int,
+	// By default `serve` handles SIGINT and SIGTERM so the process stops
+	// without stranding anyone's terminal, restoring the previous handlers
+	// before it returns. Set this if the surrounding program owns signal
+	// handling itself; then use `shutdown` to stop the server.
+	no_signal_handlers: bool,
 }
+
+// How long the accept loop waits in poll before re-checking whether it has
+// been asked to stop. The upper bound on how long shutdown takes to begin.
+@(private)
+ACCEPT_POLL_MS :: 200
 
 // Modern-only. Every one of these is an AEAD or an ETM MAC with a
 // curve25519 exchange; nothing here depends on SHA-1, CBC, or NIST curves.
@@ -562,10 +590,36 @@ serve :: proc(cfg: Config) -> bool {
 	}
 
 	srv.running = true
+	if !cfg.no_signal_handlers {
+		install_signal_handlers()
+	}
+	defer if !cfg.no_signal_handlers {restore_signal_handlers()}
+
 	fmt.printfln("otsh: listening on %s:%d  →  ssh -p %d %s", cfg.host, cfg.port, cfg.port, cfg.host)
 	audit_emit(srv, Audit_Event{kind = .Listen, host = cfg.host, port = cfg.port})
 
-	for srv.running {
+	// The listening socket, watched directly so the loop can wait with a
+	// timeout. ssh_bind_accept blocks in accept(2) with no timeout of its own,
+	// which would mean a stop signal went unnoticed until the next client
+	// happened to connect — on an idle server, indefinitely.
+	listen_fd := ls.bind_get_fd(srv.bind)
+
+	for sync.atomic_load(&srv.running) {
+		if sync.atomic_load(&signal_requested) {
+			break
+		}
+		// Wait in poll, not in accept, so this loop wakes up regularly enough
+		// to notice a stop request. A signal interrupting the wait leaves
+		// alive == true; only a genuine poll failure ends the loop.
+		readable, alive := wait_readable(listen_fd, ACCEPT_POLL_MS)
+		if !alive {
+			fmt.eprintfln("otsh: accept poll failed: %s", ls.get_error(rawptr(srv.bind)))
+			break
+		}
+		if !readable {
+			continue
+		}
+
 		s := new(Session, srv.allocator)
 		s.server = srv
 		s.user_data = srv.user_data
@@ -574,8 +628,7 @@ serve :: proc(cfg: Config) -> bool {
 			free(s, srv.allocator)
 			continue
 		}
-		// ssh_bind_accept blocks until a TCP connection arrives; the crypto
-		// handshake happens later, on the connection's own thread.
+		// A connection is already pending, so this does not block.
 		if ls.bind_accept(srv.bind, s.sess) != ls.OK {
 			fmt.eprintfln("otsh: accept failed: %s", ls.get_error(rawptr(srv.bind)))
 			ls.free_session(s.sess)
@@ -607,6 +660,16 @@ serve :: proc(cfg: Config) -> bool {
 			ls.free_session(s.sess)
 			free(s, srv.allocator)
 		}
+	}
+
+	// Stop accepting, then let everyone still connected finish on their own.
+	sync.atomic_store(&srv.running, false)
+	sync.atomic_store(&srv.draining, true)
+
+	secs := cfg.shutdown_seconds
+	if secs == 0 {secs = DEFAULT_SHUTDOWN_SECONDS}
+	if secs > 0 {
+		report_shutdown(srv, drain_sessions(srv, secs), secs)
 	}
 
 	ls.bind_free(srv.bind)

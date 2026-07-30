@@ -230,6 +230,8 @@ foreign lib {
 	bind_listen :: proc(b: Bind) -> c.int ---
 	@(link_name = "ssh_bind_accept")
 	bind_accept :: proc(b: Bind, s: Session) -> c.int ---
+	@(link_name = "ssh_bind_get_fd")
+	bind_get_fd :: proc(b: Bind) -> Socket ---
 
 	// session
 	@(link_name = "ssh_new")

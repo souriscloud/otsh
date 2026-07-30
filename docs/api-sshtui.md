@@ -30,6 +30,13 @@ Config :: struct {
 	identity_secret: string,
 	// Resource limits; per field 0 = default, negative = unlimited.
 	limits:        ssh.Limits,
+	// Seconds to wait for connected apps to finish when the server is stopping,
+	// so each one restores its client's terminal instead of having it cut off.
+	// 0 uses ssh.DEFAULT_SHUTDOWN_SECONDS.
+	shutdown_seconds: int,
+	// By default the server stops cleanly on SIGINT/SIGTERM. Set this if the
+	// surrounding program handles signals itself.
+	no_signal_handlers: bool,
 	// Read ssh.Authenticator's docs first — rejecting keys here enumerates the
 	// client's agent. Authorize inside your app instead.
 	authenticate:  ssh.Authenticator, // nil accepts everyone
@@ -120,6 +127,13 @@ Config :: struct {
 	identity_secret: string,
 	// Resource limits; per field 0 = default, negative = unlimited.
 	limits:        ssh.Limits,
+	// Seconds to wait for connected apps to finish when the server is stopping,
+	// so each one restores its client's terminal instead of having it cut off.
+	// 0 uses ssh.DEFAULT_SHUTDOWN_SECONDS.
+	shutdown_seconds: int,
+	// By default the server stops cleanly on SIGINT/SIGTERM. Set this if the
+	// surrounding program handles signals itself.
+	no_signal_handlers: bool,
 	// Read ssh.Authenticator's docs first — rejecting keys here enumerates the
 	// client's agent. Authorize inside your app instead.
 	authenticate:  ssh.Authenticator, // nil accepts everyone
@@ -185,7 +199,7 @@ run_local :: proc(cfg: Config) -> bool
 Runs the same App against the local terminal. Handy during development:
 one flag switches between `--local` and serving.
 
-*sshtui/sshtui.odin:192*
+*sshtui/sshtui.odin:201*
 
 ### `serve`
 
@@ -195,4 +209,4 @@ serve :: proc(cfg: Config) -> bool
 
 Blocks, serving connections until the process exits.
 
-*sshtui/sshtui.odin:118*
+*sshtui/sshtui.odin:125*

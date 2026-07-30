@@ -10,7 +10,7 @@ Generated from `libssh/*.odin` by `docs/tools/gen_api.py`. For how these fit tog
 
 **Constants** — [`AGAIN`](#again), [`AUTH_METHOD_HOSTBASED`](#auth-method-hostbased), [`AUTH_METHOD_INTERACTIVE`](#auth-method-interactive), [`AUTH_METHOD_NONE`](#auth-method-none), [`AUTH_METHOD_PASSWORD`](#auth-method-password), [`AUTH_METHOD_PUBLICKEY`](#auth-method-publickey), [`AUTH_METHOD_UNKNOWN`](#auth-method-unknown), [`EOF`](#eof), [`ERROR`](#error), [`INVALID_SOCKET`](#invalid-socket), [`MIN_MAJOR`](#min-major), [`MIN_MICRO`](#min-micro), [`MIN_MINOR`](#min-minor), [`OK`](#ok), [`Socket`](#socket)
 
-**Procedures** — [`bind_accept`](#bind-accept), [`bind_free`](#bind-free), [`bind_listen`](#bind-listen), [`bind_new`](#bind-new), [`bind_options_set`](#bind-options-set), [`channel_close`](#channel-close), [`channel_free`](#channel-free), [`channel_is_eof`](#channel-is-eof), [`channel_is_open`](#channel-is-open), [`channel_new`](#channel-new), [`channel_request_send_exit_status`](#channel-request-send-exit-status), [`channel_send_eof`](#channel-send-eof), [`channel_write`](#channel-write), [`clean_pubkey_hash`](#clean-pubkey-hash), [`disconnect`](#disconnect), [`event_add_session`](#event-add-session), [`event_dopoll`](#event-dopoll), [`event_free`](#event-free), [`event_new`](#event-new), [`event_remove_session`](#event-remove-session), [`finalize`](#finalize), [`free_session`](#free-session), [`get_clientbanner`](#get-clientbanner), [`get_error`](#get-error), [`get_fd`](#get-fd), [`get_fingerprint_hash`](#get-fingerprint-hash), [`get_publickey_hash`](#get-publickey-hash), [`handle_key_exchange`](#handle-key-exchange), [`init`](#init), [`is_connected`](#is-connected), [`key_free`](#key-free), [`key_type`](#key-type), [`key_type_to_char`](#key-type-to-char), [`new_session`](#new-session), [`options_set`](#options-set), [`pki_export_privkey_file`](#pki-export-privkey-file), [`pki_generate`](#pki-generate), [`pki_import_privkey_file`](#pki-import-privkey-file), [`set_auth_methods`](#set-auth-methods), [`set_blocking`](#set-blocking), [`set_channel_callbacks`](#set-channel-callbacks), [`set_server_callbacks`](#set-server-callbacks), [`socket_valid`](#socket-valid), [`string_free_char`](#string-free-char), [`threads_get_pthread`](#threads-get-pthread), [`threads_set_callbacks`](#threads-set-callbacks), [`version`](#version), [`version_int`](#version-int)
+**Procedures** — [`bind_accept`](#bind-accept), [`bind_free`](#bind-free), [`bind_get_fd`](#bind-get-fd), [`bind_listen`](#bind-listen), [`bind_new`](#bind-new), [`bind_options_set`](#bind-options-set), [`channel_close`](#channel-close), [`channel_free`](#channel-free), [`channel_is_eof`](#channel-is-eof), [`channel_is_open`](#channel-is-open), [`channel_new`](#channel-new), [`channel_request_send_exit_status`](#channel-request-send-exit-status), [`channel_send_eof`](#channel-send-eof), [`channel_write`](#channel-write), [`clean_pubkey_hash`](#clean-pubkey-hash), [`disconnect`](#disconnect), [`event_add_session`](#event-add-session), [`event_dopoll`](#event-dopoll), [`event_free`](#event-free), [`event_new`](#event-new), [`event_remove_session`](#event-remove-session), [`finalize`](#finalize), [`free_session`](#free-session), [`get_clientbanner`](#get-clientbanner), [`get_error`](#get-error), [`get_fd`](#get-fd), [`get_fingerprint_hash`](#get-fingerprint-hash), [`get_publickey_hash`](#get-publickey-hash), [`handle_key_exchange`](#handle-key-exchange), [`init`](#init), [`is_connected`](#is-connected), [`key_free`](#key-free), [`key_type`](#key-type), [`key_type_to_char`](#key-type-to-char), [`new_session`](#new-session), [`options_set`](#options-set), [`pki_export_privkey_file`](#pki-export-privkey-file), [`pki_generate`](#pki-generate), [`pki_import_privkey_file`](#pki-import-privkey-file), [`set_auth_methods`](#set-auth-methods), [`set_blocking`](#set-blocking), [`set_channel_callbacks`](#set-channel-callbacks), [`set_server_callbacks`](#set-server-callbacks), [`socket_valid`](#socket-valid), [`string_free_char`](#string-free-char), [`threads_get_pthread`](#threads-get-pthread), [`threads_set_callbacks`](#threads-set-callbacks), [`version`](#version), [`version_int`](#version-int)
 
 ## Types
 
@@ -792,6 +792,14 @@ proc(b: Bind)
 
 *libssh/libssh.odin:226* · C: `ssh_bind_free`
 
+### `bind_get_fd`
+
+```odin
+proc(b: Bind) -> Socket
+```
+
+*libssh/libssh.odin:234* · C: `ssh_bind_get_fd`
+
 ### `bind_listen`
 
 ```odin
@@ -824,7 +832,7 @@ proc(b: Bind, opt: Bind_Option, value: rawptr) -> c.int
 proc(ch: Channel) -> c.int
 ```
 
-*libssh/libssh.odin:282* · C: `ssh_channel_close`
+*libssh/libssh.odin:284* · C: `ssh_channel_close`
 
 ### `channel_free`
 
@@ -832,7 +840,7 @@ proc(ch: Channel) -> c.int
 proc(ch: Channel)
 ```
 
-*libssh/libssh.odin:280* · C: `ssh_channel_free`
+*libssh/libssh.odin:282* · C: `ssh_channel_free`
 
 ### `channel_is_eof`
 
@@ -840,7 +848,7 @@ proc(ch: Channel)
 proc(ch: Channel) -> c.int
 ```
 
-*libssh/libssh.odin:288* · C: `ssh_channel_is_eof`
+*libssh/libssh.odin:290* · C: `ssh_channel_is_eof`
 
 ### `channel_is_open`
 
@@ -848,7 +856,7 @@ proc(ch: Channel) -> c.int
 proc(ch: Channel) -> c.int
 ```
 
-*libssh/libssh.odin:286* · C: `ssh_channel_is_open`
+*libssh/libssh.odin:288* · C: `ssh_channel_is_open`
 
 ### `channel_new`
 
@@ -858,7 +866,7 @@ proc(s: Session) -> Channel
 
 channel
 
-*libssh/libssh.odin:278* · C: `ssh_channel_new`
+*libssh/libssh.odin:280* · C: `ssh_channel_new`
 
 ### `channel_request_send_exit_status`
 
@@ -866,7 +874,7 @@ channel
 proc(ch: Channel, status: c.int) -> c.int
 ```
 
-*libssh/libssh.odin:292* · C: `ssh_channel_request_send_exit_status`
+*libssh/libssh.odin:294* · C: `ssh_channel_request_send_exit_status`
 
 ### `channel_send_eof`
 
@@ -874,7 +882,7 @@ proc(ch: Channel, status: c.int) -> c.int
 proc(ch: Channel) -> c.int
 ```
 
-*libssh/libssh.odin:284* · C: `ssh_channel_send_eof`
+*libssh/libssh.odin:286* · C: `ssh_channel_send_eof`
 
 ### `channel_write`
 
@@ -882,7 +890,7 @@ proc(ch: Channel) -> c.int
 proc(ch: Channel, data: rawptr, len: u32) -> c.int
 ```
 
-*libssh/libssh.odin:290* · C: `ssh_channel_write`
+*libssh/libssh.odin:292* · C: `ssh_channel_write`
 
 ### `clean_pubkey_hash`
 
@@ -890,7 +898,7 @@ proc(ch: Channel, data: rawptr, len: u32) -> c.int
 proc(hash: ^[^]u8)
 ```
 
-*libssh/libssh.odin:316* · C: `ssh_clean_pubkey_hash`
+*libssh/libssh.odin:318* · C: `ssh_clean_pubkey_hash`
 
 ### `disconnect`
 
@@ -898,7 +906,7 @@ proc(hash: ^[^]u8)
 proc(s: Session)
 ```
 
-*libssh/libssh.odin:240* · C: `ssh_disconnect`
+*libssh/libssh.odin:242* · C: `ssh_disconnect`
 
 ### `event_add_session`
 
@@ -906,7 +914,7 @@ proc(s: Session)
 proc(e: Event, s: Session) -> c.int
 ```
 
-*libssh/libssh.odin:270* · C: `ssh_event_add_session`
+*libssh/libssh.odin:272* · C: `ssh_event_add_session`
 
 ### `event_dopoll`
 
@@ -914,7 +922,7 @@ proc(e: Event, s: Session) -> c.int
 proc(e: Event, timeout_ms: c.int) -> c.int
 ```
 
-*libssh/libssh.odin:274* · C: `ssh_event_dopoll`
+*libssh/libssh.odin:276* · C: `ssh_event_dopoll`
 
 ### `event_free`
 
@@ -922,7 +930,7 @@ proc(e: Event, timeout_ms: c.int) -> c.int
 proc(e: Event)
 ```
 
-*libssh/libssh.odin:268* · C: `ssh_event_free`
+*libssh/libssh.odin:270* · C: `ssh_event_free`
 
 ### `event_new`
 
@@ -932,7 +940,7 @@ proc() -> Event
 
 event loop
 
-*libssh/libssh.odin:266* · C: `ssh_event_new`
+*libssh/libssh.odin:268* · C: `ssh_event_new`
 
 ### `event_remove_session`
 
@@ -940,7 +948,7 @@ event loop
 proc(e: Event, s: Session) -> c.int
 ```
 
-*libssh/libssh.odin:272* · C: `ssh_event_remove_session`
+*libssh/libssh.odin:274* · C: `ssh_event_remove_session`
 
 ### `finalize`
 
@@ -956,7 +964,7 @@ proc() -> c.int
 proc(s: Session)
 ```
 
-*libssh/libssh.odin:238* · C: `ssh_free`
+*libssh/libssh.odin:240* · C: `ssh_free`
 
 ### `get_clientbanner`
 
@@ -964,7 +972,7 @@ proc(s: Session)
 proc(s: Session) -> cstring
 ```
 
-*libssh/libssh.odin:256* · C: `ssh_get_clientbanner`
+*libssh/libssh.odin:258* · C: `ssh_get_clientbanner`
 
 ### `get_error`
 
@@ -972,7 +980,7 @@ proc(s: Session) -> cstring
 proc(s: rawptr) -> cstring
 ```
 
-*libssh/libssh.odin:254* · C: `ssh_get_error`
+*libssh/libssh.odin:256* · C: `ssh_get_error`
 
 ### `get_fd`
 
@@ -980,7 +988,7 @@ proc(s: rawptr) -> cstring
 proc(s: Session) -> Socket
 ```
 
-*libssh/libssh.odin:262* · C: `ssh_get_fd`
+*libssh/libssh.odin:264* · C: `ssh_get_fd`
 
 ### `get_fingerprint_hash`
 
@@ -988,7 +996,7 @@ proc(s: Session) -> Socket
 proc(type: Pubkey_Hash_Type, hash: [^]u8, len: c.size_t) -> cstring
 ```
 
-*libssh/libssh.odin:314* · C: `ssh_get_fingerprint_hash`
+*libssh/libssh.odin:316* · C: `ssh_get_fingerprint_hash`
 
 ### `get_publickey_hash`
 
@@ -998,7 +1006,7 @@ proc(k: Key, type: Pubkey_Hash_Type, hash: ^[^]u8, hlen: ^c.size_t) -> c.int
 
 fingerprints (public-key identity)
 
-*libssh/libssh.odin:312* · C: `ssh_get_publickey_hash`
+*libssh/libssh.odin:314* · C: `ssh_get_publickey_hash`
 
 ### `handle_key_exchange`
 
@@ -1006,7 +1014,7 @@ fingerprints (public-key identity)
 proc(s: Session) -> c.int
 ```
 
-*libssh/libssh.odin:242* · C: `ssh_handle_key_exchange`
+*libssh/libssh.odin:244* · C: `ssh_handle_key_exchange`
 
 ### `init`
 
@@ -1022,7 +1030,7 @@ proc() -> c.int
 proc(s: Session) -> c.int
 ```
 
-*libssh/libssh.odin:252* · C: `ssh_is_connected`
+*libssh/libssh.odin:254* · C: `ssh_is_connected`
 
 ### `key_free`
 
@@ -1030,7 +1038,7 @@ proc(s: Session) -> c.int
 proc(k: Key)
 ```
 
-*libssh/libssh.odin:304* · C: `ssh_key_free`
+*libssh/libssh.odin:306* · C: `ssh_key_free`
 
 ### `key_type`
 
@@ -1038,7 +1046,7 @@ proc(k: Key)
 proc(k: Key) -> Keytype
 ```
 
-*libssh/libssh.odin:306* · C: `ssh_key_type`
+*libssh/libssh.odin:308* · C: `ssh_key_type`
 
 ### `key_type_to_char`
 
@@ -1046,7 +1054,7 @@ proc(k: Key) -> Keytype
 proc(t: Keytype) -> cstring
 ```
 
-*libssh/libssh.odin:308* · C: `ssh_key_type_to_char`
+*libssh/libssh.odin:310* · C: `ssh_key_type_to_char`
 
 ### `new_session`
 
@@ -1056,7 +1064,7 @@ proc() -> Session
 
 session
 
-*libssh/libssh.odin:236* · C: `ssh_new`
+*libssh/libssh.odin:238* · C: `ssh_new`
 
 ### `options_set`
 
@@ -1064,7 +1072,7 @@ session
 proc(s: Session, opt: Session_Option, value: rawptr) -> c.int
 ```
 
-*libssh/libssh.odin:250* · C: `ssh_options_set`
+*libssh/libssh.odin:252* · C: `ssh_options_set`
 
 ### `pki_export_privkey_file`
 
@@ -1072,7 +1080,7 @@ proc(s: Session, opt: Session_Option, value: rawptr) -> c.int
 proc(privkey: Key, passphrase: cstring, auth_fn: rawptr, auth_data: rawptr, filename: cstring) -> c.int
 ```
 
-*libssh/libssh.odin:300* · C: `ssh_pki_export_privkey_file`
+*libssh/libssh.odin:302* · C: `ssh_pki_export_privkey_file`
 
 ### `pki_generate`
 
@@ -1082,7 +1090,7 @@ proc(type: Keytype, parameter: c.int, pkey: ^Key) -> c.int
 
 pki (host key generation)
 
-*libssh/libssh.odin:298* · C: `ssh_pki_generate`
+*libssh/libssh.odin:300* · C: `ssh_pki_generate`
 
 ### `pki_import_privkey_file`
 
@@ -1090,7 +1098,7 @@ pki (host key generation)
 proc(filename: cstring, passphrase: cstring, auth_fn: rawptr, auth_data: rawptr, pkey: ^Key) -> c.int
 ```
 
-*libssh/libssh.odin:302* · C: `ssh_pki_import_privkey_file`
+*libssh/libssh.odin:304* · C: `ssh_pki_import_privkey_file`
 
 ### `set_auth_methods`
 
@@ -1098,7 +1106,7 @@ proc(filename: cstring, passphrase: cstring, auth_fn: rawptr, auth_data: rawptr,
 proc(s: Session, methods: c.int)
 ```
 
-*libssh/libssh.odin:244* · C: `ssh_set_auth_methods`
+*libssh/libssh.odin:246* · C: `ssh_set_auth_methods`
 
 ### `set_blocking`
 
@@ -1106,7 +1114,7 @@ proc(s: Session, methods: c.int)
 proc(s: Session, blocking: c.int)
 ```
 
-*libssh/libssh.odin:248* · C: `ssh_set_blocking`
+*libssh/libssh.odin:250* · C: `ssh_set_blocking`
 
 ### `set_channel_callbacks`
 
@@ -1114,7 +1122,7 @@ proc(s: Session, blocking: c.int)
 proc(ch: Channel, cb: ^Channel_Callbacks) -> c.int
 ```
 
-*libssh/libssh.odin:294* · C: `ssh_set_channel_callbacks`
+*libssh/libssh.odin:296* · C: `ssh_set_channel_callbacks`
 
 ### `set_server_callbacks`
 
@@ -1122,7 +1130,7 @@ proc(ch: Channel, cb: ^Channel_Callbacks) -> c.int
 proc(s: Session, cb: ^Server_Callbacks) -> c.int
 ```
 
-*libssh/libssh.odin:246* · C: `ssh_set_server_callbacks`
+*libssh/libssh.odin:248* · C: `ssh_set_server_callbacks`
 
 ### `socket_valid`
 
@@ -1142,7 +1150,7 @@ unsigned.
 proc(s: cstring)
 ```
 
-*libssh/libssh.odin:318* · C: `ssh_string_free_char`
+*libssh/libssh.odin:320* · C: `ssh_string_free_char`
 
 ### `threads_get_pthread`
 
@@ -1168,7 +1176,7 @@ proc(req_version: c.int) -> cstring
 
 Returns the runtime library version as text, or nil if the library is older than the (major<<16 | minor<<8 | micro) value passed in.
 
-*libssh/libssh.odin:260* · C: `ssh_version`
+*libssh/libssh.odin:262* · C: `ssh_version`
 
 ### `version_int`
 

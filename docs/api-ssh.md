@@ -8,9 +8,9 @@ Generated from `ssh/*.odin` by `docs/tools/gen_api.py`. For how these fit togeth
 
 **Types** — [`Audit_Event`](#audit-event), [`Audit_Kind`](#audit-kind), [`Audit_Limit`](#audit-limit), [`Audit_Sink`](#audit-sink), [`Auth_Method`](#auth-method), [`Auth_Methods`](#auth-methods), [`Auth_Request`](#auth-request), [`Authenticator`](#authenticator), [`Config`](#config), [`Handler`](#handler), [`Identity_Secret`](#identity-secret), [`Limits`](#limits), [`Pty`](#pty), [`Ring`](#ring), [`Server`](#server), [`Session`](#session)
 
-**Constants** — [`ALL_AUTH`](#all-auth), [`AUDIT_LINE_MAX`](#audit-line-max), [`DEFAULT_CIPHERS`](#default-ciphers), [`DEFAULT_HOST`](#default-host), [`DEFAULT_HOST_KEY`](#default-host-key), [`DEFAULT_HOSTKEYS`](#default-hostkeys), [`DEFAULT_KEX`](#default-kex), [`DEFAULT_LIMITS`](#default-limits), [`DEFAULT_MACS`](#default-macs), [`DEFAULT_PORT`](#default-port), [`ID_BYTES`](#id-bytes), [`ID_SIZE`](#id-size), [`MAX_INPUT`](#max-input), [`MAX_PTY_COLS`](#max-pty-cols), [`MAX_PTY_ROWS`](#max-pty-rows), [`SECRET_SIZE`](#secret-size)
+**Constants** — [`ALL_AUTH`](#all-auth), [`AUDIT_LINE_MAX`](#audit-line-max), [`DEFAULT_CIPHERS`](#default-ciphers), [`DEFAULT_HOST`](#default-host), [`DEFAULT_HOST_KEY`](#default-host-key), [`DEFAULT_HOSTKEYS`](#default-hostkeys), [`DEFAULT_KEX`](#default-kex), [`DEFAULT_LIMITS`](#default-limits), [`DEFAULT_MACS`](#default-macs), [`DEFAULT_PORT`](#default-port), [`DEFAULT_SHUTDOWN_SECONDS`](#default-shutdown-seconds), [`ID_BYTES`](#id-bytes), [`ID_SIZE`](#id-size), [`MAX_INPUT`](#max-input), [`MAX_PTY_COLS`](#max-pty-cols), [`MAX_PTY_ROWS`](#max-pty-rows), [`SECRET_SIZE`](#secret-size)
 
-**Procedures** — [`audit_format`](#audit-format), [`audit_stderr`](#audit-stderr), [`ensure_host_key`](#ensure-host-key), [`fingerprint`](#fingerprint), [`id`](#id), [`ids_equal`](#ids-equal), [`key_type`](#key-type), [`load_or_create_secret`](#load-or-create-secret), [`pseudonym`](#pseudonym), [`read`](#read), [`remote_addr`](#remote-addr), [`ring_pop`](#ring-pop), [`ring_push`](#ring-push), [`serve`](#serve), [`size`](#size), [`take_resize`](#take-resize), [`term`](#term), [`user`](#user), [`warn_if_world_readable`](#warn-if-world-readable), [`write`](#write), [`write_string`](#write-string)
+**Procedures** — [`audit_format`](#audit-format), [`audit_stderr`](#audit-stderr), [`ensure_host_key`](#ensure-host-key), [`fingerprint`](#fingerprint), [`id`](#id), [`ids_equal`](#ids-equal), [`key_type`](#key-type), [`load_or_create_secret`](#load-or-create-secret), [`pseudonym`](#pseudonym), [`read`](#read), [`remote_addr`](#remote-addr), [`ring_pop`](#ring-pop), [`ring_push`](#ring-push), [`serve`](#serve), [`shutdown`](#shutdown), [`shutting_down`](#shutting-down), [`size`](#size), [`take_resize`](#take-resize), [`term`](#term), [`user`](#user), [`warn_if_world_readable`](#warn-if-world-readable), [`write`](#write), [`write_string`](#write-string)
 
 ## Types
 
@@ -200,13 +200,23 @@ Config :: struct {
 	ciphers:           string,
 	macs:              string,
 	hostkey_algorithms: string,
+	// Seconds `serve` waits for connected sessions to finish once shutdown
+	// starts. 0 uses DEFAULT_SHUTDOWN_SECONDS; negative returns immediately
+	// without waiting, which leaves clients' terminals in the alternate
+	// screen and is only sensible when you are about to exec or _exit anyway.
+	shutdown_seconds:  int,
+	// By default `serve` handles SIGINT and SIGTERM so the process stops
+	// without stranding anyone's terminal, restoring the previous handlers
+	// before it returns. Set this if the surrounding program owns signal
+	// handling itself; then use `shutdown` to stop the server.
+	no_signal_handlers: bool,
 }
 ```
 
 How to run the server. Every field has a documented default, so the zero value
 is a working — if wide open — public server on port 2222.
 
-*ssh/server.odin:321*
+*ssh/server.odin:334*
 
 ### `Handler`
 
@@ -277,7 +287,7 @@ Pty :: struct {
 The terminal geometry the client asked for. No pseudo-terminal is actually
 allocated — this is just what the client told us about its own.
 
-*ssh/server.odin:115*
+*ssh/server.odin:121*
 
 ### `Ring`
 
@@ -292,7 +302,7 @@ Ring :: struct {
 Fixed-size byte ring for incoming keystrokes. Fixed so that libssh callbacks,
 which run without an Odin context, never touch an allocator.
 
-*ssh/server.odin:167*
+*ssh/server.odin:173*
 
 ### `Server`
 
@@ -320,7 +330,13 @@ Server :: struct {
 	allocator:    mem.Allocator,
 	host:         string,
 	port:         int,
+	// Cleared to stop the accept loop; read atomically by it.
 	running:      bool,
+	// Set once shutdown begins. Every session's `read` returns "connection
+	// gone" while this is set, which is what walks an app's own loop back out
+	// through its Handler so the connection tears down through the ordinary
+	// path instead of being severed. Read atomically from every session thread.
+	draining:     bool,
 	warned_enum:  bool, // one-shot enumeration warning; touched atomically
 }
 ```
@@ -374,7 +390,7 @@ One connection. Created and freed by the accept loop; your `Handler` owns it
 for the duration of the call. All its string accessors borrow memory that
 dies with the session.
 
-*ssh/server.odin:127*
+*ssh/server.odin:133*
 
 ## Constants
 
@@ -462,7 +478,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 
 AEAD ciphers only: no CBC, no stream ciphers with separate MACs.
 
-*ssh/server.odin:356*
+*ssh/server.odin:384*
 
 ### `DEFAULT_HOST`
 
@@ -484,7 +500,7 @@ DEFAULT_HOST_KEY :: "hostkey"
 Defaults applied to a zero-valued Config field. sshtui fills these in too;
 they live here as well so calling ssh.serve directly cannot bind port 0.
 
-*ssh/server.odin:472*
+*ssh/server.odin:500*
 
 ### `DEFAULT_HOST_KEY`
 
@@ -501,7 +517,7 @@ DEFAULT_HOST_KEY :: "hostkey"
 
 Host key path used when `Config.host_key_path` is empty.
 
-*ssh/server.odin:476*
+*ssh/server.odin:504*
 
 ### `DEFAULT_HOSTKEYS`
 
@@ -549,7 +565,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 
 Ed25519 only — matches the key `ensure_host_key` generates.
 
-*ssh/server.odin:360*
+*ssh/server.odin:388*
 
 ### `DEFAULT_KEX`
 
@@ -599,7 +615,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 Modern-only. Every one of these is an AEAD or an ETM MAC with a
 curve25519 exchange; nothing here depends on SHA-1, CBC, or NIST curves.
 
-*ssh/server.odin:354*
+*ssh/server.odin:382*
 
 ### `DEFAULT_LIMITS`
 
@@ -664,7 +680,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 
 Encrypt-then-MAC only, SHA-2 only.
 
-*ssh/server.odin:358*
+*ssh/server.odin:386*
 
 ### `DEFAULT_PORT`
 
@@ -683,7 +699,30 @@ DEFAULT_HOST_KEY :: "hostkey"
 
 Port used when `Config.port` is zero.
 
-*ssh/server.odin:474*
+*ssh/server.odin:502*
+
+### `DEFAULT_SHUTDOWN_SECONDS`
+
+```odin
+DEFAULT_SHUTDOWN_SECONDS :: 5
+
+// Set by the signal handler, read by the accept loop.
+//
+// Package-level because a `proc "c"` signal handler receives nothing but the
+// signal number: there is no way to hand it a Server pointer. That makes
+// signal-driven shutdown process-wide, which is the right shape for it —
+// SIGTERM means "this process is stopping", not "one of its listeners is".
+// A process running two servers stops both, and `shutdown` remains the way to
+// stop one of them on its own.
+@(private)
+```
+
+How long `serve` waits for connected sessions to finish once shutdown
+begins, when `Config.shutdown_seconds` is zero. Long enough for an app to
+notice its input has closed and paint one last frame, short enough not to
+hold up a service restart.
+
+*ssh/shutdown.odin:31*
 
 ### `ID_BYTES`
 
@@ -767,7 +806,7 @@ Upper bounds on client-supplied terminal geometry, matching tui's own limits.
 pty-req and window-change both carry uint32 dimensions chosen by the client;
 unclamped they are an allocation-size overflow and a remote crash.
 
-*ssh/server.odin:110*
+*ssh/server.odin:116*
 
 ### `MAX_PTY_ROWS`
 
@@ -786,7 +825,7 @@ Pty :: struct {
 }
 ```
 
-*ssh/server.odin:111*
+*ssh/server.odin:117*
 
 ### `SECRET_SIZE`
 
@@ -852,7 +891,7 @@ Creates the host key if it does not exist yet — the SSH equivalent of a TLS
 certificate. Clients pin it in ~/.ssh/known_hosts, so it must be stable
 across restarts.
 
-*ssh/server.odin:365*
+*ssh/server.odin:393*
 
 ### `fingerprint`
 
@@ -863,7 +902,7 @@ fingerprint :: proc "contextless" (s: ^Session) -> string
 SHA256 fingerprint of the key the client authenticated with, or "" if they
 did not use one. Stable across connections — use it as an account id.
 
-*ssh/server.odin:209*
+*ssh/server.odin:215*
 
 ### `id`
 
@@ -875,7 +914,7 @@ Pseudonymous account id: HMAC(server secret, fingerprint). Empty unless an
 identity secret is configured and the client used a key. Store this, not the
 fingerprint. See identity.odin.
 
-*ssh/server.odin:222*
+*ssh/server.odin:228*
 
 ### `ids_equal`
 
@@ -897,7 +936,7 @@ key_type :: proc "contextless" (s: ^Session) -> string
 The verified key's algorithm, e.g. "ssh-ed25519". Empty unless public-key
 auth was used.
 
-*ssh/server.odin:215*
+*ssh/server.odin:221*
 
 ### `load_or_create_secret`
 
@@ -938,7 +977,7 @@ actually block for us — it returns immediately every time, which would spin
 a core per session. So libssh gets to do the parsing while we do the waiting,
 on the session socket directly.
 
-*ssh/server.odin:249*
+*ssh/server.odin:255*
 
 ### `remote_addr`
 
@@ -948,7 +987,7 @@ remote_addr :: proc "contextless" (s: ^Session) -> string
 
 Numeric peer address, no reverse DNS.
 
-*ssh/server.odin:227*
+*ssh/server.odin:233*
 
 ### `ring_pop`
 
@@ -958,7 +997,7 @@ ring_pop :: proc "contextless" (r: ^Ring, dst: []u8) -> int
 
 Removes up to `len(dst)` bytes, returning how many were moved.
 
-*ssh/server.odin:184*
+*ssh/server.odin:190*
 
 ### `ring_push`
 
@@ -968,7 +1007,7 @@ ring_push :: proc "contextless" (r: ^Ring, src: []u8) -> int
 
 Appends what fits, returning how many bytes were taken.
 
-*ssh/server.odin:174*
+*ssh/server.odin:180*
 
 ### `serve`
 
@@ -976,7 +1015,30 @@ Appends what fits, returning how many bytes were taken.
 serve :: proc(cfg: Config) -> bool
 ```
 
-*ssh/server.odin:501*
+*ssh/server.odin:529*
+
+### `shutdown`
+
+```odin
+shutdown :: proc(srv: ^Server)
+```
+
+Asks `srv` to stop: the accept loop exits, connected sessions are told their
+input has finished, and `serve` returns once they are gone or the deadline
+passes. Safe to call from any thread, including from inside a Handler.
+
+*ssh/shutdown.odin:53*
+
+### `shutting_down`
+
+```odin
+shutting_down :: proc "contextless" () -> bool
+```
+
+True once a signal asked this process to stop. Useful to an app that wants
+to know why its loop is unwinding.
+
+*ssh/shutdown.odin:46*
 
 ### `size`
 
@@ -987,7 +1049,7 @@ size :: proc "contextless" (s: ^Session) -> (cols, rows: int)
 Current terminal geometry in cells, falling back to 80x24 if the client never
 said.
 
-*ssh/server.odin:233*
+*ssh/server.odin:239*
 
 ### `take_resize`
 
@@ -997,7 +1059,7 @@ take_resize :: proc "contextless" (s: ^Session) -> bool
 
 True exactly once after each window resize.
 
-*ssh/server.odin:311*
+*ssh/server.odin:324*
 
 ### `term`
 
@@ -1007,7 +1069,7 @@ term :: proc "contextless" (s: ^Session) -> string
 
 The client's `$TERM`, e.g. "xterm-256color". Empty if no pty was requested.
 
-*ssh/server.odin:203*
+*ssh/server.odin:209*
 
 ### `user`
 
@@ -1018,7 +1080,7 @@ user :: proc "contextless" (s: ^Session) -> string
 The username the client offered. Client-chosen and unverified — never use it
 as identity; use `id` instead.
 
-*ssh/server.odin:198*
+*ssh/server.odin:204*
 
 ### `warn_if_world_readable`
 
@@ -1040,7 +1102,7 @@ write :: proc(s: ^Session, data: []u8) -> int
 Sends bytes to the client. Returns how many were written, 0 once the
 connection is gone.
 
-*ssh/server.odin:293*
+*ssh/server.odin:306*
 
 ### `write_string`
 
@@ -1050,4 +1112,4 @@ write_string :: proc(s: ^Session, str: string) -> int
 
 `write` for a string.
 
-*ssh/server.odin:306*
+*ssh/server.odin:319*

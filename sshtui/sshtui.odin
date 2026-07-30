@@ -98,6 +98,13 @@ Config :: struct {
 	identity_secret: string,
 	// Resource limits; per field 0 = default, negative = unlimited.
 	limits:        ssh.Limits,
+	// Seconds to wait for connected apps to finish when the server is stopping,
+	// so each one restores its client's terminal instead of having it cut off.
+	// 0 uses ssh.DEFAULT_SHUTDOWN_SECONDS.
+	shutdown_seconds: int,
+	// By default the server stops cleanly on SIGINT/SIGTERM. Set this if the
+	// surrounding program handles signals itself.
+	no_signal_handlers: bool,
 	// Read ssh.Authenticator's docs first — rejecting keys here enumerates the
 	// client's agent. Authorize inside your app instead.
 	authenticate:  ssh.Authenticator, // nil accepts everyone
@@ -137,6 +144,8 @@ serve :: proc(cfg: Config) -> bool {
 			identity_secret = c.identity_secret,
 			limits = c.limits,
 			audit = c.audit,
+			shutdown_seconds = c.shutdown_seconds,
+			no_signal_handlers = c.no_signal_handlers,
 			handler = on_session,
 			user_data = c,
 		},
