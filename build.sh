@@ -12,8 +12,15 @@ set -euo pipefail
 OTSH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Compiler resolution: $ODIN if set, else a gitignored .odin-path file next to
 # this script (for machines where the compiler is not on PATH), else `odin`.
+# .odin-path is only taken when it actually resolves: one checkout can be seen
+# by two machines at once — a container with the worktree bind-mounted in, for
+# instance — and a path written on the other one must not shadow a perfectly
+# good `odin` on this one's $PATH.
 if [ -z "${ODIN:-}" ] && [ -f "$OTSH/.odin-path" ]; then
-	ODIN="$(cat "$OTSH/.odin-path")"
+	odin_path="$(cat "$OTSH/.odin-path")"
+	if command -v "$odin_path" >/dev/null; then
+		ODIN="$odin_path"
+	fi
 fi
 ODIN="${ODIN:-odin}"
 if ! command -v "$ODIN" >/dev/null; then

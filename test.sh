@@ -6,9 +6,13 @@
 set -euo pipefail
 
 OTSH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Same compiler resolution as build.sh: $ODIN, then .odin-path, then PATH.
+# Same compiler resolution as build.sh: $ODIN, then .odin-path if it resolves,
+# then PATH. See the comment there for why the "if it resolves" matters.
 if [ -z "${ODIN:-}" ] && [ -f "$OTSH/.odin-path" ]; then
-	ODIN="$(cat "$OTSH/.odin-path")"
+	odin_path="$(cat "$OTSH/.odin-path")"
+	if command -v "$odin_path" >/dev/null; then
+		ODIN="$odin_path"
+	fi
 fi
 ODIN="${ODIN:-odin}"
 if ! command -v "$ODIN" >/dev/null; then
