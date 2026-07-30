@@ -24,8 +24,17 @@ foreign libc_ {
 	ioctl :: proc(fd: c.int, request: c.ulong, #c_vararg args: ..any) -> c.int ---
 }
 
+// TIOCGWINSZ is not POSIX, so its value is per-kernel rather than per-standard.
+// Linux uses a flat number, 0x5413. The BSDs — macOS and FreeBSD included —
+// encode direction and payload size into the request instead:
+// _IOR('t', 104, struct winsize) with an 8-byte winsize is 0x40087468. Linux is
+// therefore the exception here and everything else POSIX gets the BSD value;
+// writing it the other way round handed FreeBSD the Linux number and made
+// `size` fall back to 80x24 there on every call. Cross-check: Odin's own
+// core/sys/linux/constants.odin says 0x5413 and core/sys/freebsd/constants.odin
+// says 0x40087468.
 @(private)
-TIOCGWINSZ :: 0x40087468 when ODIN_OS == .Darwin else 0x5413
+TIOCGWINSZ :: 0x5413 when ODIN_OS == .Linux else 0x40087468
 
 @(private)
 Winsize :: struct {

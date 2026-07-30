@@ -15,9 +15,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # clang is listed on purpose even though the ubuntu-latest runner image
+      # already has it: Odin shells out to `clang` to link on Linux, and on a
+      # stock ubuntu:24.04 with only libssh-dev and pkg-config installed,
+      # ./build.sh dies with "sh: 1: clang: not found" (measured in a
+      # container). Naming it here means this job describes its own
+      # dependencies instead of inheriting them from the runner image.
       - name: Install libssh (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libssh-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libssh-dev pkg-config clang
 
       - name: Install libssh (macOS)
         if: runner.os == 'macOS'
@@ -51,6 +57,20 @@ jobs:
           done
           for ex in examples/*/; do
             odin check "$ex" -collection:otsh=. -target:windows_amd64
+          done
+
+      # FreeBSD is a claimed platform with no runner and no builds behind it,
+      # which is how tui/local.odin's TIOCGWINSZ came to hold the Linux value
+      # there. Type-checking is not running it, but it is the only automated
+      # statement about FreeBSD that exists, and it is free.
+      - name: Cross-type-check every package and example for FreeBSD
+        if: runner.os == 'Linux'
+        run: |
+          for pkg in libssh ssh tui sshtui; do
+            odin check "$pkg" -collection:otsh=. -target:freebsd_amd64 -no-entry-point
+          done
+          for ex in examples/*/; do
+            odin check "$ex" -collection:otsh=. -target:freebsd_amd64
           done
 
   # EXPERIMENTAL — nobody has run otsh on real Windows yet. This job exists to

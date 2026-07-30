@@ -14,22 +14,81 @@ before you expose anything here to the network.
 - **libssh ≥ 0.10.** `brew install libssh` on macOS, `apt install libssh-dev`
   on Debian/Ubuntu. otsh does not vendor libssh — `otsh:libssh` is bindings
   against your system copy.
-- **macOS, Linux or FreeBSD.** Windows has an experimental port that nobody
-  has run yet — see [Platform support](#platform-support) immediately below
-  before you rely on it.
+- **clang.** Odin shells out to `clang` to link, and on Linux it is not
+  optional: on a stock `ubuntu:24.04` carrying only `libssh-dev` and
+  `pkg-config`, `./build.sh` stops at `sh: 1: clang: not found`, and adding
+  `build-essential` does not fix it — gcc is not a substitute. `apt install
+  clang`. On macOS the Command Line Tools already provide it.
+- **macOS, Linux or FreeBSD.** macOS and Linux have both been built and run;
+  FreeBSD has not. Windows has an experimental port that nobody has run
+  either — see [Platform support](#platform-support) immediately below before
+  you rely on either of those two.
 
-`build.sh` looks for an `odin` binary via the `$ODIN` environment variable,
-then on your `$PATH`. If neither resolves, it falls back to a hardcoded path
-used by this checkout's development environment
-(`/Users/souris/work/bench/odin/odin-lang/odin`) — that fallback only matters
-if you're working in this exact repo instance; set `$ODIN` or put `odin` on
-your `$PATH` anywhere else.
+`build.sh` and `test.sh` resolve the compiler in this order: `$ODIN` if it is
+set; then a gitignored `.odin-path` file next to the script, if what it
+contains resolves to an executable; then `odin` on your `$PATH`. `.odin-path`
+exists for machines where the compiler is not on `$PATH`, and is never
+committed. A path in it that does not resolve is skipped rather than obeyed,
+so one checkout seen by two machines at once — a worktree bind-mounted into a
+container, say — still builds on the machine the file was not written on.
 
 ## Platform support
 
-**macOS, Linux and FreeBSD are the supported platforms.** They are what the
-library is developed and tested on, and what CI builds and runs the test suite
-on.
+Four platforms get mentioned around here and they are not equally real. In
+descending order of evidence: **macOS is developed on, Linux has been built
+and run, FreeBSD only type-checks, Windows only type-checks.** The rest of
+this section is the evidence for each, stated as what was run rather than as
+what is expected to work — the FreeBSD bug in the next paragraph is what an
+unmeasured "supported" is worth.
+
+### Linux — built, tested and run
+
+Verified on 2026-07-30 in a container, top to bottom:
+
+- **Ubuntu 24.04.4 LTS** (the `ubuntu:24.04` image, which is what CI's
+  `ubuntu-latest` resolves to), **libssh 0.10.6** (`libssh-dev`
+  0.10.6-2ubuntu0.4), **Odin dev-2026-07-nightly:819fdc7** (the prebuilt
+  `dev-2026-07a` release), **clang 18.1.3**, client **OpenSSH_9.6p1**. Run on
+  `aarch64`; `./build.sh`, every example and the whole test suite were also
+  run on `x86_64` with the same distro, libssh and Odin.
+- `./build.sh`, `./build.sh` for each of the five `examples/`, and `./test.sh`
+  (62 tests) all pass, unmodified — the same three commands CI's Linux job
+  runs. So do the Windows and FreeBSD cross-type-checks.
+- Actually run, not just built: `examples/tracker` served over a real
+  `openssh` connection from a pty, rendering frames, reacting to keystrokes,
+  reflowing on a window-change, and shutting down cleanly on `q`; eight
+  concurrent sessions; five clients `SIGKILL`ed mid-frame without taking the
+  server with them; a ninth connection refused by `Limits.max_per_ip` and
+  audited as `limit=per_ip`; `examples/stopwatch` and `tracker --local` driven
+  through `tui/local.odin`'s raw mode on a local pty.
+- The Linux-only paths specifically: `ssh/net_posix.odin`'s `poll` and its
+  `peer_address` (`getpeername`/`inet_ntop`), read back out of the audit log
+  as `addr=127.0.0.1` over IPv4 and `addr=::1` over IPv6;
+  `ssh/perm_posix.odin` creating the host key and identity secret `0600` and
+  warning about them at `0644` and `0640`; `tui/local.odin`'s `TIOCGWINSZ`,
+  which is a different number on Linux than on the BSDs and which reported
+  every pty size it was given rather than falling back to 80x24.
+- The test suite also passes under `-sanitize:address`, and a `tracker` built
+  with ASan served a full session without a single report.
+
+Not verified on Linux: any distro other than Ubuntu 24.04, musl/Alpine, a
+non-container host, systemd (`deploy/otsh.service`), and live journald/fail2ban
+— `deploy/fail2ban/test_filter.py` passes, but that checks the filter against
+the audit-line contract, not against a running fail2ban.
+
+### FreeBSD — type-checks only
+
+Nobody has built or run otsh on FreeBSD, and the cost of that showed up here:
+`tui/local.odin`'s `TIOCGWINSZ` was written as "the macOS value on Darwin, the
+Linux value everywhere else", which handed FreeBSD `0x5413` when its kernel
+wants the BSD encoding `0x40087468` (Odin's own
+`core/sys/freebsd/constants.odin` says so). Every local-terminal app on
+FreeBSD would have silently rendered at the 80x24 fallback forever. The
+constant is now keyed off Linux being the exception, and CI cross-type-checks
+every package and example for `freebsd_amd64` — but type-checking is not
+running, and no FreeBSD claim here is stronger than that.
+
+### Windows — type-checks, plus a job that may never have been green
 
 **Windows support is experimental and has never been validated by a human on
 real Windows.** Here is exactly what does and does not stand behind it:
@@ -307,6 +366,14 @@ no separate build step for otsh itself. The `-extra-linker-flags` are needed
 because libssh is not always on the default linker search path (notably on
 Homebrew/macOS); without `-rpath` the binary links but fails to find
 `libssh.dylib`/`.so` at runtime.
+
+That is measured on Linux too, not only inferred from macOS: with libssh moved
+to `/opt/libssh/lib` and its `.pc` file pointing there, `build.sh` produced a
+binary with `RUNPATH=/opt/libssh/lib` that starts with no `LD_LIBRARY_PATH` at
+all, while the same link without `-rpath` produced one that dies with
+`error while loading shared libraries: libssh.so.4`. On a distro that keeps
+libssh in the default multiarch libdir the flag is a no-op, which is why it
+takes a non-default prefix to see it working.
 
 `./build.sh path/to/yourapp` (run from inside this repo) passes exactly these
 two flags for you, using `pkg-config` when it's available and falling back to
