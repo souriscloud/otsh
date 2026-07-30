@@ -112,8 +112,8 @@ seed_board :: proc() {
 	     "The fix lives where the issue said it must: in front of the process. deploy/ ships nftables/pf rate limits, a fail2ban filter over the audit log, and a hardened systemd unit; docs/deploy.md walks the layering. The process itself still cannot stop a spread-out flood, and the docs keep saying so.", 1)
 	seed(.Closed, "wide glyphs need a real width table",
 	     "rune_width is generated from Unicode East Asian Width data (docs/tools/gen_width.py), ambiguous-width narrow so box borders survive. Grapheme clustering stays out of scope: ZWJ sequences measure as their parts.", 6)
-	seed(.Open, "handshake can deadlock: libssh only drains its read buffer on POLLIN",
-	     "Under CPU load, 1 connection in 3 hangs after key exchange: the client waits, the session thread sits in poll(2). Cause is in libssh — a socket read can pull the client's post-kex packets into in_buffer, but that buffer is only processed from the POLLIN branch of ssh_socket_pollcallback. With nothing further to send, the client never makes the socket readable again and both sides wait forever. ssh_event_dopoll, ssh_handle_packets and ssh_message_get all poll first and none inspect in_buffer, so no public API drains it — an attempted ssh_message_get workaround still stalled 12 of 30 runs. Needs an upstream fix or a libssh-internal workaround.", 0)
+	seed(.Closed, "handshake deadlocked once in three connections under load",
+	     "Server callbacks were installed after ssh_handle_key_exchange instead of before it. The client's SERVICE_REQUEST arrives coalesced with NEWKEYS, and libssh only answers it when callbacks already exist — otherwise it queues the message where nothing drains it, so no SERVICE_ACCEPT is ever sent and the connection dies at the handshake timeout. Ordering fixed: 12/30 stalls became 0/30. It was blamed on libssh buffering first; a C reproducer refuted that.", 3)
 }
 
 // Applies `edit` to the issue with `id`, under the lock, and marks it changed.

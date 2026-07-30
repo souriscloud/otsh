@@ -645,12 +645,22 @@ session_thread :: proc(s: ^Session) {
 		ls.options_set(s.sess, .Timeout, &t)
 	}
 
-	// Key exchange: negotiates ciphers and proves we own the host key.
-	if ls.handle_key_exchange(s.sess) != ls.OK {
-		audit_emit(s.server, Audit_Event{kind = .Kex_Fail, addr = remote_addr(s)})
-		return
-	}
-
+	// Callbacks and auth methods MUST be installed before key exchange, not
+	// after. The client's SERVICE_REQUEST routinely shares a TCP segment with
+	// its NEWKEYS, so handle_key_exchange consumes it — and libssh's
+	// ssh_message_queue only answers a service request when server callbacks
+	// are already set. With none set, it appends the message to an internal
+	// list that nothing ever drains: no SERVICE_ACCEPT is sent, the client
+	// waits for a reply that will never come, and the connection dies at the
+	// handshake timeout with no error anywhere. Whether it happens depends on
+	// how the client's packets were coalesced, which is why it presented as a
+	// load-dependent 1-in-3 hang. Measured: 12/30 connections stalled with
+	// this block after handle_key_exchange, 0/30 with it before, on libssh
+	// 0.10.6, 0.11.2 and 0.12.2 alike.
+	//
+	// Consequence to respect: authentication can now complete *inside*
+	// handle_key_exchange, so nothing below may assume s.authenticated is
+	// false at this point. The pump loop's condition already allows for it.
 	s.server_cb = ls.Server_Callbacks {
 		size                                  = size_of(ls.Server_Callbacks),
 		userdata                              = s,
@@ -666,6 +676,12 @@ session_thread :: proc(s: ^Session) {
 	if .Password in s.server.methods {methods |= ls.AUTH_METHOD_PASSWORD}
 	if .Publickey in s.server.methods {methods |= ls.AUTH_METHOD_PUBLICKEY}
 	ls.set_auth_methods(s.sess, methods)
+
+	// Key exchange: negotiates ciphers and proves we own the host key.
+	if ls.handle_key_exchange(s.sess) != ls.OK {
+		audit_emit(s.server, Audit_Event{kind = .Kex_Fail, addr = remote_addr(s)})
+		return
+	}
 
 	s.event = ls.event_new()
 	ls.event_add_session(s.event, s.sess)

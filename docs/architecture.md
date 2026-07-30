@@ -345,30 +345,48 @@ own synchronization; nothing here provides it for free.
 
 ## Known rough edges
 
-**The handshake can deadlock, and the cause is inside libssh.** Under CPU
-load, roughly one connection in three never gets past key exchange: the
-client sits waiting for a reply, the session thread sits in `poll(2)`, and
-after `handshake_seconds` the socket times out and the connection dies
-without a byte of application output. It reproduces on builds predating any
-of this repo's recent changes, so it is longstanding rather than new.
+**Server callbacks must be installed before key exchange — this was a real
+one-in-three hang.** `session_thread` sets `ssh_set_server_callbacks` and
+`ssh_set_auth_methods` *before* `ssh_handle_key_exchange`, matching every
+libssh server example. The ordering looks arbitrary and is not documented by
+libssh; it is load-bearing.
 
-The mechanism, read out of libssh 0.12's `socket.c` and confirmed against
-thread stacks from a stalled process: a socket read can pull more than the
-kex packets into `in_buffer` — the client's `service-request` and
-`userauth-request` often share a TCP segment with its last kex message — and
-that buffer is drained *only* from the `POLLIN` branch of
-`ssh_socket_pollcallback`. With its request already sent, the client has
-nothing further to write, so the socket never becomes readable again, and
-both ends wait on each other.
+The client's `SERVICE_REQUEST` routinely shares a TCP segment with its
+`NEWKEYS`, so `handle_key_exchange` parses it as part of finishing kex. What
+libssh then does with it depends entirely on whether server callbacks exist
+yet, in `ssh_message_queue` (`src/messages.c`):
 
-What makes this awkward to work around is that no public entry point drains
-the buffer: `ssh_event_dopoll`, `ssh_handle_packets` and `ssh_message_get`
-all go to `poll(2)` first and none of them inspect `in_buffer`.
-`ssh_get_status()` will happily report `SSH_READ_PENDING` while offering no
-way to act on it. An attempted workaround — calling `ssh_message_get` on a
-non-blocking session after `handle_key_exchange`, and again at the top of
-`ssh.read` — still stalled 12 of 30 runs under load, because it too polls.
-A real fix belongs upstream.
+```c
+if (session->server_callbacks != NULL) {
+    ssh_message_reply_default(message);   /* -> SERVICE_ACCEPT */
+    SSH_MESSAGE_FREE(message);
+    return;
+}
+...
+ssh_list_append(session->ssh_message_list, message);   /* queued, never answered */
+```
+
+With the callbacks installed later, the request took the second path: appended
+to a list that nothing in this design ever drains. No `SERVICE_ACCEPT` was
+sent, the client waited for a reply that would never come, and the connection
+died at `handshake_seconds` with no error logged anywhere. Because it depended
+on how the client's packets happened to be coalesced, it presented as an
+intermittent hang that only appeared under CPU load.
+
+Measured with a minimal C reproducer using nothing but libssh's public API,
+30 connections per configuration under load: **9/30 stalled with callbacks
+installed after kex, 0/30 with them before**, and identically so on libssh
+0.10.6, 0.11.2 and 0.12.2 — there is no libssh version in which the late
+ordering is safe. The real `tracker` binary went from 12/30 to 0/30.
+
+Two consequences worth keeping in mind. Authentication can now complete
+*inside* `handle_key_exchange`, so no code after it may assume
+`s.authenticated` is still false — the pump loop's condition allows for that.
+And libssh stranding a mandatory protocol reply with no error and no
+documented contract is a genuine upstream robustness gap, distinct from this
+bug: see [libssh issue
+#360](https://gitlab.com/libssh/libssh-mirror/-/issues/360), which reports the
+same symptom and misattributes it to buffer draining.
 
 **`exec` and `subsystem` are refused by design, not by oversight.**
 `cb_exec_request` (`ssh/server.odin`) unconditionally returns `ls.ERROR` —
