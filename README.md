@@ -4,10 +4,7 @@
 client, no signup — it works from any machine with an `ssh` client, which is
 every machine.
 
-<!-- OWNER/otsh is a placeholder. Replace it with the real GitHub owner/repo
-     in the badges and the clone URL below once this repo has a remote. -->
-
-[![CI](https://github.com/OWNER/otsh/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/otsh/actions/workflows/ci.yml)
+[![CI](https://github.com/souriscloud/otsh/actions/workflows/ci.yml/badge.svg)](https://github.com/souriscloud/otsh/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Odin](https://img.shields.io/badge/language-Odin-000000.svg)](https://odin-lang.org)
 
@@ -16,7 +13,7 @@ every machine.
 ## Try it
 
 ```sh
-git clone https://github.com/OWNER/otsh && cd otsh
+git clone https://github.com/souriscloud/otsh && cd otsh
 ./build.sh examples/tracker      # builds examples/tracker -> ./tracker
 ./tracker                        # serves on 0.0.0.0:2222
 ```
