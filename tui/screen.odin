@@ -155,14 +155,30 @@ screen_clear :: proc(s: ^Screen, style := Style{}) {
 // --- drawing primitives -----------------------------------------------------
 
 // Paints one cell, clipped to the screen. A double-width rune also claims the
-// cell to its right; a zero-width one is ignored.
+// cell to its right; in the last column, where there is no such cell, a space
+// is drawn instead. A zero-width rune is ignored.
 set_cell :: proc(s: ^Screen, x, y: int, r: rune, style: Style) {
 	if x < 0 || y < 0 || x >= s.w || y >= s.h {
 		return
 	}
-	w := rune_width(r)
+	r, w := r, rune_width(r)
 	if w == 0 {
 		return
+	}
+	// A double-width glyph needs both of its cells. In the last column the
+	// right half has nowhere to go, and writing the lead on its own leaves an
+	// orphan — which is the one thing `flush` cannot survive: it advances the
+	// real cursor by two columns while advancing its own index by one, so
+	// `prev` ends up recording a frame the terminal is not showing, and the row
+	// stays wrong until something else forces a full redraw.
+	//
+	// This is not exotic. `draw_text` places a rune whenever `col < s.w`, so
+	// any CJK string whose last glyph lands on the final column gets here —
+	// a label in a right-hand pane, or the same label after the user drags the
+	// window one column narrower. Draw a space in the requested style: the cell
+	// is still painted, just not with a glyph that does not fit.
+	if w == 2 && x + 1 >= s.w {
+		r, w = ' ', 1
 	}
 	row := y * s.w
 

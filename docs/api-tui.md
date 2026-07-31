@@ -87,7 +87,7 @@ Border :: struct {
 
 The six runes `draw_box` uses: four corners, then horizontal and vertical.
 
-*tui/screen.odin:256*
+*tui/screen.odin:272*
 
 ### `Cell`
 
@@ -367,7 +367,7 @@ BORDER_DOUBLE :: Border{'╔', '╗', '╚', '╝', '═', '║'}
 
 Double-ruled.
 
-*tui/screen.odin:265*
+*tui/screen.odin:281*
 
 ### `BORDER_ROUND`
 
@@ -377,7 +377,7 @@ BORDER_ROUND :: Border{'╭', '╮', '╰', '╯', '─', '│'}
 
 Rounded corners.
 
-*tui/screen.odin:261*
+*tui/screen.odin:277*
 
 ### `BORDER_SHARP`
 
@@ -387,7 +387,7 @@ BORDER_SHARP :: Border{'┌', '┐', '└', '┘', '─', '│'}
 
 Square corners.
 
-*tui/screen.odin:263*
+*tui/screen.odin:279*
 
 ### `BORDER_THICK`
 
@@ -397,7 +397,7 @@ BORDER_THICK :: Border{'┏', '┓', '┗', '┛', '━', '┃'}
 
 Heavy weight.
 
-*tui/screen.odin:267*
+*tui/screen.odin:283*
 
 ### `MAX_COLS`
 
@@ -496,7 +496,7 @@ draw_box :: proc(s: ^Screen, x, y, w, h: int, style: Style, b := BORDER_ROUND, t
 Draws a box outline with an optional title inset into the top edge. Nothing is
 drawn inside it. Silently does nothing if smaller than 2x2.
 
-*tui/screen.odin:271*
+*tui/screen.odin:287*
 
 ### `draw_text`
 
@@ -506,7 +506,7 @@ draw_text :: proc(s: ^Screen, x, y: int, text: string, style: Style) -> int
 
 Returns the number of columns consumed.
 
-*tui/screen.odin:212*
+*tui/screen.odin:228*
 
 ### `draw_text_clipped`
 
@@ -516,7 +516,7 @@ draw_text_clipped :: proc(s: ^Screen, x, y, max_w: int, text: string, style: Sty
 
 Draws text clipped to `max_w` columns, appending "…" when it does not fit.
 
-*tui/screen.odin:225*
+*tui/screen.odin:241*
 
 ### `fill_rect`
 
@@ -526,7 +526,7 @@ fill_rect :: proc(s: ^Screen, x, y, w, h: int, r: rune, style: Style)
 
 Fills a rectangle with one rune. Clipped to the screen.
 
-*tui/screen.odin:247*
+*tui/screen.odin:263*
 
 ### `flush`
 
@@ -537,7 +537,7 @@ flush :: proc(s: ^Screen) -> []u8
 Produces the escape sequence stream that turns the previously rendered frame
 into the current one. Returns an empty slice when nothing changed.
 
-*tui/screen.odin:426*
+*tui/screen.odin:442*
 
 ### `key_name`
 
@@ -659,7 +659,7 @@ package draws its own borders from — `BORDER_ROUND` and friends, via
 `draw_box` — is ambiguous: at width 2 every border in every app would be
 twice as wide as the box it frames.
 
-*tui/screen.odin:315*
+*tui/screen.odin:331*
 
 ### `screen_clear`
 
@@ -709,9 +709,10 @@ set_cell :: proc(s: ^Screen, x, y: int, r: rune, style: Style)
 ```
 
 Paints one cell, clipped to the screen. A double-width rune also claims the
-cell to its right; a zero-width one is ignored.
+cell to its right; in the last column, where there is no such cell, a space
+is drawn instead. A zero-width rune is ignored.
 
-*tui/screen.odin:159*
+*tui/screen.odin:160*
 
 ### `set_cursor`
 
@@ -723,7 +724,7 @@ Shows the terminal cursor at this cell for the current frame. Call it every
 frame you want the cursor visible — `screen_clear` hides it again. Use it for
 text input, so the caret lands where the user is typing.
 
-*tui/screen.odin:295*
+*tui/screen.odin:311*
 
 ### `text_width`
 
@@ -734,7 +735,7 @@ text_width :: proc "contextless" (text: string) -> int
 Total display width of a string in terminal columns. Use this, never `len`,
 for centering or alignment.
 
-*tui/screen.odin:356*
+*tui/screen.odin:372*
 
 ### `with_attrs`
 
