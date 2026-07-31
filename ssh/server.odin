@@ -22,12 +22,23 @@ import ls "../libssh"
 // are re-offered later, which is the protocol's flow control.
 //
 // 4 KiB, not 16, because this array lives inline in every Session and idle
-// connections are the common case. The ring drains once per frame, and
-// `cb_channel_data` returning less than it was offered makes libssh keep the
-// remainder and hand it over again — so a paste bigger than the ring still
-// arrives intact, just spread across successive frames. 4 KiB per frame at
-// 30 fps is ~120 KB/s of keystrokes, orders of magnitude above what a human
-// generates, and it puts a Session under 5 KB instead of ~17 KB.
+// connections are the common case. The ring drains once per frame, so 4 KiB
+// per frame at 30 fps is ~120 KB/s of keystrokes — orders of magnitude above
+// what a human generates — and it puts a Session under 5 KB instead of ~17 KB.
+//
+// KNOWN DEFECT, and this comment used to state the opposite. Returning less
+// than offered does NOT make libssh hand the remainder over again by itself:
+// it invokes this callback only from `channel_rcv_data`, i.e. when the next
+// CHANNEL_DATA packet arrives. After a burst the client sends nothing more, so
+// what was declined is stranded. Measured: a 1 MiB paste followed by silence
+// leaves the session permanently deaf — it keeps rendering, so it looks alive,
+// but no later keystroke is ever acted on. 256 KiB recovers; 1 MiB does not.
+//
+// Two fixes were tried and both failed, so do not repeat them: calling
+// `ssh_channel_read_nonblocking` from `read` returns nothing while a
+// channel_data_function is registered (libssh routes data to one path or the
+// other), and removing the callback so libssh buffers internally did not
+// release the stranded bytes either. See docs/architecture.md.
 MAX_INPUT :: 4 * 1024
 
 // Handler runs on its own thread, one per connection, and owns the session for

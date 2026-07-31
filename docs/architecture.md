@@ -345,6 +345,43 @@ own synchronization; nothing here provides it for free.
 
 ## Known rough edges
 
+**A very large paste permanently deafens a session. This is an open defect and
+a release blocker.** Paste roughly a megabyte into any otsh app and it stops
+acting on input for the rest of that connection. The screen keeps repainting,
+so the session looks healthy while ignoring every key. Measured on `tracker`:
+256 KiB delivered in a fast burst recovers fine, 1 MiB never does — the quit
+key was still unseen after 60 seconds. It needs no hostility, only one `⌘V` of
+a log file.
+
+The mechanism is the flow-control contract between `cb_channel_data` and
+libssh, and the comment on `MAX_INPUT` used to describe it backwards. Returning
+less than offered does not make libssh re-offer the remainder on its own: the
+callback runs only from `channel_rcv_data`, when the *next* CHANNEL_DATA packet
+arrives. A paste is one burst followed by silence, so there is no next packet,
+and the declined bytes sit in the channel's buffer with nothing to release
+them.
+
+Two fixes were tried against a live reproduction and both failed — recorded
+here so nobody spends the afternoon again:
+
+- Binding `ssh_channel_read_nonblocking` and draining from `read`. It returns
+  nothing while a `channel_data_function` is registered; libssh delivers
+  channel data to the callback *or* to the channel buffer, never both.
+- Removing the data callback entirely so libssh buffers internally and `read`
+  becomes the only consumer. The stranded bytes still were not released, and
+  this rewrites the core input path, so it was reverted rather than shipped
+  half-understood.
+
+What is not yet known: whether the window ever reopens, and whether the fix
+belongs in the callback's return value, in an explicit `ssh_channel_poll`, or
+in abandoning the callback path completely with the event loop restructured
+around it. Anyone picking this up should start from the reproduction — a fast
+burst *with* the client draining output, then silence, then a keystroke. A
+burst without draining proves nothing, because the client stops reading its own
+stdin and never pushes enough to trigger it.
+
+
+
 **Server callbacks must be installed before key exchange — this was a real
 one-in-three hang.** `session_thread` sets `ssh_set_server_callbacks` and
 `ssh_set_auth_methods` *before* `ssh_handle_key_exchange`, matching every

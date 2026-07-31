@@ -104,6 +104,8 @@ seed_board :: proc() {
 	     "ESC is both a key and the start of every escape sequence. Resolved with the usual timeout: an ESC still alone after two frames is reported as the Escape key.", 3)
 	seed(.Closed, "Session is ~17 KB because of the ring buffer",
 	     "MAX_INPUT shrank to 4 KiB, cutting Session under 5 KB. Bigger pastes ride libssh's re-offer flow control and arrive across successive frames — proven with an 8 KiB burst over a live session — and a size regression test pins it.", 3)
+	seed(.Open, "a ~1 MiB paste permanently deafens a session",
+	     "Paste a megabyte into any otsh app and it never acts on input again, while still repainting so it looks alive. libssh only re-invokes the channel data callback when the next packet arrives, so what the ring declines after a burst is stranded with nothing to release it. 256 KiB recovers, 1 MiB does not. Two fixes tried and reverted — see docs/architecture.md before attempting a third.", 4)
 	seed(.Open, "no Windows local backend",
 	     "A console-API backend and a Windows build path now exist, cross-type-check for windows_amd64, and have a CI job. Still open because none of it has executed on real Windows; closes when that CI job has been green in practice.", 2)
 	seed(.Closed, "no audit log",
