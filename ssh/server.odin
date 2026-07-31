@@ -18,28 +18,34 @@ import "core:thread"
 import "core:time"
 import ls "../libssh"
 
-// Per-session input buffer. Bytes beyond this stay in libssh's own buffer and
-// are re-offered later, which is the protocol's flow control.
+// --- input path --------------------------------------------------------------
 //
-// 4 KiB, not 16, because this array lives inline in every Session and idle
-// connections are the common case. The ring drains once per frame, so 4 KiB
-// per frame at 30 fps is ~120 KB/s of keystrokes — orders of magnitude above
-// what a human generates — and it puts a Session under 5 KB instead of ~17 KB.
+// Keystrokes take exactly one path: libssh parses each CHANNEL_DATA packet
+// into the channel's internal buffer, and `read` (below) is the only consumer,
+// draining that buffer with ssh_channel_read_nonblocking. No
+// channel_data_function is registered, on purpose.
 //
-// KNOWN DEFECT, and this comment used to state the opposite. Returning less
-// than offered does NOT make libssh hand the remainder over again by itself:
-// it invokes this callback only from `channel_rcv_data`, i.e. when the next
-// CHANNEL_DATA packet arrives. After a burst the client sends nothing more, so
-// what was declined is stranded. Measured: a 1 MiB paste followed by silence
-// leaves the session permanently deaf — it keeps rendering, so it looks alive,
-// but no later keystroke is ever acted on. 256 KiB recovers; 1 MiB does not.
+// It used to take two paths, and that was a session-killing defect. A
+// channel_data_function copied bytes into a fixed per-session ring and
+// returned less than offered when the ring was full, on the belief that
+// libssh re-offers the remainder by itself. It does not: the callback runs
+// only from libssh's channel_rcv_data, i.e. when the *next* CHANNEL_DATA
+// packet arrives. A large paste is a burst followed by silence, so the tail
+// of it sat in the channel buffer with nothing to release it and the session
+// was deaf for the rest of the connection (measured: 1 MiB pasted, ~550 KB
+// stranded, the quit key never seen in 60 s). Draining the leftover from
+// `read` while keeping the callback is not sound either:
+// ssh_channel_read_nonblocking pumps the packet machinery internally, which
+// can fire the callback mid-drain and reorder or drop what it grabs
+// (measured: 42 KB of a 1 MiB paste silently lost that way). One buffer, one
+// consumer. See docs/architecture.md, "Input flow".
 //
-// Two fixes were tried and both failed, so do not repeat them: calling
-// `ssh_channel_read_nonblocking` from `read` returns nothing while a
-// channel_data_function is registered (libssh routes data to one path or the
-// other), and removing the callback so libssh buffers internally did not
-// release the stranded bytes either. See docs/architecture.md.
-MAX_INPUT :: 4 * 1024
+// Flow control and memory stay bounded without any code here: libssh only
+// extends the client's transport window as this side consumes (grow_window in
+// libssh's channels.c, called from ssh_channel_read_timeout), and it refuses
+// to let the client get more than WINDOW_DEFAULT — 2 MiB — ahead of what has
+// been consumed. A flood therefore parks at most ~2 MiB in libssh's buffer
+// and then throttles to the app's own read rate.
 
 // Handler runs on its own thread, one per connection, and owns the session for
 // as long as it runs. When it returns the connection is torn down.
@@ -173,39 +179,7 @@ Session :: struct {
 	addr_buf:      [64]u8,
 	addr_len:      int,
 	auth_failures: int,
-	input:         Ring,
 	user_data:     rawptr, // copied from Server.user_data for handler use
-}
-
-// --- ring buffer ------------------------------------------------------------
-
-// Fixed-size byte ring for incoming keystrokes. Fixed so that libssh callbacks,
-// which run without an Odin context, never touch an allocator.
-Ring :: struct {
-	data:  [MAX_INPUT]u8,
-	start: int,
-	count: int,
-}
-
-// Appends what fits, returning how many bytes were taken.
-ring_push :: proc "contextless" (r: ^Ring, src: []u8) -> int {
-	n := min(len(src), MAX_INPUT - r.count)
-	for i in 0 ..< n {
-		r.data[(r.start + r.count + i) % MAX_INPUT] = src[i]
-	}
-	r.count += n
-	return n
-}
-
-// Removes up to `len(dst)` bytes, returning how many were moved.
-ring_pop :: proc "contextless" (r: ^Ring, dst: []u8) -> int {
-	n := min(len(dst), r.count)
-	for i in 0 ..< n {
-		dst[i] = r.data[(r.start + i) % MAX_INPUT]
-	}
-	r.start = (r.start + n) % MAX_INPUT
-	r.count -= n
-	return n
 }
 
 // --- public session API -----------------------------------------------------
@@ -271,19 +245,24 @@ read :: proc(s: ^Session, buf: []u8, timeout_ms: int) -> (n: int, ok: bool) {
 	if sync.atomic_load(&s.server.draining) {
 		return 0, false
 	}
-	if s.input.count > 0 {
-		return ring_pop(&s.input, buf), true
+	// Deliver anything libssh already holds for this channel — including the
+	// tail of a paste that arrived long before this call. This must come
+	// before the eof check: the client's final keystrokes and its EOF can be
+	// parsed in the same poll, and the bytes are handed over first, leaving
+	// the EOF for the next call.
+	if n := take_input(s, buf); n > 0 {
+		return n, true
 	}
 	if s.eof {
 		return 0, false
 	}
 
-	// Drain whatever libssh has already buffered.
+	// Pump the protocol once, then look again.
 	if ls.event_dopoll(s.event, 0) == ls.ERROR {
 		return 0, false
 	}
-	if s.input.count > 0 {
-		return ring_pop(&s.input, buf), true
+	if n := take_input(s, buf); n > 0 {
+		return n, true
 	}
 	if s.eof {
 		return 0, false
@@ -304,12 +283,40 @@ read :: proc(s: ^Session, buf: []u8, timeout_ms: int) -> (n: int, ok: bool) {
 	if ls.event_dopoll(s.event, 0) == ls.ERROR {
 		return 0, false
 	}
-	// EOF can arrive in the same poll as the client's final keystrokes. Hand
-	// the bytes over first; the EOF is still there to report on the next call.
-	if s.input.count > 0 {
-		return ring_pop(&s.input, buf), true
+	if n := take_input(s, buf); n > 0 {
+		return n, true
 	}
 	return 0, !s.eof
+}
+
+// The single consumer of the channel's buffered input. Reads whatever libssh
+// has parsed for the session's stdin, up to len(buf), without blocking.
+//
+// Consuming from here is also what reopens the client's transport window:
+// grow_window runs inside libssh's channel read. Do not add a second consumer
+// (a channel_data_function, or another reader thread) — see the input-path
+// comment above for how two consumers of one buffer lost and reordered bytes.
+@(private)
+take_input :: proc(s: ^Session, buf: []u8) -> int {
+	if s.chan == nil || len(buf) == 0 {
+		return 0
+	}
+	n := ls.channel_read_nonblocking(s.chan, raw_data(buf), u32(len(buf)), 0)
+	if n > 0 {
+		return int(n)
+	}
+	// Negative n is EOF or an error; both are reported through s.eof and the
+	// event loop rather than from here.
+	//
+	// A client can also send "stderr" extended data, which this server has no
+	// use for. It lands in a separate buffer that shares the channel's flow-
+	// control window, so it must be discarded, not ignored — left in place it
+	// would pin the window shut. The data callback used to swallow it; now
+	// this does. Only reached when stdin is quiet, which is exactly when a
+	// stderr-flooding client needs its window credit back.
+	junk: [1024]u8
+	for ls.channel_read_nonblocking(s.chan, &junk[0], len(junk), 1) > 0 {}
+	return 0
 }
 
 // Sends bytes to the client. Returns how many were written, 0 once the
@@ -992,10 +999,12 @@ cb_channel_open :: proc "c" (session: ls.Session, userdata: rawptr) -> ls.Channe
 	if ch == nil {
 		return nil
 	}
+	// No channel_data_function here, deliberately: `read` is the input path's
+	// single consumer and registering a data callback would make it fight
+	// libssh's own buffer. The comment above `take_input` has the history.
 	s.channel_cb = ls.Channel_Callbacks {
 		size                               = size_of(ls.Channel_Callbacks),
 		userdata                           = s,
-		channel_data_function              = cb_channel_data,
 		channel_eof_function               = cb_channel_eof,
 		channel_close_function             = cb_channel_close,
 		channel_pty_request_function       = cb_pty_request,
@@ -1007,25 +1016,6 @@ cb_channel_open :: proc "c" (session: ls.Session, userdata: rawptr) -> ls.Channe
 	ls.set_channel_callbacks(ch, &s.channel_cb)
 	s.chan = ch
 	return ch
-}
-
-@(private)
-cb_channel_data :: proc "c" (
-	session: ls.Session,
-	channel: ls.Channel,
-	data: rawptr,
-	length: u32,
-	is_stderr: c.int,
-	userdata: rawptr,
-) -> c.int {
-	s := (^Session)(userdata)
-	if is_stderr != 0 || length == 0 {
-		return c.int(length)
-	}
-	bytes := ([^]u8)(data)[:length]
-	// Returning less than `length` tells libssh to keep the rest buffered and
-	// hand it to us again — free flow control.
-	return c.int(ring_push(&s.input, bytes))
 }
 
 @(private)
