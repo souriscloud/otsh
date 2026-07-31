@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+# Nothing here writes to the repository: the jobs check out, build, test and
+# validate the docs, and no step uses GITHUB_TOKEN for anything else. Stating
+# the scope explicitly means the job token stays read-only no matter what the
+# repository's or organisation's default workflow permissions are set to.
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:
