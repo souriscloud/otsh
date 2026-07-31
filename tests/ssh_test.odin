@@ -1,6 +1,5 @@
-// Tests for the pure logic in otsh:ssh — the input ring, pseudonymous
-// identity, resource limits, and audit line formatting. Nothing here opens a
-// socket.
+// Tests for the pure logic in otsh:ssh — pseudonymous identity, resource
+// limits, and audit line formatting. Nothing here opens a socket.
 package otsh_tests
 
 import "core:os"
@@ -9,85 +8,21 @@ import "core:time"
 import "otsh:ssh"
 import "otsh:sshtui"
 
-// --- ring buffer ------------------------------------------------------------
-
-@(test)
-ring_push_pop :: proc(t: ^testing.T) {
-	r: ssh.Ring
-	testing.expect_value(t, ssh.ring_push(&r, transmute([]u8)string("hello")), 5)
-
-	buf: [16]u8
-	n := ssh.ring_pop(&r, buf[:])
-	testing.expect_value(t, n, 5)
-	testing.expect_value(t, string(buf[:n]), "hello")
-
-	// Drained.
-	testing.expect_value(t, ssh.ring_pop(&r, buf[:]), 0)
-}
-
-@(test)
-ring_partial_pop :: proc(t: ^testing.T) {
-	r: ssh.Ring
-	ssh.ring_push(&r, transmute([]u8)string("abcdef"))
-
-	small: [2]u8
-	testing.expect_value(t, ssh.ring_pop(&r, small[:]), 2)
-	testing.expect_value(t, string(small[:]), "ab")
-
-	rest: [16]u8
-	n := ssh.ring_pop(&r, rest[:])
-	testing.expect_value(t, string(rest[:n]), "cdef")
-}
-
-@(test)
-ring_reports_what_it_took :: proc(t: ^testing.T) {
-	// Overfilling must be reported, not silently dropped: the return value is
-	// what tells libssh to keep the remainder and re-offer it. That is the
-	// protocol's flow control.
-	r: ssh.Ring
-	big := make([]u8, ssh.MAX_INPUT + 100)
-	defer delete(big)
-
-	took := ssh.ring_push(&r, big)
-	testing.expect_value(t, took, ssh.MAX_INPUT)
-	testing.expect_value(t, ssh.ring_push(&r, big), 0) // full: takes nothing
-}
-
-@(test)
-ring_wraps_around :: proc(t: ^testing.T) {
-	// Push/pop past the end of the backing array so start wraps, then verify
-	// the bytes still come back in order.
-	r: ssh.Ring
-	chunk := make([]u8, ssh.MAX_INPUT - 4)
-	defer delete(chunk)
-	ssh.ring_push(&r, chunk)
-
-	drain := make([]u8, ssh.MAX_INPUT - 4)
-	defer delete(drain)
-	ssh.ring_pop(&r, drain)
-
-	// Now start is near the end; this push must straddle the boundary.
-	ssh.ring_push(&r, transmute([]u8)string("wrapped"))
-	out: [16]u8
-	n := ssh.ring_pop(&r, out[:])
-	testing.expect_value(t, string(out[:n]), "wrapped")
-}
-
 @(test)
 session_stays_small :: proc(t: ^testing.T) {
-	// One Session is allocated per accepted connection and the Ring lives inline
-	// in it, so this size is multiplied by max_sessions — it used to be 17184
-	// bytes with a 16 KiB ring, which is why the ring is 4 KiB now.
+	// One Session is allocated per accepted connection, so this size is
+	// multiplied by max_sessions. It was 17184 bytes with a 16 KiB inline
+	// input ring, 4896 with a 4 KiB one, and ~800 now that input buffering
+	// lives in libssh's own per-channel buffer (see the input-path comment in
+	// ssh/server.odin) and Session holds only fixed identity storage.
 	//
 	// A ceiling rather than an exact value: field order, alignment and padding
 	// are the compiler's business and a new bool must not fail the suite. What
-	// must fail is somebody re-growing the ring or parking a large buffer in
-	// Session. 6 KiB leaves ~1.2 KB of headroom over the 4896 bytes measured
-	// when this was written.
+	// must fail is somebody parking a large buffer inline in Session again.
 	testing.expectf(
 		t,
-		size_of(ssh.Session) <= 6 * 1024,
-		"Session is %d bytes, past its 6 KiB budget; check what was added and whether it belongs inline",
+		size_of(ssh.Session) <= 2 * 1024,
+		"Session is %d bytes, past its 2 KiB budget; check what was added and whether it belongs inline",
 		size_of(ssh.Session),
 	)
 }

@@ -9,7 +9,6 @@ package otsh_tests
 
 import "core:math/rand"
 import "core:testing"
-import "otsh:ssh"
 import "otsh:tui"
 
 // The contract `dispatch_input` relies on. A violation here is a potential
@@ -125,46 +124,3 @@ fuzz_key_name_respects_small_buffers :: proc(t: ^testing.T) {
 	}
 }
 
-// --- the ring buffer under adversarial sizes --------------------------------
-
-@(test)
-fuzz_ring_never_loses_or_invents_bytes :: proc(t: ^testing.T) {
-	// The ring is fed straight from the network. Push/pop random amounts and
-	// verify the byte stream comes back exactly, in order, forever.
-	rand.reset(0x21A6)
-
-	ring: ssh.Ring
-	src := make([]u8, 4096)
-	defer delete(src)
-	dst := make([]u8, 4096)
-	defer delete(dst)
-
-	next_write, next_read: u8
-	pending := 0
-
-	for round in 0 ..< 4000 {
-		if rand.uint32() & 1 == 0 {
-			n := int(rand.uint32() % 4096) + 1
-			for i in 0 ..< n {
-				src[i] = next_write
-				next_write += 1
-			}
-			took := ssh.ring_push(&ring, src[:n])
-			testing.expectf(t, took <= n, "ring took more than offered")
-			// Bytes it declined were not consumed, so rewind the generator.
-			next_write -= u8(n - took)
-			pending += took
-		} else {
-			n := int(rand.uint32() % 4096) + 1
-			got := ssh.ring_pop(&ring, dst[:n])
-			testing.expectf(t, got <= n, "ring returned more than asked")
-			testing.expectf(t, got <= pending, "ring invented bytes")
-			for i in 0 ..< got {
-				testing.expectf(t, dst[i] == next_read,
-					"ring reordered bytes at round %d", round)
-				next_read += 1
-			}
-			pending -= got
-		}
-	}
-}

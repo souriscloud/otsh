@@ -343,9 +343,11 @@ Per-session state lives in fixed-size fields on `Session`, filled by
 `copy_cstr`, which stops at the destination length — an oversized value
 from the client is silently truncated, not overflowed and not rejected:
 `user_buf: [64]u8`, `term_buf: [32]u8`, `fp_buf: [96]u8`, `kt_buf: [32]u8`,
-`id_buf: [ID_SIZE]u8`, `addr_buf: [64]u8`. Input from the channel goes into
-`Session.input`, a `Ring` backed by `[MAX_INPUT]u8` where `MAX_INPUT :: 4
-* 1024` — 4 KiB per session, not a growable buffer.
+`id_buf: [ID_SIZE]u8`, `addr_buf: [64]u8`. Input from the channel stays in
+libssh's own per-channel buffer until `read` consumes it; that buffer is not
+growable without limit, because libssh only widens the client's transport
+window as this side consumes, capping what an uncooperative client can park
+server-side at ~2 MiB (architecture.md, "Input flow and backpressure").
 
 On teardown, `session_thread`'s deferred cleanup explicitly zeroes two of
 those buffers — `s.fp_buf = {}` and `s.id_buf = {}` — with the reasoning
@@ -571,7 +573,7 @@ the gap yourself rather than infer it.
 | Area | Method | Result |
 | --- | --- | --- |
 | Input parser | ~45,000 fuzz iterations over random bytes, escape-shaped bytes, and every truncated prefix of valid sequences | No invariant violation: never over-consumes, never reports success without progress |
-| Ring buffer | Randomised push/pop with wraparound, checking byte-for-byte ordering | No lost, reordered or invented bytes |
+| Input delivery | End-to-end byte accounting over a real ssh client: pastes of 4 KiB–4 MiB followed by a keystroke | No lost, reordered or invented bytes; every payload delivered exactly (e.g. 1,048,577 sent, 1,048,577 seen by the app) |
 | `key_name` | Fuzzed against undersized buffers with guard bytes | No write past the slice |
 | Session lifecycle | 36 real SSH connections, then `leaks(1)` | **0 leaks, 0 bytes.** RSS flat from connection 12 to 36 |
 | Auth path | Code review of `cb_auth_pubkey` | An unverified probe returns before identity capture and before the `Authenticator`; only a signature-verified key reaches app code |

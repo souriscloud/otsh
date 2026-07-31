@@ -131,7 +131,7 @@ to avoid growing that arena forever on a long-lived thread. No other callback
 touches an allocator, which is why `Session` carries fixed-size buffers
 instead of strings: `user_buf: [64]u8`, `term_buf: [32]u8`, `fp_buf: [96]u8`,
 `kt_buf: [32]u8`, `id_buf: [ID_SIZE]u8` (32 bytes), `addr_buf: [64]u8`. Procs
-like `copy_cstr`, `ring_push`, `set_user`, and the accessors (`user`, `term`,
+like `copy_cstr`, `set_user`, and the accessors (`user`, `term`,
 `fingerprint`, `key_type`, `id`, `remote_addr`) are all `proc "contextless"` —
 they cannot allocate even if they wanted to.
 
@@ -150,22 +150,58 @@ in `ssh/server.odin:session_thread` and `cb_channel_open`.
 
 ## Input flow and backpressure
 
-Every session owns a `Ring` (`ssh/server.odin`): a fixed `data: [MAX_INPUT]u8`
-with `start`/`count` cursors, where `MAX_INPUT :: 4 * 1024` (4 KiB).
-`cb_channel_data` is the only writer:
+Input takes exactly one path. libssh parses each CHANNEL_DATA packet into the
+channel's own internal buffer (`channel->stdout_buffer` in libssh's
+`channels.c`), and `ssh.read` is the only consumer, draining it with
+`ssh_channel_read_nonblocking` (`take_input` in `ssh/server.odin`). No
+`channel_data_function` is registered, deliberately — see the comment block
+above `take_input` and the history below.
 
-```odin
-bytes := ([^]u8)(data)[:length]
-return c.int(ring_push(&s.input, bytes))
-```
+Flow control needs no code on this side. libssh only extends the client's
+transport window as this side consumes: `grow_window` (libssh `channels.c`)
+runs inside every channel read, credits the client with what has been
+consumed, and refuses to let it get more than `WINDOW_DEFAULT` — 2 MiB —
+ahead of consumption. A client flooding faster than the app reads parks at
+most ~2 MiB in libssh's buffer and then blocks in its own `write(2)`, which
+is SSH's own backpressure doing its job.
 
-The return value is not a status code — libssh's channel-data callback
-contract is that the return value is the number of bytes the callback
-actually consumed. `ring_push` returns `min(len(src), MAX_INPUT - r.count)`,
-so once the ring is full it returns less than `length`. libssh keeps whatever
-was not consumed buffered on its side and re-offers it on a later call. That
-one return value is the entire flow-control mechanism — there is no explicit
-"pause reading" call anywhere in this codebase.
+**History — this used to take two paths, and that was the release-blocking
+"large paste deafens the session" defect.** A `channel_data_function` copied
+bytes into a fixed 4 KiB per-session ring and returned less than offered when
+the ring was full, on the belief that libssh re-offers the remainder by
+itself. It does not: the callback runs only from libssh's `channel_rcv_data`,
+i.e. when the *next* CHANNEL_DATA packet arrives. A paste is one burst
+followed by silence, so the tail of a big one sat in the channel buffer with
+nothing to release it. Measured on `tracker` before the fix: paste 1 MiB,
+~550 KB stranded (`ssh_channel_poll` reports it precisely), and the quit key
+— queued behind the stranded bytes — never acted on in 60 s while the screen
+kept repainting. 256 KiB happened to drain during the burst itself and
+recovered, which made the defect look like a size threshold when it was
+really a race between arrival and consumption.
+
+Two half-fixes are worth recording because both *look* right:
+
+- Keeping the callback and also draining the leftover from `read`. Not sound:
+  `ssh_channel_read_nonblocking` pumps the packet machinery internally, which
+  can fire the callback mid-drain and hand it ring space the drain had
+  already counted — measured 42 KB of a 1 MiB paste silently lost exactly
+  that way. Two consumers of one buffer cannot be sequenced from out here.
+- An earlier attempt at removing the callback was recorded as failing with
+  the bytes still stranded. That observation did not survive instrumentation:
+  with a byte-accounting probe app, every payload from 4 KiB to 4 MiB now
+  arrives complete and in order (e.g. 1,048,577 bytes sent, 1,048,577
+  delivered), and the stranded count drains to zero. The earlier attempt most
+  likely drained only after `poll(2)` reported the socket readable — after a
+  burst nothing more arrives, so a drain gated on readability never runs.
+  `read` drains *before* it waits; that ordering is load-bearing.
+
+After a multi-megabyte paste the app still has to chew through the backlog at
+its own pace (one 4 KiB `read` per frame — ~120 KB/s at 30 fps), so the
+session catches up within seconds rather than instantly; the window cap
+bounds that catch-up at roughly 17 s worst case. The end-to-end regression
+test is a paste harness — a real `ssh` client on a pty, a fast burst *with*
+the client draining output, silence, then one quit key — because a burst
+without draining stalls the client's own stdin and proves nothing.
 
 ## The blocking problem
 
@@ -182,16 +218,17 @@ burning a full core per connection for a session that is sitting idle.
 The fix has two parts:
 
 **(a) `ssh.read` waits on the socket itself.** (`ssh/server.odin:read`.) It
-first drains anything already queued in the ring buffer or already buffered
-inside libssh (one `event_dopoll(s.event, 0)` call, timeout zero, used purely
-to let libssh parse whatever is already on the wire). Only if that comes up
-empty does it get the raw file descriptor with `ls.get_fd(s.sess)` and call
-`posix.poll` on it directly, for up to `timeout_ms`. `poll(2)` genuinely
-blocks the OS thread until the socket is readable or the timeout elapses.
-Once `poll` says data is ready, `event_dopoll(s.event, 0)` is called once
-more — this time purely to let libssh parse the bytes it can now read and
-feed them to `cb_channel_data` — and the ring is drained. libssh's event loop
-does the protocol parsing; this code does the actual waiting.
+first drains anything libssh already holds for the channel (`take_input`,
+which never blocks), pumping the protocol once with `event_dopoll(s.event, 0)`
+if the first drain comes up empty. Only if there is still nothing does it get
+the raw file descriptor with `ls.get_fd(s.sess)` and call `posix.poll` on it
+directly, for up to `timeout_ms`. `poll(2)` genuinely blocks the OS thread
+until the socket is readable or the timeout elapses. Once `poll` says data is
+ready, `event_dopoll(s.event, 0)` is called once more — purely to let libssh
+parse the bytes it can now read — and `take_input` drains the result.
+libssh's event loop does the protocol parsing; this code does the actual
+waiting. Draining *before* waiting is what keeps the tail of a large paste
+flowing after the client goes quiet (see Input flow above).
 
 **(b) `tui.run` paces frames independent of how `poll` behaves.**
 (`tui/tui.odin:run`.) Each iteration records `frame_start`, calls
@@ -345,40 +382,18 @@ own synchronization; nothing here provides it for free.
 
 ## Known rough edges
 
-**A very large paste permanently deafens a session. This is an open defect and
-a release blocker.** Paste roughly a megabyte into any otsh app and it stops
-acting on input for the rest of that connection. The screen keeps repainting,
-so the session looks healthy while ignoring every key. Measured on `tracker`:
-256 KiB delivered in a fast burst recovers fine, 1 MiB never does — the quit
-key was still unseen after 60 seconds. It needs no hostility, only one `⌘V` of
-a log file.
-
-The mechanism is the flow-control contract between `cb_channel_data` and
-libssh, and the comment on `MAX_INPUT` used to describe it backwards. Returning
-less than offered does not make libssh re-offer the remainder on its own: the
-callback runs only from `channel_rcv_data`, when the *next* CHANNEL_DATA packet
-arrives. A paste is one burst followed by silence, so there is no next packet,
-and the declined bytes sit in the channel's buffer with nothing to release
-them.
-
-Two fixes were tried against a live reproduction and both failed — recorded
-here so nobody spends the afternoon again:
-
-- Binding `ssh_channel_read_nonblocking` and draining from `read`. It returns
-  nothing while a `channel_data_function` is registered; libssh delivers
-  channel data to the callback *or* to the channel buffer, never both.
-- Removing the data callback entirely so libssh buffers internally and `read`
-  becomes the only consumer. The stranded bytes still were not released, and
-  this rewrites the core input path, so it was reverted rather than shipped
-  half-understood.
-
-What is not yet known: whether the window ever reopens, and whether the fix
-belongs in the callback's return value, in an explicit `ssh_channel_poll`, or
-in abandoning the callback path completely with the event loop restructured
-around it. Anyone picking this up should start from the reproduction — a fast
-burst *with* the client draining output, then silence, then a keystroke. A
-burst without draining proves nothing, because the client stops reading its own
-stdin and never pushes enough to trigger it.
+**A very large paste replays at the app's own read rate, so the session takes
+seconds to catch up.** The paste wedge that used to live at the top of this
+list is fixed — input now takes a single path and a 1 MiB paste followed by
+one `q` delivers every byte, in order, with the quit acted on ~4.7 s later
+(measured; 4 MiB caught up in ~13 s, and the 2 MiB transport window bounds
+the worst case at roughly 17 s). See "Input flow and backpressure" for the
+mechanism, the measurements, and the two half-fixes that looked right and
+were not. What remains is the catch-up latency itself: an app consumes one
+4 KiB read per frame, so a monster paste means seconds of replay before new
+keystrokes — including `ctrl+c`, which is just a byte in the same queue — get
+acted on. Killing the ssh client is always available and tears the session
+down through the normal path.
 
 
 
@@ -454,15 +469,10 @@ already installed before any concurrent use touches its internal state.
 Reordering this would not fail loudly; it would show up as sporadic
 corruption once real concurrent connections arrive.
 
-**`Session` is about 4.8 KB, almost entirely the 4 KiB `Ring`.** The rest of
-the struct (six fixed identity/address buffers, the two libssh callback
-structs, `Pty`, assorted ints and bools) adds a few hundred bytes on top.
-That is negligible at the default `max_sessions = 256` (roughly 1 MB of ring
-buffers at full occupancy), but worth knowing before raising that limit or
-setting it negative to disable it — thousands of idle connections cost real,
-linearly-scaling memory, before the app's own per-connection `Model` is even
-counted. The ring was 16 KiB, which put `Session` at 17 KB; since it is
-drained every frame and the flow control above makes an oversized paste
-arrive across several frames instead of being dropped, the extra 12 KiB per
-connection bought nothing. `tests/ssh_test.odin:session_stays_small` holds
-the size down so a new field cannot quietly give it back.
+**`Session` is under 1 KB.** Six fixed identity/address buffers, the two
+libssh callback structs, `Pty`, assorted ints and bools. It used to be 17 KB,
+then 4.8 KB, when it carried an inline input ring; input buffering now lives
+in libssh's own per-channel buffer (see "Input flow and backpressure"), which
+costs nothing for an idle connection and is window-bounded at ~2 MiB for one
+being flooded. `tests/ssh_test.odin:session_stays_small` holds the struct's
+size down so a large buffer cannot quietly move back inline.

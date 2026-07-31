@@ -128,8 +128,10 @@ Blocks for up to `timeout_ms` waiting for input, then returns. The contract:
 - `ok == false` — the connection is gone (closed, errored, or EOF). Stop
   reading; the `Handler` should return soon after.
 
-Input is buffered in a fixed 4 KiB ring per session (`MAX_INPUT`); `read`
-never allocates. `write` and `write_string` push bytes out over the channel
+Input is buffered inside libssh's own per-channel buffer and `read` is its
+only consumer; `read` never allocates, and SSH's transport window caps what a
+client can buffer server-side at ~2 MiB (see architecture.md, "Input flow and
+backpressure"). `write` and `write_string` push bytes out over the channel
 immediately and return the number of bytes written (`0` if the connection is
 already gone or `data`/`str` was empty).
 

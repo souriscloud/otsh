@@ -292,6 +292,18 @@ foreign lib {
 	channel_write :: proc(ch: Channel, data: rawptr, len: u32) -> c.int ---
 	@(link_name = "ssh_channel_request_send_exit_status")
 	channel_request_send_exit_status :: proc(ch: Channel, status: c.int) -> c.int ---
+	// Returns how many bytes are buffered inside libssh for this channel (its
+	// stdout_buffer), 0 when empty, EOF at end of stream, ERROR on error. Also
+	// pumps the session nonblockingly, like event_dopoll(e, 0).
+	@(link_name = "ssh_channel_poll")
+	channel_poll :: proc(ch: Channel, is_stderr: c.int) -> c.int ---
+	// Drains up to `count` bytes from the channel's internal buffer without
+	// blocking. Returns bytes read, 0/AGAIN when empty, EOF at end of stream,
+	// ERROR on error. Data a channel_data_function declined stays in that
+	// internal buffer, and this is the only call that can retrieve it after
+	// the peer goes quiet — see ssh.read.
+	@(link_name = "ssh_channel_read_nonblocking")
+	channel_read_nonblocking :: proc(ch: Channel, dest: rawptr, count: u32, is_stderr: c.int) -> c.int ---
 	@(link_name = "ssh_set_channel_callbacks")
 	set_channel_callbacks :: proc(ch: Channel, cb: ^Channel_Callbacks) -> c.int ---
 
