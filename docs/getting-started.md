@@ -19,10 +19,9 @@ before you expose anything here to the network.
   `pkg-config`, `./build.sh` stops at `sh: 1: clang: not found`, and adding
   `build-essential` does not fix it — gcc is not a substitute. `apt install
   clang`. On macOS the Command Line Tools already provide it.
-- **macOS, Linux or FreeBSD.** macOS and Linux have both been built and run;
-  FreeBSD has not. Windows has an experimental port that nobody has run
-  either — see [Platform support](#platform-support) immediately below before
-  you rely on either of those two.
+- **macOS, Linux, Windows or FreeBSD.** macOS, Linux and Windows have all been
+  built and run; FreeBSD has not — see [Platform
+  support](#platform-support) immediately below before you rely on that one.
 
 `build.sh` and `test.sh` resolve the compiler in this order: `$ODIN` if it is
 set; then a gitignored `.odin-path` file next to the script, if what it
@@ -35,8 +34,8 @@ container, say — still builds on the machine the file was not written on.
 ## Platform support
 
 Four platforms get mentioned around here and they are not equally real. In
-descending order of evidence: **macOS is developed on, Linux has been built
-and run, FreeBSD only type-checks, Windows only type-checks.** The rest of
+descending order of evidence: **macOS is developed on, Linux and Windows have
+both been built and run, FreeBSD only type-checks.** The rest of
 this section is the evidence for each, stated as what was run rather than as
 what is expected to work — the FreeBSD bug in the next paragraph is what an
 unmeasured "supported" is worth.
@@ -88,21 +87,49 @@ constant is now keyed off Linux being the exception, and CI cross-type-checks
 every package and example for `freebsd_amd64` — but type-checking is not
 running, and no FreeBSD claim here is stronger than that.
 
-### Windows — type-checks, plus a job that may never have been green
+### Windows — built, tested and run
 
-**Windows support is experimental and has never been validated by a human on
-real Windows.** Here is exactly what does and does not stand behind it:
+Verified on 2026-07-31 on a physical desktop, top to bottom:
 
-- What exists: every package and example type-checks for `windows_amd64`
-  (`odin check tui -collection:otsh=. -target:windows_amd64`, and the same for
-  each of `libssh`, `ssh`, `sshtui` and every `examples/` directory), and CI
-  runs that check on every push as a blocking step. A separate `windows-latest`
-  job installs libssh through vcpkg, builds the packages and examples, and runs
-  the test suite.
-- What does not exist: anybody having run an otsh server, or the `--local`
-  loop, on a Windows machine. The `windows-latest` job is marked
-  `continue-on-error`, so at the time of writing it may never have been green.
-  Treat "it compiles" as the whole of the evidence.
+- **Windows 11 Pro 10.0.26200** (`AMD64`), **libssh 0.12.0** (vcpkg
+  `libssh[core,pcap,server]:x64-windows`, over **OpenSSL 3.6.3**), **Odin
+  dev-2026-07-nightly:819fdc7** (the prebuilt `dev-2026-07a` release — the same
+  compiler commit as the Linux run above), linking with the **MSVC** linker
+  from Visual Studio 2026 Community. Clients: **OpenSSH_10.2p1** on macOS
+  across the network, and the OpenSSH client Windows 11 itself ships.
+- `./build.sh`, `./build.sh` for each of the five `examples/`, and `./test.sh`
+  all pass under Git Bash, unmodified — the same three commands CI's Windows
+  job runs, through the same `uname -s` → `MINGW64_NT` branch. The suite
+  reports **67 tests**, not 62: the four in `tests/linux_test.odin` are
+  `#+build !windows` and correctly do not run. Odin finds the MSVC linker by
+  itself, so nothing has to run `vcvars64.bat` first.
+- Actually run, not just built: `examples/tracker` served real `openssh`
+  sessions from a pty — drawing the `issues` frame, cycling the filter on `f`,
+  moving the cursor with the arrow keys, and exiting cleanly on `q` — both to a
+  client on the machine itself and to one across the network. `examples/whoami`
+  emitted a full audit trail (`listen`, `accept`, `auth` publickey, on to
+  `session_start` and `session_end`) in which every line carried a correct
+  **non-loopback** peer address, which is precisely what
+  `ssh/net_windows.odin`'s `getpeername` and hand-bound `inet_ntop` exist to
+  produce. `tracker --local` drove `tui/local_windows.odin` in a real console:
+  raw single-key input, VT escape sequences honoured rather than printed, UTF-8
+  box-drawing intact, and the frame sized from `srWindow`. Ctrl+C at the server
+  console shut it down gracefully — `otsh: stopped; all sessions closed
+  cleanly` — with a connected client's terminal restored (alt screen left,
+  cursor shown, mouse reporting off) before the connection closed.
+
+Four bugs surfaced the moment any of this was first executed, all fixed here:
+`build.sh` passed an extensionless `-out:`, which Odin rejects on Windows;
+`ssh/server.odin` called `ssh_threads_get_pthread`, which a Windows libssh
+declares but never defines, so every example failed to link with `LNK2019`;
+four tests wrote to a hardcoded `/tmp`, which on Windows is a `C:\tmp` that
+does not exist; and the startup banner's `→` was mojibake in any console whose
+output code page is not UTF-8.
+
+Still unverified on Windows, and stated so rather than assumed: concurrent
+sessions under load, window-resize reflow, large pastes, the connection
+limiter, and `examples/` other than `tracker` and `whoami`, which were built
+but not run.
 
 To build on Windows you need libssh from vcpkg (`vcpkg install
 libssh:x64-windows`, which produces `ssh.lib`) and `ssh.dll` on your `%PATH%`
@@ -195,9 +222,11 @@ resolve and execute, and the Linux job's commands do what they claim. It says
 nothing about:
 
 - **The `macos-latest` and `windows-latest` jobs.** `act` has no image for
-  either and skips them (`Skipping unsupported platform`). Nothing local has
-  ever run `brew install libssh` or `vcpkg install libssh:x64-windows`, and the
-  Windows job's `continue-on-error: true` has never been exercised.
+  either and skips them (`Skipping unsupported platform`). What the Windows job
+  does has since been reproduced by hand on a real Windows 11 machine — vcpkg
+  libssh, then `./build.sh` and `./test.sh` under Git Bash, all green (see
+  [Platform support](#platform-support)) — but the job itself, on a
+  GitHub-hosted `windows-latest` runner, still has not been observed running.
 - **`actions/checkout`.** `act` does not clone; it copies the working tree in,
   gitignored files and all.
 - **The GitHub-hosted runner images.** `catthehacker/ubuntu:act-latest` is a

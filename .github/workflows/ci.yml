@@ -80,11 +80,21 @@ jobs:
             odin check "$ex" -collection:otsh=. -target:freebsd_amd64
           done
 
-  # EXPERIMENTAL — nobody has run otsh on real Windows yet. This job exists to
-  # find out whether the Windows code paths build and whether the tests pass
-  # there; until one of those has actually been green it must not be able to
-  # block a merge. Flip continue-on-error off once it has been green in
-  # practice, not before.
+  # Windows is now genuinely exercised: on 2026-07-31 every step below was
+  # reproduced by hand on a physical Windows 11 machine — vcpkg libssh 0.12.0,
+  # Odin dev-2026-07a, ./build.sh for the packages and all five examples, and
+  # ./test.sh (67 tests) under Git Bash, all green, with tracker.exe then
+  # serving real openssh sessions. It found four genuine bugs on the way, which
+  # is what this job is for.
+  #
+  # It still does not block, because that run and this job are not the same
+  # thing. A hosted windows-latest runner is a different machine: vcpkg is
+  # preinstalled at C:\vcpkg rather than cloned, the Visual Studio edition
+  # differs, and the whole workflow file has never executed on GitHub at all.
+  # Blocking on a job that has never once run is how a repo starts its life
+  # with a red X nobody can explain. Flip this to blocking after it has been
+  # green on real CI a few times — the substance is verified; the plumbing is
+  # not. docs/getting-started.md records exactly what was and was not covered.
   windows:
     runs-on: windows-latest
     continue-on-error: true

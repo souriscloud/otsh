@@ -11,11 +11,14 @@ id_rsa*
 
 # --- build output ------------------------------------------------------------
 # build.sh drops the binary in the repo root, named after the source directory.
+# On Windows the same name carries a .exe (and link.exe leaves a .pdb beside it).
 /tracker
 /whoami
 /members
 /guestbook
 /stopwatch
+*.exe
+*.pdb
 *.o
 *.bin
 *.dSYM/

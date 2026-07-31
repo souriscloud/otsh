@@ -216,8 +216,15 @@ foreign lib {
 	finalize :: proc() -> c.int ---
 	@(link_name = "ssh_threads_set_callbacks")
 	threads_set_callbacks :: proc(cb: Threads_Callbacks) -> c.int ---
-	@(link_name = "ssh_threads_get_pthread")
-	threads_get_pthread :: proc() -> Threads_Callbacks ---
+	// The platform's own threading backend: pthreads on unix, and on Windows the
+	// winlocks one. Deliberately NOT ssh_threads_get_pthread — callbacks.h
+	// declares that on every platform, but a Windows libssh only *defines*
+	// ssh_threads_get_default and ssh_threads_get_noop, so binding the pthread
+	// spelling links everywhere except the one place it is checked:
+	//   error LNK2019: unresolved external symbol ssh_threads_get_pthread
+	// On unix the two are the same function's result, so nothing changes there.
+	@(link_name = "ssh_threads_get_default")
+	threads_get_default :: proc() -> Threads_Callbacks ---
 
 	// bind (listening socket)
 	@(link_name = "ssh_bind_new")

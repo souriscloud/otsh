@@ -3,10 +3,29 @@
 package otsh_tests
 
 import "core:os"
+import "core:path/filepath"
 import "core:testing"
 import "core:time"
 import "otsh:ssh"
 import "otsh:sshtui"
+
+// A scratch path in the OS temp directory, for the tests below that need a
+// real file on disk.
+//
+// These paths used to be spelled "/tmp/otsh_test_secret" literally. That is a
+// POSIX-only spelling: on Windows it resolves to C:\tmp, which does not exist,
+// so all four identity tests failed with Not_Exist the first time the suite was
+// ever run there. os.temp_directory is %TMP% on Windows and $TMPDIR (else
+// /tmp) on unix, and filepath.join gets the separator right on both.
+@(private = "file")
+temp_path :: proc(name: string) -> string {
+	dir, err := os.temp_directory(context.temp_allocator)
+	if err != nil {
+		dir = "." // no temp dir: the working directory is still writable
+	}
+	joined, _ := filepath.join({dir, name}, context.temp_allocator)
+	return joined
+}
 
 @(test)
 session_stays_small :: proc(t: ^testing.T) {
@@ -31,7 +50,7 @@ session_stays_small :: proc(t: ^testing.T) {
 
 @(test)
 pseudonym_is_stable_and_distinct :: proc(t: ^testing.T) {
-	path := "/tmp/otsh_test_secret"
+	path := temp_path("otsh_test_secret")
 	os.remove(path)
 	defer os.remove(path)
 
@@ -58,7 +77,7 @@ pseudonym_differs_per_secret :: proc(t: ^testing.T) {
 	// Two servers with different secrets must produce unlinkable ids for the
 	// same key. This is the property that makes a leaked database useless
 	// for correlating users across services.
-	p1, p2 := "/tmp/otsh_test_secret1", "/tmp/otsh_test_secret2"
+	p1, p2 := temp_path("otsh_test_secret1"), temp_path("otsh_test_secret2")
 	os.remove(p1);os.remove(p2)
 	defer os.remove(p1)
 	defer os.remove(p2)
@@ -84,7 +103,7 @@ pseudonym_needs_a_secret :: proc(t: ^testing.T) {
 @(test)
 pseudonym_survives_reload :: proc(t: ^testing.T) {
 	// Restarting the server must not re-pseudonymise everybody.
-	path := "/tmp/otsh_test_secret3"
+	path := temp_path("otsh_test_secret3")
 	os.remove(path)
 	defer os.remove(path)
 
@@ -121,7 +140,7 @@ ids_equal_rejects_empty :: proc(t: ^testing.T) {
 identity_secret_rejects_all_zero :: proc(t: ^testing.T) {
 	// An all-zero HMAC key is a published key: every id becomes computable by
 	// anyone holding the fingerprint, which voids the point of pseudonymising.
-	path := "/tmp/otsh_test_zero_secret"
+	path := temp_path("otsh_test_zero_secret")
 	os.remove(path)
 	defer os.remove(path)
 
