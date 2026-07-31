@@ -105,6 +105,7 @@ run :: proc(p: ^Program, app: App) {
 	cols, rows := p.backend.size(p.backend.data)
 	screen_init(&p.screen, cols, rows)
 	defer screen_destroy(&p.screen)
+	last_w, last_h := p.screen.w, p.screen.h
 
 	if app.init != nil {
 		app.init(p)
@@ -130,10 +131,17 @@ run :: proc(p: ^Program, app: App) {
 
 		dispatch_input(p)
 
+		// What the backend reports is a request, not a fact: `screen_resize`
+		// clamps it to MAX_COLS/MAX_ROWS. Compare against the size the screen
+		// actually took, never against the raw numbers — a backend stuck at
+		// 5000x5000 would otherwise never satisfy the test, so every frame
+		// would resize and fire a Resize, forever, each one naming a geometry
+		// the grid does not have. Apps size their layout off that message.
 		nc, nr := p.backend.size(p.backend.data)
-		if nc != p.screen.w || nr != p.screen.h {
-			screen_resize(&p.screen, nc, nr)
-			send(p, Resize{nc, nr})
+		screen_resize(&p.screen, nc, nr)
+		if p.screen.w != last_w || p.screen.h != last_h {
+			last_w, last_h = p.screen.w, p.screen.h
+			send(p, Resize{last_w, last_h})
 		}
 
 		now := time.tick_now()
