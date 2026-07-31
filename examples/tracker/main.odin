@@ -103,9 +103,9 @@ seed_board :: proc() {
 	seed(.Closed, "lone ESC is ambiguous",
 	     "ESC is both a key and the start of every escape sequence. Resolved with the usual timeout: an ESC still alone after two frames is reported as the Escape key.", 3)
 	seed(.Closed, "Session is ~17 KB because of the ring buffer",
-	     "MAX_INPUT shrank to 4 KiB, cutting Session under 5 KB. Bigger pastes ride libssh's re-offer flow control and arrive across successive frames — proven with an 8 KiB burst over a live session — and a size regression test pins it.", 3)
-	seed(.Open, "a ~1 MiB paste permanently deafens a session",
-	     "Paste a megabyte into any otsh app and it never acts on input again, while still repainting so it looks alive. libssh only re-invokes the channel data callback when the next packet arrives, so what the ring declines after a burst is stranded with nothing to release it. 256 KiB recovers, 1 MiB does not. Two fixes tried and reverted — see docs/architecture.md before attempting a third.", 4)
+	     "The per-session ring is gone entirely: libssh already buffers channel data, so read() drains that directly and Session dropped under 1 KB. The ring's original justification — that libssh re-offers whatever the callback declines — turned out to be false, and cost a separate session-deafening bug before anyone checked it.", 4)
+	seed(.Closed, "a ~1 MiB paste permanently deafened a session",
+	     "Two consumers shared one buffer: a channel_data_function copied into a fixed ring and declined the rest, believing libssh would re-offer it. It does not — the callback fires only when the next packet arrives, so a paste's tail was stranded and the session went deaf while still repainting. Instrumented: 1 MiB pasted, ~550 KB stuck, quit key unseen after 60s. Now one buffer, one consumer: no callback, read() drains libssh directly. 1 MiB went from never to 4.8s, 4 MiB works, and SSH's own window is the backpressure.", 6)
 	seed(.Open, "no Windows local backend",
 	     "A console-API backend and a Windows build path now exist, cross-type-check for windows_amd64, and have a CI job. Still open because none of it has executed on real Windows; closes when that CI job has been green in practice.", 2)
 	seed(.Closed, "no audit log",
