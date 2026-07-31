@@ -139,6 +139,89 @@ Caveats specific to the Windows build, all of them accepted deliberately:
   tightens the mode after libssh writes the key. Keep them in a directory only
   the service account can read and treat that as the whole of the protection.
 
+### Validating CI locally
+
+Everything above is evidence about otsh. `.github/workflows/ci.yml` is a
+separate claim — a workflow file that has never run is a prediction — so it
+gets checked before it is pushed. Both tools run in containers; neither is
+installed on the host.
+
+**Lint it.** `actionlint` parses the YAML, type-checks every `${{ }}`
+expression, validates the `runs-on` labels and `if:` conditions, and runs
+`shellcheck` over every `run:` block. No output means no findings:
+
+```sh
+docker run --rm -v "$PWD":/repo --workdir /repo rhysd/actionlint:latest -color
+```
+
+**Run it.** `act` executes jobs in Docker. No `act` image is publicly
+pullable, so build a small one (use `act_Linux_x86_64.tar.gz` on an Intel
+host):
+
+```sh
+printf 'FROM alpine:3.20\nRUN apk add --no-cache curl git bash docker-cli\nRUN curl -fsSL https://github.com/nektos/act/releases/download/v0.2.89/act_Linux_arm64.tar.gz | tar -xz -C /usr/local/bin act\nENTRYPOINT ["/usr/local/bin/act"]\n' | docker build -t local/act -
+```
+
+Then, from the repository root — `-j docs` takes about a minute, `-j build
+--matrix os:ubuntu-latest` a few more because it builds Odin from source:
+
+```sh
+docker run --rm \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$PWD":"$PWD" --workdir "$PWD" \
+  local/act \
+  -P ubuntu-latest=catthehacker/ubuntu:act-latest \
+  --env PATH="$(docker run --rm catthehacker/ubuntu:act-latest printenv PATH)" \
+  -j docs
+```
+
+Two details in that invocation are worth an hour each if you have to rederive
+them:
+
+- **The repository is mounted at the same absolute path it has on the host.**
+  `act` runs inside a container but drives the host's Docker daemon, so the
+  host resolves every bind mount `act` asks for. Mounted at `/repo`, `act`
+  would tell the host to mount `/repo`, which is not there.
+- **The `--env PATH=...` line works around a bug in `act`, not in the
+  workflow.** `actions/setup-python` prepends its own entries to `PATH`, and
+  `act` then drops the runner image's `node` directory, so the action's *post*
+  step dies with `exec: "node": executable file not found`. Real runners invoke
+  `node` by absolute path and never reach this. Handing the job the image's own
+  `PATH` back makes it green.
+
+A green local run says the YAML parses, the expressions and conditions
+evaluate, the steps are ordered correctly, the three third-party actions
+resolve and execute, and the Linux job's commands do what they claim. It says
+nothing about:
+
+- **The `macos-latest` and `windows-latest` jobs.** `act` has no image for
+  either and skips them (`Skipping unsupported platform`). Nothing local has
+  ever run `brew install libssh` or `vcpkg install libssh:x64-windows`, and the
+  Windows job's `continue-on-error: true` has never been exercised.
+- **`actions/checkout`.** `act` does not clone; it copies the working tree in,
+  gitignored files and all.
+- **The GitHub-hosted runner images.** `catthehacker/ubuntu:act-latest` is a
+  leaner Ubuntu 24.04 than GitHub's, so a step that quietly leans on
+  preinstalled software can pass in one and fail in the other. It cuts both
+  ways here: that image ships no LLVM, and `setup-odin` only found one because
+  the job's own `clang` install had already pulled in LLVM 18.
+- **Architecture.** On an Apple Silicon host these jobs run `arm64`, while
+  GitHub's `ubuntu-latest` is `x86_64`. Forcing
+  `--container-architecture linux/amd64` does not help: the runner image's
+  `git-lfs` segfaults under emulation while cloning Odin, long before the job
+  reaches anything of otsh's.
+- **Anything that only exists on GitHub:** caches, secrets, `GITHUB_TOKEN`
+  scopes, branch filters and matrix fan-out across real runners.
+
+One thing to expect when you run the build job: `./test.sh` fails roughly one
+run in fifteen on Linux, always as
+`otsh_tests.local_size_reads_the_pty ... size fell back to 80x24`. That is not
+`act` and not `TIOCGWINSZ` — the three `tests/linux_test.odin` size tests each
+point the *process-wide* `STDOUT_FILENO` at their own fd, and Odin's test
+runner runs them on four threads, so one test's `/dev/null` can land under
+another's `ioctl`. It reproduces in a bare `ubuntu:24.04` container (1 failure
+in 15) and disappears at `-define:ODIN_TEST_THREADS=1` (0 in 15).
+
 ## Build and run the examples
 
 `build.sh` builds one app against the otsh source tree and drops the binary,
