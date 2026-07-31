@@ -80,14 +80,16 @@ jobs:
             odin check "$ex" -collection:otsh=. -target:freebsd_amd64
           done
 
-  # EXPERIMENTAL — nobody has run otsh on real Windows yet. This job exists to
-  # find out whether the Windows code paths build and whether the tests pass
-  # there; until one of those has actually been green it must not be able to
-  # block a merge. Flip continue-on-error off once it has been green in
-  # practice, not before.
+  # This job used to be continue-on-error, on the rule that a Windows claim
+  # nobody had ever run must not gate a merge. That has now happened: on
+  # 2026-07-31 every step below was reproduced by hand on a physical Windows 11
+  # machine — vcpkg libssh 0.12.0, Odin dev-2026-07a, then ./build.sh for the
+  # packages and all five examples and ./test.sh (67 tests) under Git Bash, all
+  # green, and tracker.exe went on to serve real openssh sessions. It found
+  # four genuine bugs on the way, which is what this job is for. So it blocks
+  # now; docs/getting-started.md records what was and was not covered.
   windows:
     runs-on: windows-latest
-    continue-on-error: true
     defaults:
       run:
         # Git Bash, so build.sh and test.sh run unmodified. Their Windows

@@ -51,6 +51,10 @@ MINGW*|MSYS*|CYGWIN*)
 	VCPKG="${VCPKG_ROOT:-${VCPKG_INSTALLATION_ROOT:-C:/vcpkg}}"
 	LIBDIR="${VCPKG}/installed/x64-windows/lib"
 	LDFLAGS="/LIBPATH:${LIBDIR}"
+	# Odin refuses an -out: without a recognised extension on Windows:
+	#   Output path C:/otsh-ci/otsh/tracker must have an appropriate extension.
+	# basename gives an extensionless name, so add the one Windows wants.
+	OUT="${OUT}.exe"
 	;;
 *)
 	if command -v pkg-config >/dev/null && pkg-config --exists libssh; then

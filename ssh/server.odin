@@ -553,7 +553,7 @@ serve :: proc(cfg: Config) -> bool {
 	if cfg.port == 0 {cfg.port = DEFAULT_PORT}
 	if cfg.host_key_path == "" {cfg.host_key_path = DEFAULT_HOST_KEY}
 
-	ls.threads_set_callbacks(ls.threads_get_pthread())
+	ls.threads_set_callbacks(ls.threads_get_default())
 	if ls.init() != ls.OK {
 		fmt.eprintln("otsh: ssh_init failed")
 		return false
@@ -613,7 +613,16 @@ serve :: proc(cfg: Config) -> bool {
 	}
 	defer if !cfg.no_signal_handlers {restore_signal_handlers()}
 
-	fmt.printfln("otsh: listening on %s:%d  →  ssh -p %d %s", cfg.host, cfg.port, cfg.port, cfg.host)
+	// The only non-ASCII byte this package writes to a console, and a Windows
+	// console decodes what it is given with the *console output code page* —
+	// the user's OEM one unless somebody changed it, 852 on the machine this
+	// was found on, where the arrow arrived as "Ôćĺ". tui/local_windows.odin
+	// switches that code page to UTF-8 for the TUI and restores it on exit, but
+	// a server that may never draw a frame has no business mutating the parent
+	// shell's console state for one glyph, so here the arrow is ASCII.
+	arrow :: "->" when ODIN_OS == .Windows else "→"
+	fmt.printfln("otsh: listening on %s:%d  %s  ssh -p %d %s",
+		cfg.host, cfg.port, arrow, cfg.port, cfg.host)
 	audit_emit(srv, Audit_Event{kind = .Listen, host = cfg.host, port = cfg.port})
 
 	// The listening socket, watched directly so the loop can wait with a
