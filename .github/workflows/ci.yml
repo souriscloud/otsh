@@ -1,9 +1,25 @@
 name: ci
 
+# Cost shapes this file. On a PRIVATE repo, GitHub bills macOS runner minutes
+# at 10x and Windows at 2x against the monthly allowance, and each job is
+# rounded up to a whole minute. Measured on the first real run: windows 17m
+# wall = 34 billed, macOS 54s = 10 billed, ubuntu 1m10s = 2, docs 6s = 1 —
+# 47 minutes for one push, or about 42 pushes a month before it costs money.
+#
+# So the cheap jobs (Linux, docs) run on every push and pull request, and the
+# expensive ones run when there is a reason: on demand, weekly, and for
+# release tags. Routine pushes now cost ~3 billed minutes instead of 47.
+# Nothing about coverage changes — the same jobs run, just not on every commit.
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
+  schedule:
+    # Mondays 04:17 UTC. Odd minute on purpose: the top of the hour is when
+    # everyone else's cron fires and the runner queue is longest.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
 
 # Nothing here writes to the repository: the jobs check out, build, test and
 # validate the docs, and no step uses GITHUB_TOKEN for anything else. Stating
@@ -13,11 +29,14 @@ permissions:
   contents: read
 
 jobs:
+  # Linux carries every push: it is the 1x platform, it runs the full test
+  # suite, and it owns both cross-type-checks, so a Windows or FreeBSD
+  # regression is caught here without paying for those runners.
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -80,6 +99,34 @@ jobs:
             odin check "$ex" -collection:otsh=. -target:freebsd_amd64
           done
 
+  # macOS at 10x is the most expensive minute GitHub sells, and it is also the
+  # platform this package is developed on, so a break here shows up on the
+  # author's machine long before CI would tell them. Weekly, on demand, and for
+  # release tags is enough; `if` rather than a separate workflow so the whole
+  # matrix stays readable in one file.
+  macos:
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install libssh (macOS)
+        run: brew install libssh pkg-config
+
+      - name: Install Odin
+        uses: laytan/setup-odin@v2
+        with:
+          release: false
+          branch: master
+
+      - name: Build packages and every example
+        run: |
+          ./build.sh
+          for ex in examples/*/; do ./build.sh "$ex"; done
+
+      - name: Run tests
+        run: ./test.sh
+
   # Windows is now genuinely exercised: on 2026-07-31 every step below was
   # reproduced by hand on a physical Windows 11 machine — vcpkg libssh 0.12.0,
   # Odin dev-2026-07a, ./build.sh for the packages and all five examples, and
@@ -95,7 +142,13 @@ jobs:
   # with a red X nobody can explain. Flip this to blocking after it has been
   # green on real CI a few times — the substance is verified; the plumbing is
   # not. docs/getting-started.md records exactly what was and was not covered.
+  #
+  # It is also the single most expensive job here — 17 minutes wall, almost all
+  # of it vcpkg compiling libssh and OpenSSL from source, doubled to 34 billed
+  # minutes. Hence the same gating as macOS, plus a binary cache below so a
+  # repeat run restores the built package instead of rebuilding it.
   windows:
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')
     runs-on: windows-latest
     continue-on-error: true
     defaults:
@@ -105,6 +158,18 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      # vcpkg's own binary cache, persisted between runs. Without it every run
+      # recompiles libssh, OpenSSL and zlib — the bulk of this job's 17
+      # minutes. The key is pinned to the vcpkg commit the runner image ships,
+      # so a runner-image bump invalidates the cache rather than restoring
+      # packages built against a different toolchain.
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/vcpkg/archives
+          key: vcpkg-${{ runner.os }}-libssh-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: vcpkg-${{ runner.os }}-libssh-
 
       # vcpkg is preinstalled on the windows runner image, at
       # $VCPKG_INSTALLATION_ROOT, which is where build.sh looks.
