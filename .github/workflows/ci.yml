@@ -80,16 +80,24 @@ jobs:
             odin check "$ex" -collection:otsh=. -target:freebsd_amd64
           done
 
-  # This job used to be continue-on-error, on the rule that a Windows claim
-  # nobody had ever run must not gate a merge. That has now happened: on
-  # 2026-07-31 every step below was reproduced by hand on a physical Windows 11
-  # machine — vcpkg libssh 0.12.0, Odin dev-2026-07a, then ./build.sh for the
-  # packages and all five examples and ./test.sh (67 tests) under Git Bash, all
-  # green, and tracker.exe went on to serve real openssh sessions. It found
-  # four genuine bugs on the way, which is what this job is for. So it blocks
-  # now; docs/getting-started.md records what was and was not covered.
+  # Windows is now genuinely exercised: on 2026-07-31 every step below was
+  # reproduced by hand on a physical Windows 11 machine — vcpkg libssh 0.12.0,
+  # Odin dev-2026-07a, ./build.sh for the packages and all five examples, and
+  # ./test.sh (67 tests) under Git Bash, all green, with tracker.exe then
+  # serving real openssh sessions. It found four genuine bugs on the way, which
+  # is what this job is for.
+  #
+  # It still does not block, because that run and this job are not the same
+  # thing. A hosted windows-latest runner is a different machine: vcpkg is
+  # preinstalled at C:\vcpkg rather than cloned, the Visual Studio edition
+  # differs, and the whole workflow file has never executed on GitHub at all.
+  # Blocking on a job that has never once run is how a repo starts its life
+  # with a red X nobody can explain. Flip this to blocking after it has been
+  # green on real CI a few times — the substance is verified; the plumbing is
+  # not. docs/getting-started.md records exactly what was and was not covered.
   windows:
     runs-on: windows-latest
+    continue-on-error: true
     defaults:
       run:
         # Git Bash, so build.sh and test.sh run unmodified. Their Windows
