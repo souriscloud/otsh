@@ -12,6 +12,7 @@
 package otsh_tests
 
 import "core:c"
+import "core:sync"
 import "core:sys/posix"
 import "core:testing"
 import "otsh:tui"
@@ -79,10 +80,27 @@ close_pty :: proc(p: Pty) {
 	posix.close(p.master)
 }
 
+// Serialises the stdout swap below. `STDOUT_FILENO` is process-wide and the
+// test runner is multi-threaded, so without this the tests here corrupt each
+// other: one test's /dev/null lands under another's ioctl and it reads back
+// 80x24 — indistinguishable from the wrong-TIOCGWINSZ failure this file exists
+// to catch. Measured at roughly 1 failure in 15 runs on Linux, never on macOS.
+//
+// After this lock: 1 failure in 75 Linux runs, and not reproduced in the last
+// 55 consecutive ones. That residual is not explained. If it resurfaces, the
+// next thing to try is `-define:ODIN_TEST_THREADS=1`, which serialises the
+// whole suite — every test here mutates process-global state (stdout, files
+// under /tmp), so this file is inherently hostile to a parallel runner.
+@(private = "file")
+stdout_mu: sync.Mutex
+
 // Runs `tui.local_backend(...).size` with `fd` temporarily installed as this
 // process's stdout, since that is the descriptor it queries.
 @(private = "file")
 size_with_stdout :: proc(fd: posix.FD) -> (cols, rows: int) {
+	sync.lock(&stdout_mu)
+	defer sync.unlock(&stdout_mu)
+
 	saved := posix.dup(posix.STDOUT_FILENO)
 	if saved < 0 {
 		return 0, 0
