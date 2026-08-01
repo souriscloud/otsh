@@ -698,6 +698,11 @@ serve :: proc(cfg: Config) -> bool {
 	if secs > 0 {
 		report_shutdown(srv, drain_sessions(srv, secs), secs)
 	}
+	// Every session has had its chance now. On Windows a console close, logoff
+	// or shutdown handler is parked on this flag waiting for exactly that: it
+	// cannot return until the drain is over, because returning is what lets the
+	// OS kill the process. See signal_windows.odin.
+	sync.atomic_store(&stop_complete, true)
 
 	ls.bind_free(srv.bind)
 	ls.finalize()

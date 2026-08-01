@@ -41,6 +41,13 @@ DEFAULT_SHUTDOWN_SECONDS :: 5
 @(private)
 signal_requested: bool
 
+// Set by `serve` once shutdown has run its course — sessions drained or the
+// deadline passed — and read only by the Windows console handler, which has to
+// block until then because returning from it on a close/logoff/shutdown event
+// terminates the process (see signal_windows.odin). Nothing on POSIX reads it.
+@(private)
+stop_complete: bool
+
 // True once a signal asked this process to stop. Useful to an app that wants
 // to know why its loop is unwinding.
 shutting_down :: proc "contextless" () -> bool {
@@ -109,6 +116,7 @@ report_shutdown :: proc(srv: ^Server, stragglers: int, seconds: int) {
 @(private)
 install_signal_handlers :: proc() {
 	sync.atomic_store(&signal_requested, false)
+	sync.atomic_store(&stop_complete, false)
 	set_stop_handler()
 }
 
