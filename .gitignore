@@ -17,6 +17,11 @@ id_rsa*
 /members
 /guestbook
 /stopwatch
+# The two apps the docs have you build yourself: docs/getting-started.md walks
+# through `./build.sh ~/src/greeter`, docs/ssh.md through the sshdoc example.
+# Both land in the repo root too, the same way the bundled examples do.
+/greeter
+/sshdoc
 *.exe
 *.pdb
 *.o
@@ -26,6 +31,14 @@ id_rsa*
 # --- generated ---------------------------------------------------------------
 # Rebuild with: python3 docs/tools/build_site.py
 docs/site/
+# Byte-compiled caches CPython leaves behind for the tools in docs/tools/.
+__pycache__/
+*.pyc
+
+# --- runtime output ----------------------------------------------------------
+# examples/whoami's header suggests `./whoami 2>audit.log` to keep the audit
+# trail separate from the app's own chatter on stdout.
+audit.log
 
 # --- local machine config ----------------------------------------------------
 # Optional path to the odin compiler, read by build.sh/test.sh when odin is not
