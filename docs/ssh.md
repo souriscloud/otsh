@@ -45,9 +45,11 @@ interactive sessions.
 serve :: proc(cfg: Config) -> bool
 ```
 
-Blocks, accepting connections until the process exits (or `Server.running` is
-set false from outside — there is no exported stop function today). Returns
-`false` if setup fails: `ssh_init`, host key creation, or `ssh_bind_listen`.
+Blocks, accepting connections. Returns `false` if setup fails: `ssh_init`,
+host key creation, or `ssh_bind_listen`. Otherwise it returns `true` once it
+has been asked to stop — by `SIGINT`/`SIGTERM`, which it handles by default,
+or by a `shutdown(srv)` call — and the connected sessions have drained. See
+[Shutdown](#shutdown) below.
 
 ### `Config`
 
@@ -67,6 +69,8 @@ set false from outside — there is no exported stop function today). Returns
 | `ciphers` | `string` | `""` uses `DEFAULT_CIPHERS`, applied to both directions (`Ciphers_C_S` and `Ciphers_S_C`). `"-"` opts out. |
 | `macs` | `string` | `""` uses `DEFAULT_MACS`, applied to both directions (`Hmac_C_S` and `Hmac_S_C`). `"-"` opts out. |
 | `hostkey_algorithms` | `string` | `""` uses `DEFAULT_HOSTKEYS`. `"-"` opts out. |
+| `shutdown_seconds` | `int` | `0` uses `DEFAULT_SHUTDOWN_SECONDS` (5) — how long `serve` waits for connected sessions to finish once shutdown starts. Negative returns immediately. See Shutdown below. |
+| `no_signal_handlers` | `bool` | `false` means `serve` handles `SIGINT`/`SIGTERM` itself and restores the previous handlers before returning. Set it when the surrounding program owns signal handling; then stop the server with `shutdown`. |
 
 `key_exchange`, `ciphers`, `macs`, and `hostkey_algorithms` take libssh's
 comma-separated algorithm-name format (e.g. what `DEFAULT_CIPHERS` is written
@@ -242,7 +246,7 @@ individually.
 | `max_sessions` | Total concurrent sessions across the whole process. Without it, connections accumulate threads until the process runs out of them. |
 | `max_per_ip` | Concurrent sessions from one source address. Without it, a single host can hold every session slot open by itself. Verified: with `max_per_ip = 3` and 12 simultaneous connection attempts from one address, exactly 3 were admitted. |
 | `handshake_seconds` | Time allowed to complete key exchange and authentication, enforced as a timeout on the session socket. Without it, a client that opens a TCP connection and then sends nothing pins a thread forever. |
-| `max_auth_attempts` | Failed authentication attempts on one connection before it is dropped. Limits brute-force guessing within a single session. |
+| `max_auth_attempts` | Failed `Authenticator` verdicts on one connection before that connection stops being asked. Note what it does not do — it does **not** drop the connection, and it does **not** bound guessing across connections, because the counter lives on the `Session` and a client that reconnects gets a fresh budget (measured: ~37 guesses/second from one address). If you accept passwords, rate-limit them yourself; this is not that control. |
 
 Limit enforcement happens per source address in `remote_addr`'s numeric
 form; a connection that is over a limit is dropped before the handshake
@@ -322,10 +326,11 @@ file doesn't exist yet. `serve` calls this automatically when
 `Config.identity_secret` is non-empty and stores the result on the `Server`.
 
 `pseudonym` is what turns a verified fingerprint into `Session.id`:
-`id = hex(HMAC-SHA256(secret, fingerprint))[:ID_BYTES]`, i.e. `ID_SIZE`
-(32) hex characters of a truncated HMAC. It writes into `dst` (which needs
-`ID_SIZE` bytes) and returns a string viewing it, so deriving an id never
-allocates and is safe to call from a session thread's fast path.
+`id = hex(HMAC-SHA256(secret, fingerprint)[:ID_BYTES])` — the 32-byte MAC is
+truncated to `ID_BYTES` (16) bytes *first*, and then hex-encoded, so the id
+is `ID_SIZE` (32) hex characters carrying 128 bits. It writes into `dst`
+(which needs `ID_SIZE` bytes) and returns a string viewing it, so deriving an
+id never allocates and is safe to call from a session thread's fast path.
 
 The reason to store this instead of the fingerprint: a public key fingerprint
 is a fine account id but a bad thing to persist, because it's *global* — a
@@ -481,16 +486,29 @@ buffer you own (`AUDIT_LINE_MAX` bytes is always enough, newline included).
 ## Host key
 
 ```odin
-ensure_host_key :: proc(path: string) -> bool
+ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool
 ```
 
-Called automatically by `serve` before it binds. If `path` already exists,
-it just checks the permissions (see below) and returns. Otherwise it
-generates a fresh ed25519 key (`ssh_pki_generate`), writes it to `path`
-unencrypted (`ssh_pki_export_privkey_file`), and `chmod`s it to `0600`
-(owner read/write only) immediately afterward — libssh writes new files with
-the process umask, typically `0644`, which is too permissive for a key that
-lets someone impersonate this host.
+Called automatically by `serve` before it binds, with `advertised` set from
+`Config.hostkey_algorithms`.
+
+If `path` already exists, it checks the permissions (see below), then reads
+the key back and checks its *type* against `advertised`. A key whose type is
+not in that list returns `false` and refuses to start, naming both — an
+ed25519-only server pointed at an RSA key would otherwise fail key exchange
+for every client with nothing in any log to say why. `advertised = "-"`
+(libssh's own broader defaults) skips the type check.
+
+Otherwise it generates a fresh ed25519 key (`ssh_pki_generate`) and writes
+it to `path` unencrypted (`ssh_pki_export_privkey_file`) — but creates the
+file itself first, empty, with `O_EXCL` and mode `0600`. libssh writes new
+files with `fopen(path, "wb")`, i.e. `0666` masked by the process umask, and
+chmod-ing afterwards does not close that window: a descriptor another process
+opens inside it survives the chmod, and under a permissive umask the key is
+briefly world-*writable*, so it could be replaced and not merely read.
+Pre-creating the file avoids that — `fopen("wb")` on an existing file
+truncates but leaves the mode alone, so `0600` is the only mode the key is
+ever observable at.
 
 ```odin
 warn_if_world_readable :: proc(path: string)
@@ -533,8 +551,10 @@ main :: proc() {
 ```
 
 `ssh -p 2225 localhost` connects, gets one line back, and the server closes
-the connection as soon as `handle` returns. This builds as-is with
-`./build.sh path/to/this/file`.
+the connection as soon as `handle` returns. This builds as-is: save it into a
+directory of its own and run `./build.sh path/to/that/directory` from the repo
+root. `build.sh` takes an Odin *package directory*, not a source file, and
+names the binary after it.
 
 ## See also
 

@@ -3,10 +3,12 @@
 // for what this is for; the four public names here are the same four, with the
 // same signatures, so an app that builds on one platform builds on the other.
 //
-// EXPERIMENTAL. This file is type-checked for windows_amd64 and built by CI on
-// windows-latest, and that is the whole of its validation — nobody has run it
-// on a real Windows console. Accepted caveats are commented at each site and
-// summarised in docs/getting-started.md.
+// Driven in a real Windows 11 console on 2026-07-31 by `tracker --local`: raw
+// single-key input, VT sequences honoured rather than printed, UTF-8 box
+// drawing intact, and the frame sized from srWindow. Resize reflow and large
+// pastes went unmeasured there, and the hosted CI windows job has still never
+// executed. Accepted caveats are commented at each site and summarised in
+// docs/getting-started.md.
 package tui
 
 import win32 "core:sys/windows"

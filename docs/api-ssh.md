@@ -968,7 +968,7 @@ Asks `srv` to stop: the accept loop exits, connected sessions are told their
 input has finished, and `serve` returns once they are gone or the deadline
 passes. Safe to call from any thread, including from inside a Handler.
 
-*ssh/shutdown.odin:53*
+*ssh/shutdown.odin:60*
 
 ### `shutting_down`
 
@@ -979,7 +979,7 @@ shutting_down :: proc "contextless" () -> bool
 True once a signal asked this process to stop. Useful to an app that wants
 to know why its loop is unwinding.
 
-*ssh/shutdown.odin:46*
+*ssh/shutdown.odin:53*
 
 ### `size`
 

@@ -9,7 +9,7 @@ list of what is out of scope.
 
 The source of truth is `ssh/server.odin`, `ssh/identity.odin`, and
 `ssh/limits.odin`. Where this page and `README.md` disagree, this page
-follows the source; one such disagreement is called out at the end.
+follows the source; two such disagreements are called out at the end.
 
 ## 1. How SSH public-key auth actually works
 
@@ -94,7 +94,7 @@ Measured against this server, with a client configured to offer four keys:
 `ssh/server.odin` takes the second path: the `Authenticator` doc comment
 states it directly —
 
-> Rejecting a public key here does not only deny access — it makes the
+> Rejecting a public key here does not just deny access — it makes the
 > client offer its *next* key, and the next, so a rejecting server learns
 > every public key in the user's agent.
 
@@ -248,16 +248,23 @@ there is no way to harden one direction and not the other.
 ## 6. Host key management
 
 `ensure_host_key` generates an ed25519 key pair (`ls.pki_generate(.Ed25519,
-0, &key)`) the first time `host_key_path` doesn't exist, exports the
-private key unencrypted to that path via `ls.pki_export_privkey_file`, and
-then calls `posix.chmod(cpath, {.IRUSR, .IWUSR})` — mode 0600 — immediately
-after. Unlike the identity secret, this is not `O_EXCL`-atomic: the file is
-first written by libssh under the process umask (commonly 0644) and then
-chmod'd right after, so there is a brief window between "file exists" and
-"file is 0600" rather than a guarantee of never being briefly wider. On
-every subsequent start, an existing key is left alone and
-`warn_if_world_readable` checks its mode and warns (with the exact `chmod`
-command to run) if group or world bits are set.
+0, &key)`) the first time `host_key_path` doesn't exist, and — exactly like
+the identity secret — the file is created `O_EXCL` at 0600 before anything
+is written into it. libssh's own writer would `fopen(path, "wb")`, i.e.
+0666 masked by the process umask, and chmod-ing after the fact does not fix
+that: a descriptor another process obtains inside the window survives the
+chmod, and under a permissive umask that window is world-*writable*, so the
+key could be replaced rather than merely read. So `otsh` opens the path
+itself with `{.Write, .Create, .Excl}` and `{.Read_User, .Write_User}`,
+closes it, and only then calls `ls.pki_export_privkey_file` — `fopen("wb")`
+on an existing file truncates but leaves the mode alone, so 0600 is the only
+mode the key is ever observable at. `ensure_private_mode` re-asserts it
+afterwards as belt and braces. On every subsequent start the existing key is
+kept: `warn_if_world_readable` checks its mode and warns (with the exact
+`chmod` command to run) if group or world bits are set, and the key is
+imported so its type can be checked against the advertised host-key
+algorithms — a mismatch refuses to start rather than failing every client's
+key exchange with nothing in the log to say why.
 
 The host key is the server's identity, in the same sense a TLS certificate
 is a site's identity. Clients that connect once remember it — pinned into
@@ -315,11 +322,14 @@ default above, a negative value disables that specific limit, and a
 positive value is used as given. The zero value of `Limits{}` is therefore
 the hardened default, not an accidental free-for-all.
 
-`limiter_acquire` runs in `session_thread` before `ls.handle_key_exchange`
-— a connection that is over a limit is dropped without spending any crypto
-work on it at all (`if !admitted { return }`). Measured: configuring
-`max_per_ip = 3` and opening 12 simultaneous connections from one address
-admitted exactly 3; the rest were refused at accept time.
+`limiter_acquire` runs in `serve`'s accept loop, immediately after
+`ls.bind_accept` and before the session thread is created — a connection
+that is over a limit is disconnected and freed without costing a pthread or
+a single round of crypto (`if ok, tripped := limiter_acquire(&srv.limiter,
+addr); !ok`). `session_thread` only *releases* the slot the accept loop
+already took for it. Measured: configuring `max_per_ip = 3` and opening 12
+simultaneous connections from one address admitted exactly 3; the rest were
+refused at accept time.
 
 Be clear about what this does not cover: `Limiter` tracks state
 per-process, keyed by the numeric source address it sees. It has no view
@@ -342,7 +352,7 @@ volumetric one needs filtering upstream of the machine.
 Per-session state lives in fixed-size fields on `Session`, filled by
 `copy_cstr`, which stops at the destination length — an oversized value
 from the client is silently truncated, not overflowed and not rejected:
-`user_buf: [64]u8`, `term_buf: [32]u8`, `fp_buf: [96]u8`, `kt_buf: [32]u8`,
+`user_buf: [64]u8`, `term_buf: [32]u8`, `fp_buf: [96]u8`, `kt_buf: [64]u8`,
 `id_buf: [ID_SIZE]u8`, `addr_buf: [64]u8`. Input from the channel stays in
 libssh's own per-channel buffer until `read` consumes it; that buffer is not
 growable without limit, because libssh only widens the client's transport
@@ -357,7 +367,8 @@ term, key type, address) are not zeroed, because none of them is treated
 as sensitive in the same sense — they're connection metadata, not
 credential-adjacent.
 
-`peer_address` (in `ssh/limits.odin`) fills `Session.addr_buf` using
+`peer_address` (in `ssh/net_posix.odin`, with a twin in
+`ssh/net_windows.odin`) fills `Session.addr_buf` using
 `posix.inet_ntop` on the socket's peer address — numeric only. There is no
 reverse-DNS lookup anywhere in this path: doing one would hand every
 connecting address to a DNS resolver and block the session thread while
@@ -457,7 +468,7 @@ Before exposing an `otsh` server to the internet:
     (§9).
 12. **Keep libssh patched.** It is the transport; its vulnerabilities are
     yours (§9).
-12. **Do not expect `exec` or `subsystem` to work, and do not add them
+13. **Do not expect `exec` or `subsystem` to work, and do not add them
     without understanding why they were left out** — this server's
     request handling assumes a single interactive shell channel (§8).
 
@@ -590,11 +601,18 @@ the gap yourself rather than infer it.
 
 **Not checked:**
 
-- No third-party review. Nobody with an adversarial mindset and no stake in
-  this code has looked at it.
-- No sanitizer run. AddressSanitizer would not link in this environment
-  (Odin's bundled LLVM runtime versus the system clang), so the leak evidence
-  above comes from `leaks(1)` and RSS, not from instrumented builds.
+- No professional audit. Three independent reviewers went over this code
+  adversarially (§11) and their ten findings are fixed, but that was a
+  reading pass by people who volunteered for it, not a paid engagement with
+  a scope, a methodology and a report you could hold anyone to. Treat §11 as
+  evidence that the obvious classes were hunted, not as sign-off.
+- No continuous sanitizer coverage. The suite does pass under
+  `-sanitize:address`, and an ASan-built `tracker` served a full session
+  without a report ([`./getting-started.md`](./getting-started.md),
+  "Platform support"), but that was one local run on one machine — it is
+  not wired into CI, so nothing catches a regression between runs, and the
+  leak numbers above still come from `leaks(1)` and RSS rather than from
+  instrumented builds.
 - No testing of libssh itself, and no independent verification of its
   protocol handling. Its CVEs are yours; keep the system library current and
   watch <https://www.libssh.org/security/>.

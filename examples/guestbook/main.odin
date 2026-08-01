@@ -10,6 +10,7 @@
 package main
 
 import "core:fmt"
+import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:unicode/utf8"
@@ -246,9 +247,12 @@ compose_key :: proc(m: ^Model, k: tui.Key) {
 		m.buf_len = 0
 		m.mode = .Browse
 	case .Backspace:
+		// Delete a whole rune, not a byte — otherwise multi-byte input leaves
+		// a broken tail behind. The max() keeps it a decrement of at least one
+		// byte, so a size of 0 can never turn backspace into a dead key.
 		if m.buf_len > 0 {
 			_, size := utf8.decode_last_rune(m.buf[:m.buf_len])
-			m.buf_len -= size
+			m.buf_len -= max(size, 1)
 		}
 	case .Space:
 		insert_rune(m, ' ')
@@ -405,15 +409,19 @@ connected :: proc(info: sshtui.Info) {
 main :: proc() {
 	messages = make([dynamic]Message, 0, 64)
 
-	sshtui.serve(
-		sshtui.Config {
-			port            = 2228,
-			host_key_path   = "guestbook_hostkey",
-			identity_secret = "guestbook_secret", // enables Info.id
-			methods         = {.Publickey}, // required so a key is always offered
-			create          = create,
-			destroy         = destroy,
-			on_connect      = connected,
-		},
-	)
+	cfg := sshtui.Config {
+		port            = 2228,
+		host_key_path   = "guestbook_hostkey",
+		identity_secret = "guestbook_secret", // enables Info.id
+		methods         = {.Publickey}, // required so a key is always offered
+		create          = create,
+		destroy         = destroy,
+		on_connect      = connected,
+	}
+
+	// serve returns false when the server never came up — port in use, bad
+	// host key, libssh too old — after printing why. Exiting 0 would hide it.
+	if !sshtui.serve(cfg) {
+		os.exit(1)
+	}
 }

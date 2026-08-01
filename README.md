@@ -102,7 +102,7 @@ main :: proc() {
 }
 ```
 
-`examples/whoami/main.odin` is the whole thing, start to finish, in 90 lines.
+`examples/whoami/main.odin` is the whole thing, start to finish, in about 100 lines.
 
 ## Why it's built this way
 
@@ -129,9 +129,11 @@ main :: proc() {
   throughput ~530 B/s, one keypress ~230 B. Four concurrent animated sessions
   cost ~3.7% of one core. The diff renderer is why — it emits only the escape
   sequences needed to reconcile a frame, not a repaint.
-- **45 tests, no network needed** (`./test.sh`) — text metrics, input
-  decoding, the diff renderer, ring-buffer flow control, and identity
-  properties (same key → same id, different secrets → unlinkable ids).
+- **71 tests, no network needed** (`./test.sh`) — text metrics, input
+  decoding, the diff renderer checked against a model terminal, audit-line
+  formatting, resource limits, shutdown defaults, fuzzed parser and renderer
+  input, and identity properties (same key → same id, different secrets →
+  unlinkable ids).
 
 ## Screenshots
 
@@ -190,14 +192,21 @@ audited, and nobody should claim "secure" about network-facing code without
 one.** The transport is libssh — its CVEs are your CVEs. TOFU is still TOFU:
 the first connection trusts the host key blind, so publish its fingerprint
 (`ssh-keygen -lf hostkey`) out of band. Rate limiting is per-process and
-per-IP, not distributed. There's no audit log or account recovery. Whatever
-your *app* does with untrusted input is on you — otsh hands you bytes.
+per-IP, not distributed. There is an audit log, but it is opt-in and off by
+default — every line carries a peer address, so nothing is recorded until you
+set `Config.audit`. There's no account recovery. Whatever your *app* does with
+untrusted input is on you — otsh hands you bytes.
 
 ## Requirements
 
 - Odin (nightly; uses `core:sys/posix`)
-- libssh ≥ 0.10 (`brew install libssh` / `apt install libssh-dev`)
-- macOS and Linux. Windows needs a different local backend and a libssh build.
+- libssh ≥ 0.10.6 (`brew install libssh` / `apt install libssh-dev`) — the
+  server refuses to start against anything older, which is where the Terrapin
+  fix landed
+- macOS and Linux are the primary platforms. Windows builds and runs too,
+  verified once on real hardware against a vcpkg libssh — see
+  [getting started](docs/getting-started.md) for exactly what that covered.
+  FreeBSD is only cross-type-checked in CI, never run.
 
 ## License
 
@@ -206,6 +215,8 @@ MIT. See [LICENSE](LICENSE).
 ## Contributing
 
 Issues and pull requests are welcome. Run `./test.sh` before submitting; CI
-builds every package and example on Linux and macOS. This is a
+builds every package and example on Linux for every push, runs the 71 tests
+there along with the Windows and FreeBSD cross-type-checks, and runs the
+macOS and Windows jobs on pull requests, weekly, and on release tags. This is a
 security-sensitive library — a careful read of `ssh/` or `libssh/` looking
 for the next defect is worth at least as much as a feature.

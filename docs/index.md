@@ -29,7 +29,7 @@ survived unconverted, and that the sidebar actually rendered. It is worth
 running after editing any page.
 
 Standard library only — no `pip install`, no network, no Node. Documentation
-you cannot build is documentation that rots, so the generator is about 400
+you cannot build is documentation that rots, so the generator is about 650
 lines in `docs/tools/build_site.py` and has no dependencies to break.
 
 Regenerating the screenshots is a separate, authoring-time step and does need

@@ -11,9 +11,12 @@ before you expose anything here to the network.
 
 - **Odin, nightly.** otsh uses `core:sys/posix`, which tracks Odin's nightly
   builds rather than a tagged release.
-- **libssh ≥ 0.10.** `brew install libssh` on macOS, `apt install libssh-dev`
-  on Debian/Ubuntu. otsh does not vendor libssh — `otsh:libssh` is bindings
-  against your system copy.
+- **libssh ≥ 0.10.6.** `brew install libssh` on macOS, `apt install
+  libssh-dev` on Debian/Ubuntu. The `.6` is not decoration: `ssh.serve` checks
+  the runtime version before it binds anything and refuses to start below
+  0.10.6, because that is the release carrying the fix for CVE-2023-48795
+  (Terrapin). A 0.10.0 install compiles and then declines to run. otsh does
+  not vendor libssh — `otsh:libssh` is bindings against your system copy.
 - **clang.** Odin shells out to `clang` to link, and on Linux it is not
   optional: on a stock `ubuntu:24.04` carrying only `libssh-dev` and
   `pkg-config`, `./build.sh` stops at `sh: 1: clang: not found`, and adding
@@ -51,7 +54,7 @@ Verified on 2026-07-30 in a container, top to bottom:
   `aarch64`; `./build.sh`, every example and the whole test suite were also
   run on `x86_64` with the same distro, libssh and Odin.
 - `./build.sh`, `./build.sh` for each of the five `examples/`, and `./test.sh`
-  (62 tests) all pass, unmodified — the same three commands CI's Linux job
+  (71 tests) all pass, unmodified — the same three commands CI's Linux job
   runs. So do the Windows and FreeBSD cross-type-checks.
 - Actually run, not just built: `examples/tracker` served over a real
   `openssh` connection from a pty, rendering frames, reacting to keystrokes,
@@ -100,7 +103,7 @@ Verified on 2026-07-31 on a physical desktop, top to bottom:
 - `./build.sh`, `./build.sh` for each of the five `examples/`, and `./test.sh`
   all pass under Git Bash, unmodified — the same three commands CI's Windows
   job runs, through the same `uname -s` → `MINGW64_NT` branch. The suite
-  reports **67 tests**, not 62: the four in `tests/linux_test.odin` are
+  reports **67 tests**, not 71: the four in `tests/linux_test.odin` are
   `#+build !windows` and correctly do not run. Odin finds the MSVC linker by
   itself, so nothing has to run `vcvars64.bat` first.
 - Actually run, not just built: `examples/tracker` served real `openssh`
@@ -300,7 +303,7 @@ The smallest useful otsh app — one box showing who connected and how. It
 requires public-key auth (`methods = {.Publickey}`), so `info.fingerprint`
 and `info.key_type` are always populated, and it wires an `authenticate` hook
 (`gate`) that logs every attempt and accepts it. Read this one first; it's the
-whole surface area in about 90 lines.
+whole surface area in about 100 lines.
 
 ### members — key-driven identity
 
@@ -431,20 +434,14 @@ just run the binary in the terminal you already have open.
 `examples/tracker/main.odin` wires it behind a flag:
 
 ```odin
-local := false
-// ...
-switch args[i] {
-case "--local", "-l":
-	local = true
-// ...
-}
-
-if local {
-	if !sshtui.run_local(cfg) {
-		fmt.eprintln("tracker: stdin is not a terminal")
-		os.exit(1)
+for arg in os.args[1:] {
+	if arg == "--local" || arg == "-l" {
+		if !sshtui.run_local(cfg) {
+			fmt.eprintln("tracker: stdin is not a terminal")
+			os.exit(1)
+		}
+		return
 	}
-	return
 }
 if !sshtui.serve(cfg) {
 	os.exit(1)

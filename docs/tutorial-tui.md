@@ -458,8 +458,9 @@ The cookbook recipe's warning applies here without change: `update` (handling
 Up/Down) and `view` (drawing the list) both need `viewport_h`, and if they
 compute it two different ways — one of them forgetting a header row, say —
 the scroll position and what's actually drawn quietly disagree. Step 7 is
-where that number comes from and how the stopwatch avoids the two of them
-drifting apart.
+where that number comes from, how the stopwatch avoids the two of them
+drifting apart, and why `lap_offset` also has to be re-clamped every time the
+window changes size.
 
 ## 7. Make it fit any window
 
@@ -540,6 +541,36 @@ metrics section](./tui.md#text-metrics) for the full rune-width table this
 is built on. Use `text_width` for layout arithmetic even when you're fairly
 sure today's string is ASCII — the whole point is not having to re-audit
 every `draw_text` call the day it isn't.
+
+**What that guard does not cover.** `view` bails out below the minimum, but
+`update` does not: `j`/`k`/Up/Down keep being handled while the "terminal too
+small" message is on screen, and down there `layout` reports
+`viewport_h == 0`. `laps_scroll`'s `max_offset` is then `n - 0`, so
+`lap_offset` can walk right past the newest lap. Grow the window back and
+`draw_laps` breaks out on its very first row: a blank laps pane — no rows, not
+even the "no laps yet" line — with a stale `▲` in its top corner, until you
+happen to press a scroll key and it re-clamps itself.
+Nothing is corrupt — the offset is simply still describing a viewport that no
+longer exists. So re-clamp whenever the viewport changes, which is precisely
+what a `Resize` message announces:
+
+```odin
+case tui.Resize:
+	_, _, _, viewport_h := layout(e.cols, e.rows)
+	laps_scroll(m, 0, viewport_h)
+```
+
+A `delta` of `0` turns `laps_scroll` into a pure clamp, so this needs no
+second proc. `tui.run` sends `Resize` before that frame's `Tick` and before
+it calls `view`, so the corrected offset is already in place for the first
+frame drawn at the new size — there is no stale frame in between. It also
+fixes the milder version of the same problem, the one that has nothing to do
+with the minimum: scroll to the bottom of a short viewport, make the window
+taller, and without this the list keeps the old offset and draws three rows
+into a pane with room for twelve. `examples/guestbook` and `examples/tracker`
+both clamp their scroll state in their own `Resize` cases, for exactly this
+reason — an offset only means anything relative to a viewport height, so it
+has to be revisited every time that height moves.
 
 ## 8. Colour and polish
 
@@ -785,6 +816,14 @@ update :: proc(p: ^tui.Program, msg: tui.Msg) {
 			m.elapsed += e.dt
 		}
 
+	case tui.Resize:
+		// update handles scroll keys even below MIN_W/MIN_H, where layout
+		// reports viewport_h == 0 and lap_offset can climb past the newest
+		// lap — which would leave the list blank once the window grows back.
+		// Re-clamp on every size change, as guestbook and tracker do.
+		_, _, _, viewport_h := layout(e.cols, e.rows)
+		laps_scroll(m, 0, viewport_h)
+
 	case tui.Key:
 		// The terminal is in raw mode (tui.local_enter_raw turned off ISIG),
 		// so Ctrl+C never becomes SIGINT — it arrives down the same path as
@@ -997,6 +1036,7 @@ one block `new` returned, not whatever that block points into — in a
 `Destroy_Proc`:
 
 ```odin
+import "core:os"
 import "otsh:sshtui"
 
 create :: proc(info: sshtui.Info) -> tui.App {
@@ -1011,19 +1051,25 @@ destroy :: proc(app: tui.App) {
 }
 
 main :: proc() {
-	sshtui.serve(
-		sshtui.Config {
-			port          = 2222,
-			host_key_path = "stopwatch_hostkey",
-			create        = create,
-			destroy       = destroy,
-		},
-	)
+	cfg := sshtui.Config {
+		port          = 2222,
+		host_key_path = "stopwatch_hostkey",
+		create        = create,
+		destroy       = destroy,
+	}
+
+	// serve returns false when the server never came up — port in use, bad
+	// host key, libssh too old — after printing why. Exiting 0 would hide it.
+	if !sshtui.serve(cfg) {
+		os.exit(1)
+	}
 }
 ```
 
 `create`/`destroy`/the `Config` literal/the `serve` call — that's the four
-lines (well, four *things*) that change. `local_enter_raw`, `local_backend`,
+lines (well, four *things*) that change; the `core:os` import tags along only
+because a `serve` that never bound has to exit non-zero, the same check every
+example in the repository makes. `local_enter_raw`, `local_backend`,
 and the manual `tui.Program` setup all disappear, because `sshtui.serve`
 builds a `Backend` out of the SSH channel itself instead of your terminal,
 and runs the same `tui.run` loop against it per connection, on that
@@ -1053,8 +1099,9 @@ multi-user app with actual state shared across users — see
   `layout`, and drawing code barely change; only the arithmetic in the
   `Tick` case does.
 - **A second view**, cycling through several named timers, the way
-  `examples/tracker` switches between menu/cart/receipt behind one `View` enum
-  — see [`cookbook.md`'s multiple-views recipe](./cookbook.md#2-multiple-viewsscreens-in-one-app).
+  `examples/tracker` switches between its issue list, one issue's detail, and
+  the new-issue form behind one `View` enum (`List`, `Detail`, `Compose`) —
+  see [`cookbook.md`'s multiple-views recipe](./cookbook.md#2-multiple-viewsscreens-in-one-app).
 - **Export laps** to a file when the user presses a key, using `core:os` —
   nothing about `tui` stops you from doing ordinary I/O from inside
   `update`; it just has no opinion about it either way.

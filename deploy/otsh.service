@@ -99,13 +99,18 @@ LogRateLimitBurst=0
 #
 #   threads   256 sessions + the accept loop + main. TasksMax counts threads,
 #             not processes, so this has to clear 258.
-#   memory    256 x ~4.8 KB Session (docs/architecture.md; ~1 MB of that is the
-#             4 KiB input rings) = ~1.2 MB, plus libssh's per-connection state,
-#             plus your app's per-connection Model, plus resident thread stacks
+#   memory    256 x ~800 B Session (docs/architecture.md) = ~200 KB, which is
+#             rounding error. The per-connection cost that matters is libssh's
+#             own state: input now buffers in its channel buffer, nothing for
+#             an idle connection and up to the ~2 MiB transport window for one
+#             being flooded — so 256 connections flooded at once is the only
+#             term in this list that approaches the limit below at all. Add
+#             your app's per-connection Model, plus resident thread stacks
 #             (glibc reserves 8 MiB of *address space* per thread, which
 #             MemoryMax does not count — only pages actually touched).
 #
-# 512M is therefore a backstop that turns a leak into a restart, not a measured
+# 512M is therefore a backstop that turns a leak, or an every-connection
+# flood, into a restart rather than a swap storm. It is not a measured
 # working set. Measure yours (systemctl show otsh -p MemoryPeak, or
 # systemd-cgtop) and set it near the real peak. Raise both together with
 # Limits.max_sessions, never one alone.

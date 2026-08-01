@@ -172,6 +172,14 @@ update :: proc(p: ^tui.Program, msg: tui.Msg) {
 			m.elapsed += e.dt
 		}
 
+	case tui.Resize:
+		// update handles scroll keys even below MIN_W/MIN_H, where layout
+		// reports viewport_h == 0 and lap_offset can climb past the newest
+		// lap — which would leave the list blank once the window grows back.
+		// Re-clamp on every size change, as guestbook and tracker do.
+		_, _, _, viewport_h := layout(e.cols, e.rows)
+		laps_scroll(m, 0, viewport_h)
+
 	case tui.Key:
 		// The terminal is in raw mode (tui.local_enter_raw turned off ISIG),
 		// so Ctrl+C never becomes SIGINT — it arrives down the same path as

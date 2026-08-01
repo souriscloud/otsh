@@ -13,6 +13,7 @@
 package main
 
 import "core:fmt"
+import "core:os"
 import "core:strings"
 import "core:sync"
 import "otsh:sshtui"
@@ -150,22 +151,26 @@ connected :: proc(info: sshtui.Info) {
 main :: proc() {
 	roster = make(map[string]Member)
 
-	sshtui.serve(
-		sshtui.Config {
-			port            = 2226,
-			host_key_path   = "members_hostkey",
-			identity_secret = "members_secret", // enables Info.id
-			create          = create,
-			destroy         = destroy,
-			on_connect      = connected,
-			// Required for a key-identity app: every OpenSSH client probes the
-			// "none" method first, and if we accept it the client never offers
-			// a key at all — Info.id would always be empty. Not offering "none"
-			// costs nothing in privacy: the client still stops at its *first*
-			// key, because we accept that one.
-			methods         = {.Publickey},
-			// Note what is NOT here: no `authenticate`. Everyone gets in at the
-			// SSH layer; `view` decides what they see. That is the whole trick.
-		},
-	)
+	cfg := sshtui.Config {
+		port            = 2226,
+		host_key_path   = "members_hostkey",
+		identity_secret = "members_secret", // enables Info.id
+		create          = create,
+		destroy         = destroy,
+		on_connect      = connected,
+		// Required for a key-identity app: every OpenSSH client probes the
+		// "none" method first, and if we accept it the client never offers
+		// a key at all — Info.id would always be empty. Not offering "none"
+		// costs nothing in privacy: the client still stops at its *first*
+		// key, because we accept that one.
+		methods         = {.Publickey},
+		// Note what is NOT here: no `authenticate`. Everyone gets in at the
+		// SSH layer; `view` decides what they see. That is the whole trick.
+	}
+
+	// serve returns false when the server never came up — port in use, bad
+	// host key, libssh too old — after printing why. Exiting 0 would hide it.
+	if !sshtui.serve(cfg) {
+		os.exit(1)
+	}
 }

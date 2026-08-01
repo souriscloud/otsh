@@ -47,6 +47,7 @@ Every otsh app is the same three procs wired together with `sshtui.serve`:
 ```odin
 package main
 
+import "core:os"
 import "otsh:sshtui"
 import "otsh:tui"
 
@@ -75,14 +76,18 @@ destroy :: proc(app: tui.App) {
 }
 
 main :: proc() {
-	sshtui.serve(
-		sshtui.Config {
-			port          = 2228,
-			host_key_path = "guestbook_hostkey",
-			create        = create,
-			destroy       = destroy,
-		},
-	)
+	cfg := sshtui.Config {
+		port          = 2228,
+		host_key_path = "guestbook_hostkey",
+		create        = create,
+		destroy       = destroy,
+	}
+
+	// serve returns false when the server never came up — port in use, bad
+	// host key, libssh too old — after printing why. Exiting 0 would hide it.
+	if !sshtui.serve(cfg) {
+		os.exit(1)
+	}
 }
 ```
 
@@ -94,6 +99,15 @@ once per frame and is where you paint. `destroy` runs once, after the
 connection's loop ends, to free whatever `create` allocated. All four run on
 a thread private to that one connection — a fact that will matter a great
 deal starting at step 5.
+
+`sshtui.serve` itself blocks until the server stops, and returns `false` when
+it never started at all — a port already in use, a host key it can neither
+read nor write, a libssh too old to be safe. It prints the reason itself, so
+there is nothing to format here; the one thing `main` has to add is the
+non-zero exit status, because without it a server that never bound looks
+exactly like one that ran and shut down cleanly to whatever launched it.
+Every `main` in this tutorial keeps that check, and so does every example in
+the repository.
 
 The detail worth sitting with now, because it explains almost everything
 about how you'll write `view` for the rest of this tutorial: **`view` paints
@@ -286,8 +300,9 @@ Model :: struct {
 
 `update` now dispatches on `m.mode` before it dispatches on the key, which is
 the same "one enum picked twice" pattern `docs/cookbook.md` recipe 2 shows
-for `examples/tracker`'s menu/cart/receipt screens — there it's three views
-dispatching draw calls, here it's two modes dispatching key handling:
+for `examples/tracker`'s `View` enum — there it's three screens (`List`,
+`Detail`, `Compose`) dispatching draw calls, here it's two modes dispatching
+key handling:
 
 ```odin
 update :: proc(p: ^tui.Program, msg: tui.Msg) {
@@ -335,9 +350,12 @@ compose_key :: proc(m: ^Model, k: tui.Key) {
 		m.buf_len = 0
 		m.mode = .Browse
 	case .Backspace:
+		// Delete a whole rune, not a byte — otherwise multi-byte input leaves
+		// a broken tail behind. The max() keeps it a decrement of at least one
+		// byte, so a size of 0 can never turn backspace into a dead key.
 		if m.buf_len > 0 {
 			_, size := utf8.decode_last_rune(m.buf[:m.buf_len])
-			m.buf_len -= size
+			m.buf_len -= max(size, 1)
 		}
 	case .Space:
 		insert_rune(m, ' ')
@@ -375,7 +393,13 @@ commit_message :: proc(m: ^Model) {
 A few things are easy to get wrong here and worth calling out directly.
 `.Backspace` has to step back one *rune*, not one byte —
 `utf8.decode_last_rune` tells you how many bytes the last rune actually took,
-which matters the moment someone types something outside ASCII.
+which matters the moment someone types something outside ASCII. Subtract
+`max(size, 1)`, not `size`: today `decode_last_rune` only ever reports 0 for
+an empty slice, which the `m.buf_len > 0` test already excludes, but putting
+"always move at least one byte" into the arithmetic instead of leaving it to
+a caller's guard means backspace can never quietly become a dead key.
+`examples/tracker` writes its version of the same line that way, and the two
+should not teach one idiom two ways.
 `.Rune` fires for most printable characters, but Space is its own
 `Key_Kind` (`.Space`, not `.Rune`) — miss that case and the space bar does
 nothing in your input field, which is exactly the kind of bug you only
@@ -579,9 +603,15 @@ create :: proc(info: sshtui.Info) -> tui.App {
 
 main :: proc() {
 	messages = make([dynamic]Message, 0, 64)
-	sshtui.serve(
-		sshtui.Config{port = 2228, host_key_path = "guestbook_hostkey", create = create, destroy = destroy},
-	)
+	cfg := sshtui.Config {
+		port          = 2228,
+		host_key_path = "guestbook_hostkey",
+		create        = create,
+		destroy       = destroy,
+	}
+	if !sshtui.serve(cfg) {
+		os.exit(1)
+	}
 }
 ```
 
@@ -617,17 +647,18 @@ Turn it on:
 ```odin
 main :: proc() {
 	messages = make([dynamic]Message, 0, 64)
-	sshtui.serve(
-		sshtui.Config {
-			port            = 2228,
-			host_key_path   = "guestbook_hostkey",
-			identity_secret = "guestbook_secret", // enables Info.id
-			methods         = {.Publickey}, // required so a key is always offered
-			create          = create,
-			destroy         = destroy,
-			on_connect      = connected,
-		},
-	)
+	cfg := sshtui.Config {
+		port            = 2228,
+		host_key_path   = "guestbook_hostkey",
+		identity_secret = "guestbook_secret", // enables Info.id
+		methods         = {.Publickey}, // required so a key is always offered
+		create          = create,
+		destroy         = destroy,
+		on_connect      = connected,
+	}
+	if !sshtui.serve(cfg) {
+		os.exit(1)
+	}
 }
 
 connected :: proc(info: sshtui.Info) {
@@ -1043,7 +1074,7 @@ off, so Ctrl+C arrives down the channel as byte `0x03` and decodes to
 `Key{kind = .Rune, r = 'c', ctrl = true}` rather than ever reaching your
 server as `SIGINT`). Check it once, at the top of `update`, above the
 mode dispatch, the same way `examples/tracker` checks it above its own
-menu/cart/receipt dispatch:
+`List`/`Detail`/`Compose` dispatch:
 
 ```odin
 update :: proc(p: ^tui.Program, msg: tui.Msg) {
@@ -1095,6 +1126,7 @@ steps:
 package main
 
 import "core:fmt"
+import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:unicode/utf8"
@@ -1331,9 +1363,12 @@ compose_key :: proc(m: ^Model, k: tui.Key) {
 		m.buf_len = 0
 		m.mode = .Browse
 	case .Backspace:
+		// Delete a whole rune, not a byte — otherwise multi-byte input leaves
+		// a broken tail behind. The max() keeps it a decrement of at least one
+		// byte, so a size of 0 can never turn backspace into a dead key.
 		if m.buf_len > 0 {
 			_, size := utf8.decode_last_rune(m.buf[:m.buf_len])
-			m.buf_len -= size
+			m.buf_len -= max(size, 1)
 		}
 	case .Space:
 		insert_rune(m, ' ')
@@ -1490,17 +1525,21 @@ connected :: proc(info: sshtui.Info) {
 main :: proc() {
 	messages = make([dynamic]Message, 0, 64)
 
-	sshtui.serve(
-		sshtui.Config {
-			port            = 2228,
-			host_key_path   = "guestbook_hostkey",
-			identity_secret = "guestbook_secret", // enables Info.id
-			methods         = {.Publickey}, // required so a key is always offered
-			create          = create,
-			destroy         = destroy,
-			on_connect      = connected,
-		},
-	)
+	cfg := sshtui.Config {
+		port            = 2228,
+		host_key_path   = "guestbook_hostkey",
+		identity_secret = "guestbook_secret", // enables Info.id
+		methods         = {.Publickey}, // required so a key is always offered
+		create          = create,
+		destroy         = destroy,
+		on_connect      = connected,
+	}
+
+	// serve returns false when the server never came up — port in use, bad
+	// host key, libssh too old — after printing why. Exiting 0 would hide it.
+	if !sshtui.serve(cfg) {
+		os.exit(1)
+	}
 }
 ```
 
