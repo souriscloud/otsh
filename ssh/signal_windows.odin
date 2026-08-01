@@ -27,10 +27,26 @@
 //
 // https://learn.microsoft.com/en-us/windows/console/handlerroutine
 //
-// Verified on real Windows 11 hardware on 2026-07-31: Ctrl+C at the server
-// console drained the server and restored a connected client's terminal. The
-// close/logoff/shutdown path has NOT been run — it is modelled on the documented
-// contract quoted above.
+// Verified on real Windows 11 hardware (Pro 10.0.26200, 2026-07-31 and
+// 2026-08-01):
+//
+//   - Ctrl+C at the server console drained the server and restored a
+//     connected client's terminal (2026-07-31, by hand; re-run 2026-08-01
+//     with GenerateConsoleCtrlEvent after fixing the inherited-flag bug
+//     documented at set_stop_handler below).
+//   - CTRL_CLOSE_EVENT, delivered by posting WM_CLOSE to the server's real
+//     console window: the connected client received the full restore
+//     sequence (?7h ?25h SGR reset ?1049l, mouse reporting off) before the
+//     connection closed, and the process exited 255 ms after the close —
+//     "otsh: stopped; all sessions closed cleanly". The OS grace period was
+//     measured on the same machine with a handler that never returns: it was
+//     killed between 4980 and 5018 ms, so the documented ~5000 ms holds and
+//     CLOSE_WAIT_MS below keeps ~500 ms of margin.
+//
+// CTRL_LOGOFF_EVENT and CTRL_SHUTDOWN_EVENT have still NEVER executed: testing
+// them means logging out or rebooting the machine, which was not safe to do on
+// the hardware available. Their handling is modelled on the documented
+// contract quoted above, no more.
 package ssh
 
 import "core:sync"
@@ -42,6 +58,9 @@ handlers_installed: bool
 // How long the close-type events will wait for the drain, and how often they
 // look. Comfortably under the ~5000 ms the OS grants before it terminates the
 // process regardless; the margin absorbs the scheduling slop of getting here.
+// The 5000 is not folklore: measured for CTRL_CLOSE_EVENT on Windows 11 Pro
+// 10.0.26200 (2026-08-01) with a handler that never returns, the process was
+// terminated between 4980 and 5018 ms after the event.
 // A `Config.shutdown_seconds` at or above the 5 s default can therefore outlast
 // this wait — the OS budget binds, not ours, and stopping late is not an option
 // the handler has.
@@ -76,6 +95,20 @@ console_handler :: proc "system" (ctrl_type: win.DWORD) -> win.BOOL {
 @(private)
 set_stop_handler :: proc() {
 	win.SetConsoleCtrlHandler(console_handler, win.TRUE)
+	// Installing the handler is not enough for Ctrl+C. A process whose
+	// ancestor was created with CREATE_NEW_PROCESS_GROUP — PowerShell's
+	// Start-Process, cmd's `start`, most service wrappers — inherits an
+	// "ignore Ctrl+C" flag, and that flag gates CTRL_C_EVENT delivery before
+	// the handler list is ever consulted. Found on real Windows 11 hardware
+	// on 2026-08-01: a tracker launched via Start-Process ignored Ctrl+C
+	// entirely — it neither drained nor died — while the same binary launched
+	// by hand stopped cleanly. Passing nil/FALSE clears the flag and restores
+	// normal Ctrl+C processing for this process.
+	//
+	// restore_stop_handler cannot undo this: there is no getter for the flag,
+	// so its prior state is unknowable. Leaving Ctrl+C enabled errs on the
+	// side of a process that can be stopped.
+	win.SetConsoleCtrlHandler(nil, win.FALSE)
 	handlers_installed = true
 }
 
