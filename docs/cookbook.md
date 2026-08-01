@@ -23,6 +23,7 @@ which is called after every cursor move, after every resize, and after every
 tick — because the row count can change underneath you when another connection
 files or closes an issue:
 
+<!-- check:verbatim examples/tracker/main.odin -->
 ```odin
 // examples/tracker/main.odin
 viewport_rows :: proc(h: int) -> int {
@@ -57,6 +58,7 @@ The single most common bug here is clamping only on keypress. Anything that
 changes the row count — a filter, a resize, another user's edit — has to
 re-clamp too, or the cursor silently points past the end.
 
+<!-- check:decls -->
 ```odin
 List :: struct {
 	items:  []string,

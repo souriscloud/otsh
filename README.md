@@ -60,9 +60,11 @@ implementation of the same idea, not a port.)
 
 ## Three procs and a config
 
+<!-- check:file -->
 ```odin
 package main
 
+import "core:fmt"
 import "otsh:sshtui"
 import "otsh:tui"
 

@@ -45,6 +45,7 @@ fi
 echo "docs"
 step "api reference is current" python3 docs/tools/gen_api.py --check
 step "site builds and validates" python3 docs/tools/build_site.py --check
+step "doc code samples are real" python3 docs/tools/check_examples.py --check
 
 echo "bindings"
 # Compares libssh/libssh.odin against the libssh headers installed here. Skips
