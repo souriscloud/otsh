@@ -72,10 +72,34 @@ quit :: proc(p: ^Program) {
 	p.quit = true
 }
 
+// Writes one of the loop's own control sequences, retrying a short while if the
+// backend only takes part of it.
+//
+// Frames may be dropped — the next one repaints. These may not: they are the
+// sequences that enter and leave the alternate screen, and half of the leaving
+// one strands the user in it with their scrollback hidden, which persists long
+// after the connection is gone. A backend write can now come up short (see
+// `ssh.write`, which sends only what the peer has flow-control credit for
+// instead of blocking), so "wrote some" has to be handled here.
+//
+// Bounded at roughly half a second of no progress, because the usual reason for
+// no progress is that the client has left, and teardown must not hang on it.
 @(private)
 emit :: proc(p: ^Program, s: string) {
-	if p.backend.write != nil {
-		p.backend.write(p.backend.data, transmute([]u8)s)
+	if p.backend.write == nil {
+		return
+	}
+	buf := transmute([]u8)s
+	stalled := 0
+	for len(buf) > 0 && stalled < 50 {
+		n := p.backend.write(p.backend.data, buf)
+		if n <= 0 {
+			stalled += 1
+			time.sleep(10 * time.Millisecond)
+			continue
+		}
+		stalled = 0
+		buf = buf[min(n, len(buf)):]
 	}
 }
 
@@ -161,8 +185,21 @@ run :: proc(p: ^Program, app: App) {
 		}
 		out := flush(&p.screen)
 		if len(out) > 0 {
-			p.bytes_out += u64(len(out))
-			p.backend.write(p.backend.data, out)
+			n := p.backend.write(p.backend.data, out)
+			p.bytes_out += u64(max(n, 0))
+			if n < len(out) {
+				// The backend took only part of the frame. `flush` has already
+				// recorded the whole of it in `prev`, so every later diff would
+				// be computed against a screen the terminal is not actually
+				// showing, and the difference would never be repaired — the
+				// same failure mode as the wide-glyph orphan in screen.odin.
+				// Repaint from scratch next frame instead.
+				//
+				// Over SSH this is how a client that stops reading presents:
+				// `ssh.write` sends only what the peer has flow-control credit
+				// for rather than blocking on it.
+				p.screen.full_redraw = true
+			}
 		}
 
 		// A backend whose poll returns early must not turn this into a spin
@@ -225,7 +262,19 @@ dispatch_input :: proc(p: ^Program) {
 		case Key:
 			send(p, e)
 		case Mouse:
-			send(p, e)
+			// `parse_input` has already clamped these to MAX_COLS/MAX_ROWS, which
+			// is all it can do without knowing the screen. That still admits a
+			// coordinate far outside the *actual* terminal: the numbers come off
+			// the wire, not from the client's real geometry, so `ESC [ < 0 ; 999 ;
+			// 299 M` on an 80x24 session parses to (998, 298). Nothing in `tui`
+			// indexes by them — `set_cell` re-checks — but an app that writes
+			// `grid[m.y][m.x]` for a grid sized to the screen is the obvious thing
+			// to do and would be out of bounds. Clamp to the live screen here,
+			// where its size is known.
+			m := e
+			m.x = clamp(m.x, 0, max(p.screen.w - 1, 0))
+			m.y = clamp(m.y, 0, max(p.screen.h - 1, 0))
+			send(p, m)
 		}
 		if p.quit {
 			return

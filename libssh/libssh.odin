@@ -368,6 +368,18 @@ foreign lib {
 	channel_is_eof :: proc(ch: Channel) -> c.int ---
 	@(link_name = "ssh_channel_write")
 	channel_write :: proc(ch: Channel, data: rawptr, len: u32) -> c.int ---
+	// The peer's remaining flow-control credit, i.e. how many bytes may be sent
+	// right now without waiting. Zero means the peer has not read what it was
+	// already sent.
+	//
+	// This is what keeps `ssh.write` off libssh's blocking path. Once the credit
+	// is exhausted, ssh_channel_write waits inside ssh_handle_packets for a
+	// WINDOW_ADJUST, and that wait does not honour SSH_OPTIONS_TIMEOUT —
+	// measured still blocked 34 s in with the timeout set to 20 s. A client that
+	// simply stops reading would otherwise pin a session thread for as long as
+	// it likes.
+	@(link_name = "ssh_channel_window_size")
+	channel_window_size :: proc(ch: Channel) -> u32 ---
 	@(link_name = "ssh_channel_request_send_exit_status")
 	channel_request_send_exit_status :: proc(ch: Channel, status: c.int) -> c.int ---
 	// Returns how many bytes are buffered inside libssh for this channel (its

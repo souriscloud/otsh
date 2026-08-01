@@ -56,7 +56,22 @@ Attrs :: distinct bit_set[Attr;u8]
 
 // Everything about a cell except its rune. The zero value is the terminal's own
 // defaults, which is usually what you want as a base.
-Style :: struct {
+//
+// The alignment is not cosmetic and must not be dropped. These three fields come
+// to 11 bytes, and Odin emits a 12-byte store when an 11-byte struct is passed
+// by value — so every call taking a `Style` parameter writes one byte past its
+// own incoming stack slot. Harmless in a normal build (the byte lands in that
+// frame's padding) but AddressSanitizer reports it as a stack-buffer-overflow,
+// and it fires on the first frame any app draws, which makes ASan useless for
+// finding real defects here.
+//
+// `#align(4)` rounds the size to 12 so the store is in bounds. Reduced to a
+// standalone 40-line program with no otsh code in it, on Odin dev-2026-07a /
+// arm64 macOS: an 11-byte struct as a by-value parameter reports, whether the
+// parameter is defaulted or explicit; the same struct as a local does not; the
+// same struct padded or aligned to 12 does not. `Cell` is 16 bytes either way,
+// so the cell grid — the only place these are stored in bulk — costs nothing.
+Style :: struct #align (4) {
 	fg:    Color,
 	bg:    Color,
 	attrs: Attrs,

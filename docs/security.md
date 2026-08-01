@@ -2,10 +2,21 @@
 
 This page describes what `otsh` does at the SSH transport and identity layer,
 what was measured, and what is left for the application and the operator.
-It has not been audited. Nothing below should be read as a claim that a
-server built with it is "secure" — that is not a property a library can
-grant. It is a record of specific, checkable behaviour, plus an explicit
-list of what is out of scope.
+
+**`otsh` has never been professionally audited.** Four adversarial review
+passes have been made over it by people with no stake in it, and between them
+they found and fixed a good number of real defects (§11, §13) — but a review
+pass is not an audit. An audit means a qualified firm agrees a scope, applies a
+methodology, puts its name to a report and carries liability for it. None of
+that has happened here, and finding bugs in four passes is evidence that bugs
+were findable, not that the supply is exhausted. Nothing below should be read
+as a claim that a server built with `otsh` is "secure" — that is not a property
+a library can grant, and it is not one anybody should assert about
+network-facing code without an audit that does not exist here.
+
+What this page is instead: a record of specific, checkable behaviour, marked
+throughout as measured or reasoned, plus an explicit list of what is out of
+scope. §13 states in detail what the most recent pass did *not* cover.
 
 The source of truth is `ssh/server.odin`, `ssh/identity.odin`, and
 `ssh/limits.odin`. Where this page and `README.md` disagree, this page
@@ -203,6 +214,15 @@ rather than `==`. It requires equal length and then calls
 `crypto.compare_constant_time`, so a lookup does not leak, via timing, how
 far a guessed id matched a real one before diverging.
 
+Be precise about what that buys, because "constant-time comparison" is easy to
+over-read. `ids_equal` returns early — and therefore in variable time — in two
+cases: when either side is empty, and when the two lengths differ. It is
+constant-time *given two non-empty strings of equal length*, which is the only
+shape the hot path ever has, since every real id is exactly `ID_SIZE`
+characters. The two early exits leak "that stored value was not a well-formed
+id", which is not a secret. What they do not leak is any information about the
+contents of a real id, and that is the property the function exists for.
+
 ## 5. Transport hardening
 
 `ssh/server.odin` defines these defaults and applies them unless
@@ -237,13 +257,52 @@ list syntax:
   choosing exactly what's negotiable;
 - set to `"-"`, `otsh` does not call `ssh_bind_options_set` for that option
   at all, leaving libssh's own built-in default in force, which is broader
-  and includes older, compatibility-oriented algorithms (the `Config.
-  hostkey_algorithms` doc comment specifically mentions RSA/SHA-1-era
-  support returning under `"-"`).
+  and includes older, compatibility-oriented algorithms.
 
 `ciphers` and `macs` each apply to both directions
 (`Ciphers_C_S`/`Ciphers_S_C` and `Hmac_C_S`/`Hmac_S_C` respectively) —
 there is no way to harden one direction and not the other.
+
+**A list is validated name by name, and one bad name stops the server.** This
+is stricter than checking what `ssh_bind_options_set` returns, and the gap
+between the two was a real downgrade. libssh only fails that call when *every*
+name in a list is unknown to it; hand it a list with five good names and one
+typo and it returns success, silently drops the typo, and negotiates with
+whatever is left. Measured against libssh 0.12.0, one misspelling each time:
+
+| Configured | Was negotiated |
+| --- | --- |
+| `chacha20-poly1305@openssh.comTYPO,aes128-ctr` | `aes128-ctr` — a non-AEAD cipher |
+| `hmac-sha2-256-etm@openssh.comTYPO,hmac-sha1` | `hmac-sha1` |
+| `curve25519-sha256TYPO,diffie-hellman-group14-sha1` | the server's whole offered kex set was SHA-1 |
+
+No error, no warning, nothing in any log — just weaker crypto than the operator
+wrote down. `set_algorithms` now offers each name to a throwaway `ssh_bind` on
+its own, where a single unknown name *is* an all-unknown list and does fail, and
+refuses to start with the offending name quoted. A name dropped from `otsh`'s
+own defaults is a warning rather than a fatal error, because those lists are
+all-AEAD and all-ETM by construction so any surviving subset is still strong,
+and a libssh built on a backend without chacha20-poly1305 legitimately lacks
+one.
+
+**What `"-"` actually re-admits**, measured rather than assumed — the server's
+own KEXINIT as an OpenSSH client saw it, with all four fields set to `"-"` on
+libssh 0.12.0: NIST curves (`ecdh-sha2-nistp256/384/521`), the SHA-2
+Diffie-Hellman groups (`diffie-hellman-group14/16/18`, `group-exchange-sha256`),
+CTR ciphers (`aes128/192/256-ctr`) and non-ETM MACs (`hmac-sha2-256`,
+`hmac-sha2-512`). It also re-admits the post-quantum exchanges
+(`mlkem768x25519-sha256`, `sntrup761x25519-sha512`), which are *stronger* than
+the default list. On this version it does not re-admit SHA-1 or CBC. Earlier
+editions of this page said `"-"` brought back SHA-1 and CBC; that was true of an
+older libssh and is not true of 0.12. Check it against your own libssh rather
+than trusting either statement.
+
+**Overriding the kex list does not disable the Terrapin countermeasure.**
+Verified by reading the proposal off the wire: with `key_exchange` set to a
+single deliberately weak algorithm, the server still advertised
+`kex-strict-s-v00@openssh.com` alongside it. libssh appends the strict-kex
+marker unconditionally, so there is no way to configure it away through
+`Config`.
 
 ## 6. Host key management
 
@@ -293,10 +352,11 @@ never comes back.
 
 ```odin
 DEFAULT_LIMITS :: Limits {
-    max_sessions      = 256,
-    max_per_ip        = 8,
-    handshake_seconds = 20,
-    max_auth_attempts = 6,
+    max_sessions        = 256,
+    max_per_ip          = 8,
+    handshake_seconds   = 20,
+    max_auth_attempts   = 6,
+    write_stall_seconds = 30,
 }
 ```
 
@@ -315,7 +375,25 @@ DEFAULT_LIMITS :: Limits {
   fails, so this counter never engages when everyone is accepted). Its
   purpose is bounding repeated guesses against a password `Authenticator`;
   once `s.auth_failures` reaches the limit, `allow` denies further
-  attempts on that connection outright.
+  attempts on that connection outright. Read the correction at the end of
+  §11 before relying on it: it does not bound guessing across connections.
+- `write_stall_seconds` bounds how long a client may refuse to read.
+  `handshake_seconds` does not cover this, and the difference was a
+  service-denial hole: it is a socket timeout, and the wait inside libssh's
+  `ssh_channel_write` does not honour it. A client that authenticated, asked
+  for a shell and then simply stopped reading closed its flow-control window
+  and pinned its session thread there indefinitely. Measured with three such
+  clients against `max_sessions = 3` and `handshake_seconds = 20`: at t+22s
+  all three threads were blocked — 2368 of 2368 sampled stack frames in
+  `ssh::write` → `channel_write_common` → `ssh_handle_packets` → `poll` —
+  the sessions ended only when the clients themselves left at t+70s, and a
+  fourth client was refused with `limit=sessions` throughout. Nothing in that
+  exchange is malformed; a slow reader is entitled to stop reading, so it is
+  invisible to a protocol-level filter and costs the attacker one idle socket
+  per pinned server thread. `ssh.write` now hands libssh only what the peer
+  has credit for instead of blocking, and a window that stays shut this long
+  ends the session. Re-measured with the bound at 8s: all three sessions ended
+  at ~16s and the slots came back.
 
 Every field follows one convention (`resolve_limits`): `0` takes the
 default above, a negative value disables that specific limit, and a
@@ -330,6 +408,28 @@ addr); !ok`). `session_thread` only *releases* the slot the accept loop
 already took for it. Measured: configuring `max_per_ip = 3` and opening 12
 simultaneous connections from one address admitted exactly 3; the rest were
 refused at accept time.
+
+**Size RAM for the geometry, not for the session count.** The largest
+per-session cost is the cell grid, and the *client* chooses it: `pty-req`
+carries the dimensions, and `tui` allocates two grids of `cols × rows × 16`
+bytes, clamped at `MAX_COLS`/`MAX_ROWS` (1000 × 300). Measured RSS across 20
+concurrent sessions on one server:
+
+| Client asked for | Per session |
+| --- | --- |
+| 200 × 50, idle | ~0.55 MB |
+| 200 × 50, each pushing 4 MiB of input | ~0.63 MB |
+| 200 × 50, refusing to read | ~0.56 MB |
+| **1000 × 300 (the maximum a client may request)** | **~10.4 MB** |
+
+The ~0.55 MB floor is mostly the per-connection thread stack, not libssh —
+`Session` itself is under 2 KB and the suite has a test pinning that. The jump
+to 10.4 MB is entirely the grid, and it is requested, not negotiated. At the
+default `max_sessions = 256` the worst case is therefore about **2.7 GB**, from
+clients that need only complete a handshake and ask for a large pty. The clamps
+prevent the overflow crash that an unbounded geometry used to cause (§11); they
+do not make the ceiling small. Set `max_sessions` against the RAM you actually
+have, at 10.4 MB a session, rather than against the thread count.
 
 Be clear about what this does not cover: `Limiter` tracks state
 per-process, keyed by the numeric source address it sees. It has no view
@@ -374,6 +474,21 @@ reverse-DNS lookup anywhere in this path: doing one would hand every
 connecting address to a DNS resolver and block the session thread while
 waiting on it.
 
+**What the server tells an unauthenticated client about itself.** Before any
+authentication, the version banner is sent in the clear, and it is libssh's
+default — observed on the wire as `SSH-2.0-libssh_0.12.0`. That names the
+transport library *and its exact patch version* to anyone who opens a socket,
+which is precisely what someone matching hosts against a CVE list wants. `otsh`
+does not set `SSH_BIND_OPTIONS_BANNER` and offers no `Config` field for it, so
+there is currently no supported way to change it short of patching.
+
+Treat that as a fingerprinting fact to know about rather than a hole to plug.
+Suppressing a version string patches nothing, and the honest mitigation is the
+one already in the checklist below: keep libssh current, so the version it
+announces is one with no outstanding advisory. It is recorded here because an
+operator doing threat modelling should not have to discover it by running
+`nc` against their own port.
+
 Two request types are not serviced at all. `cb_exec_request` in
 `ssh/server.odin` returns `ls.ERROR` unconditionally, with the comment
 "this server only speaks TUI." Subsystem requests go further: `cb_
@@ -397,7 +512,17 @@ Stated plainly rather than left implicit:
 - **`Info.user` is attacker-chosen.** It is whatever string the client
   put after `ssh user@host` — there is no verification of it anywhere in
   the auth path. Never use it as an identity or authorization key; use
-  `Info.id`.
+  `Info.id`. **And do not log it unescaped.** `otsh`'s own audit sink
+  scrubs it (every byte outside `[A-Za-z0-9.:_@/+,%-]` becomes `?`, capped
+  at 32), so a username of `bob ok=true id=deadbeef` lands as
+  `user=bob?ok?true?id?deadbeef` and a username containing a newline cannot
+  open a second line — both verified against a live server, along with CR,
+  tab, `=`, control bytes and a 400-byte name. An application that prints
+  the same string with `fmt.println` has none of that protection: in the
+  very test that confirmed the audit path was safe, the sample app's own
+  log line faithfully reproduced the embedded newline and the forged
+  `otsh: audit ...` text after it. `Info.term` is client-chosen in exactly
+  the same way.
 - **TOFU is still TOFU** (§6): a user's first connection trusts the host
   key without independent verification unless you've published its
   fingerprint somewhere they'll actually check.
@@ -442,11 +567,14 @@ Before exposing an `otsh` server to the internet:
    first connection isn't blind trust (§6).
 5. **Leave `key_exchange`, `ciphers`, `macs`, `hostkey_algorithms`
    empty** unless a specific, known client needs the broader
-   compatibility set behind `"-"`. Know what you are re-admitting (SHA-1,
-   CBC, older key types) if you do (§5).
+   compatibility set behind `"-"`. Know what you are re-admitting if you do,
+   and check it against your own libssh rather than against this page (§5).
 6. **Size `Limits` for your deployment** rather than taking the defaults on
    faith: `max_sessions`, `max_per_ip`, `handshake_seconds`,
-   `max_auth_attempts`. Remember `0` = default, negative = unlimited (§7).
+   `max_auth_attempts`, `write_stall_seconds`. Remember `0` = default,
+   negative = unlimited (§7). Size `max_sessions` against RAM at **10.4 MB a
+   session**, the measured cost of the largest pty a client may ask for — not
+   against the thread count (§7).
 7. **Put a network-level limiter in front of it** if a distributed flood is
    in your threat model — `otsh`'s limiter cannot see across source
    addresses (§7). [`./deploy.md`](./deploy.md) has the ruleset
@@ -601,24 +729,271 @@ the gap yourself rather than infer it.
 
 **Not checked:**
 
-- No professional audit. Three independent reviewers went over this code
-  adversarially (§11) and their ten findings are fixed, but that was a
-  reading pass by people who volunteered for it, not a paid engagement with
-  a scope, a methodology and a report you could hold anyone to. Treat §11 as
-  evidence that the obvious classes were hunted, not as sign-off.
-- No continuous sanitizer coverage. The suite does pass under
-  `-sanitize:address`, and an ASan-built `tracker` served a full session
-  without a report ([`./getting-started.md`](./getting-started.md),
-  "Platform support"), but that was one local run on one machine — it is
-  not wired into CI, so nothing catches a regression between runs, and the
-  leak numbers above still come from `leaks(1)` and RSS rather than from
-  instrumented builds.
+- No professional audit. Four adversarial passes have been made by people who
+  volunteered for them (§11, §13), and their findings are fixed — but none was
+  a paid engagement with a scope, a methodology and a report you could hold
+  anyone to. Treat them as evidence that the obvious classes were hunted, not
+  as sign-off. §13's "What this is not" lists what an audit would additionally
+  have covered.
+- No continuous sanitizer coverage. The suite passes under
+  `-sanitize:address` and an ASan-built server has now served a full hostile
+  session without a report (§13), but those are local runs on one machine —
+  none of it is wired into CI, so nothing catches a regression between runs,
+  and the leak numbers above still come from `leaks(1)` and RSS rather than
+  from instrumented builds.
 - No testing of libssh itself, and no independent verification of its
   protocol handling. Its CVEs are yours; keep the system library current and
   watch <https://www.libssh.org/security/>.
-- No load, soak, or hostile-client testing beyond the limits above. Nothing
-  has been run for days, or against a client deliberately violating the
-  protocol at the packet level.
+- No multi-day soak, and no packet-level protocol violation. §13 adds a
+  hostile-client pass over a live channel, but nothing here has been run for
+  days, and no test deliberately corrupts the SSH framing below the layer
+  libssh parses.
+
+## 13. Fourth review pass — methodology, findings, and limits
+
+### What this is not
+
+**This was not an audit, and nothing in this section may be cited as one.**
+Read this part before the findings, because the findings are the part that
+looks like assurance and is not.
+
+This pass was one reviewer working against the source and a running server for
+a matter of hours. It has no scope document agreed in advance, no independent
+sign-off, no second reviewer checking its conclusions, and nobody's name or
+liability attached to it. It found real defects, which is evidence that
+defects were reachable by an afternoon of adversarial effort — not evidence
+that the remaining ones are few. **A reviewer who finds bugs has demonstrated
+the presence of bugs and nothing whatsoever about their absence.**
+
+Specifically, a real audit would cover all of the following, and this pass
+covered none of them:
+
+- **A threat model someone signs.** There is no agreed statement of who the
+  adversary is, what they are assumed to be able to do, and which properties
+  are being claimed — so there is no way to say what "passing" would have
+  meant. §9 is the author's own sketch, not a reviewed artefact.
+- **Cryptographic implementation review of libssh.** Every claim on this page
+  about ciphers, MACs, key exchange and signature verification is a claim about
+  what libssh was *asked* to do and what it *reported* doing. Nothing here
+  inspects libssh's own key handling, nonce management, constant-time
+  properties or state machine. otsh is a few hundred lines of policy sitting on
+  a large C library that does all of the actual cryptography, and that library
+  was treated throughout as a trusted black box.
+- **Supply chain.** No verification of the libssh binary being linked, its
+  build provenance, the Odin toolchain, the dependency graph of anything in
+  `deploy/`, or the integrity of this repository's own history. The identity
+  and host-key files are examined as artefacts on disk; nothing checks how the
+  software that writes them got onto the machine.
+- **Side channels.** No timing analysis beyond reading `ids_equal` and
+  reasoning about it (§4). No measurement of timing, cache, or
+  power/electromagnetic behaviour anywhere in the auth path. The statement
+  that a comparison is constant-time rests on `crypto.compare_constant_time`
+  doing what its name says, which was not verified at the instruction level.
+- **Formal verification, and liability.** Nothing here is proved. Nobody is
+  answerable for what it missed.
+
+The sentence from the top of this page still stands without qualification:
+**`otsh` has not been professionally audited, and nobody should describe
+network-facing code as "secure" on the strength of a review like this one.**
+Four passes by unpaid reviewers do not add up to one audit; they add up to
+four passes.
+
+### Method
+
+The instruction this pass was given, and followed, was to **prefer measurement
+to reading** — because the previous rounds were repeatedly embarrassed by
+confident prose that measurement later disproved (a libssh behaviour comment
+that turned out backwards, and two "verified dead ends" that were not).
+
+So the working method was: build a configurable probe server against the real
+packages, drive it with a real OpenSSH client and with hand-written Python
+clients (paramiko) that can violate what OpenSSH will not, sample the server's
+threads while it misbehaved, and diff behaviour A/B by toggling the code path
+under test. Every quantitative claim added to this page in this pass came off a
+terminal, and every one is marked below as **measured** or **reasoned**.
+
+That discipline caught one of this pass's own errors and is worth recording as
+a caution. The first stalling-client experiment appeared to show three session
+threads pinned for 60 seconds, and it would have been easy to write that up.
+Checking *where* the threads actually were showed them idle in `poll`, not
+blocked: the probe app drew a static screen, so the diff renderer emitted
+almost nothing and the client's window never drained. The sessions had simply
+stayed open as long as the clients held them, which is ordinary behaviour. The
+finding below is the corrected version, taken after the probe was changed to
+emit a genuinely different frame every tick, and confirmed by stack sample
+rather than by inference from timing.
+
+### What was examined, and what came of it
+
+| # | Area | Method | Outcome |
+| --- | --- | --- | --- |
+| 1 | Algorithm lists: partial validity | **Measured** — configured lists with one misspelled name, read the server's KEXINIT off the wire | **Defect, fixed.** A single typo silently downgraded the negotiation (§5) |
+| 2 | Algorithm lists: fail-closed on an all-unknown list | **Measured** — bogus list, server refused to start | Behaves as documented |
+| 3 | `"-"` opt-out | **Measured** — all four fields set to `"-"`, proposal read off the wire | Broader than the default but not weak on libssh 0.12; this page's earlier description was wrong and is corrected (§5) |
+| 4 | Terrapin countermeasure under an overridden kex list | **Measured** — proposal read off the wire | `kex-strict-s-v00@openssh.com` still advertised; not configurable away |
+| 5 | libssh version floor | **Reasoned** — read `check_libssh_version` against `ssh_version` semantics | Unchanged from the previous pass, which measured it |
+| 6 | Id derivation | **Measured** — compared against Python `hmac`/`hashlib` | Exactly `HMAC-SHA256(key=secret, msg=fingerprint)[:16]`; the three plausible wrong constructions all differ. Pinned as a test vector |
+| 7 | `pseudonym` guards | **Measured** — unloaded secret, empty fingerprint, undersized destination, 4 KiB attacker-shaped fingerprint | All refused or handled; now covered by tests |
+| 8 | `ids_equal` constant-time claim | **Reasoned** — read the early-return paths | Constant-time only given equal non-empty lengths; the page now says so precisely (§4) rather than claiming more |
+| 9 | Mid-session re-authentication | **Measured** — authenticated with key A, opened a shell, then sent a second signed userauth with key B | Cannot mutate a running session's identity: the second attempt never reached the callback, no second `auth` audit line, `id` unchanged, libssh dropped the connection |
+| 10 | Unverified pubkey probe | **Reasoned** — re-read `cb_auth_pubkey` against the previous passes' three attacks | No new path found; the probe still returns before identity capture and before the `Authenticator` |
+| 11 | Client that stops reading | **Measured** — three stalling clients, thread stack sampling, A/B against the old code path | **Defect, fixed.** Session threads pinned indefinitely; `handshake_seconds` does not cover it (§7) |
+| 12 | Per-session memory ceiling | **Measured** — RSS across 20 concurrent sessions in four conditions | ~0.55 MB idle, **~10.4 MB at the largest pty a client may request** — now documented (§7) |
+| 13 | Memory safety under hostile input, with AddressSanitizer | **Measured** — 45 hostile-input classes over live channels, 122 sessions | **No ASan report from otsh code.** One report traced to the toolchain, not to otsh — see below |
+| 14 | Test suite under AddressSanitizer | **Measured** | 80 tests, no report |
+| 15 | Audit-log forgery | **Measured** — usernames and `$TERM` containing spaces, `=`, newline, CR, tab, control bytes, 400 bytes | No forged field or line; every hostile byte scrubbed to `?`. But an *application* that logs `Info.user` itself has no such protection (§9) |
+| 16 | Version banner | **Measured** — read off the wire | Discloses the exact libssh version pre-authentication; not configurable (§8) |
+| 17 | Startup failure paths | **Reasoned** — read `serve`'s early returns | **Defect, fixed.** The `Server`, its limiter map and the loaded identity secret were leaked on every startup-failure path, the secret un-zeroed |
+| 18 | `copy_cstr`, the `*_buf`/`*_len` pairs, `peer_address` | **Reasoned** — line-by-line read of every `cstring` conversion and every length variable | No over-read found. `copy_cstr` tests `i < len(dst)` before `p[i]` and Odin short-circuits, so an attacker-length string truncates rather than over-reads; no `_len` can exceed its buffer or go negative; `peer_address`'s manual NUL scan is bounded by `len(dst)` regardless of what `inet_ntop` wrote |
+| 19 | `audit.odin` fixed-buffer writers | **Reasoned** — worst case computed per event kind | No off-by-one. Longest possible line (`session_start`, every field at its cap) is 289 bytes + newline against `AUDIT_LINE_MAX` 320, and every writer funnels through one bounds-checked `audit_put_byte`, so `n` saturates rather than overflowing. `audit_stderr`'s one-byte holdback for the newline is exactly right |
+| 20 | `tui` parsers indexing on attacker bytes | **Reasoned** — read `parse_csi`, `parse_sgr_mouse`, the UTF-8 path, the width table | Bounds-safe. Parsed CSI parameters can integer-overflow but are never used as an index; the width-table binary search is unreachable for control bytes, so an ESC can never enter the cell grid — which is what stops escape injection into another user's terminal in a multi-user app |
+| 21 | Mouse coordinate clamping | **Reasoned** | **Hardened** — clamped to the package maximum, not the live screen (see below) |
+
+### The three defects, and how to reproduce them
+
+**1. One typo in an algorithm list silently downgraded the connection.**
+`ciphers = "chacha20-poly1305@openssh.comTYPO,aes128-ctr"` started a server
+that negotiated `aes128-ctr` — a non-AEAD cipher — with no diagnostic
+anywhere. The same shape produced `hmac-sha1`, and an all-SHA-1 kex offer.
+Cause: `ssh_bind_options_set` only fails when *every* name is unknown, so
+`set_algorithms`'s existing fail-closed check could not see a partial drop.
+Fixed by validating each name on its own against a throwaway bind. Reproduce
+by setting any of the four `Config` algorithm fields to a list with one
+misspelling: the server now refuses to start and names the entry. Regression
+tests in `tests/crypto_config_test.odin`, including one asserting libssh's
+accept-a-mixed-list behaviour, so the premise itself is pinned.
+
+**2. An authenticated client that stopped reading pinned its session thread
+indefinitely.** Measured with three such clients against `max_sessions = 3`:
+at t+22s, 2368 of 2368 sampled frames were in `ssh::write` →
+`channel_write_common` → `ssh_handle_packets` → `poll`, the sessions lasted
+until the clients left at t+70s, and a fourth client was refused with
+`limit=sessions` the whole time. `handshake_seconds` does not bound it — the
+wait inside `ssh_channel_write` does not honour `SSH_OPTIONS_TIMEOUT`. Fixed
+by giving libssh only what the peer has flow-control credit for and ending a
+session whose window stays shut past `Limits.write_stall_seconds` (default 30).
+Re-measured at an 8-second bound: sessions ended at ~16s and the slots came
+back. Reproduce with any client that authenticates, requests a pty and never
+reads; `tests/stall_test.odin` records the numbers and pins the limit's
+defaults, since the socket behaviour itself needs a live server.
+
+Two consequences of that fix are worth knowing. `ssh.write` may now return a
+short count, so `tui.run` marks the screen for a full repaint whenever a frame
+is only partly sent — otherwise its diff baseline would describe a screen the
+terminal is not showing, the same failure mode as the wide-glyph orphan in
+§11. And `tui`'s own alternate-screen enter/exit sequences are now retried
+briefly rather than written once, because half of the exit sequence strands the
+user's terminal.
+
+**3. `Limits` convention vs. the stall bound — caught reviewing this pass's own
+fix.** A separate read-through of the C boundary, done after the fix above
+landed, found that the first version of it bundled two things together: setting
+`write_stall_seconds` negative meant "no limit" by the convention every other
+field follows, and that skipped the window check entirely — handing `write`
+straight back to libssh's blocking path and restoring the exact thread pin the
+limit exists to prevent. An operator writing `-1` to be generous with slow links
+would have re-enabled the DoS. Now separated: `write` never blocks whatever the
+setting, and the limit governs only whether a stalled session is eventually
+disconnected. **Measured** both ways after the change — at `-1` the session
+threads sit in `wait_readable` rather than in `ssh::write`, and at `8` they
+still tear down at ~16s.
+
+**4. Every startup-failure path in `serve` leaked, including the identity
+secret.** A `serve` that returns `false` — bad algorithm list, unusable
+identity secret, `ssh_bind_new` failure, `bind_listen` failure — dropped the
+`Server`, its limiter map and its cloned keys on the floor, and handed the
+32-byte HMAC key back to the allocator without zeroing it. Benign when the
+process is about to exit, which is the common case; not benign for a caller
+that treats `false` as recoverable, and the un-zeroed secret is the same class
+of mistake §11 already records fixing once. Now released, and the secret
+scrubbed, on every path before the accept loop takes ownership.
+
+**Also hardened, from the same C-boundary read-through.** None of these was
+shown to be reachable; each is a place where the code was relying on something
+it did not check:
+
+- `Pty.term` was documented as borrowing `Session.term_buf` but the struct
+  literal in `cb_pty_request` never assigned it, so the public field was
+  permanently `""`. A plain correctness bug — `term(s)` worked, `s.pty.term`
+  did not.
+- `copy_cstr` had no nil guard. Every one of its four call sites checks, so
+  nothing was reachable; the fifth call site somebody adds would have been a
+  NULL dereference on a connection thread.
+- `take_input` returned libssh's byte count unclamped. It becomes a slice
+  bound in every caller and `ssh.read` is public, so it is now
+  `min(int(n), len(buf))` rather than trusting the library's contract.
+- `ssh_event_new`'s result was passed straight to `ssh_event_add_session`
+  without a nil check, while the teardown block guards `s.event != nil` —
+  the inconsistency being the tell that nil was thought reachable.
+- Mouse coordinates were clamped to `MAX_COLS`/`MAX_ROWS` rather than to the
+  live screen. Those numbers come off the wire, not from the client's real
+  terminal, so `ESC [ < 0 ; 999 ; 299 M` parsed to (998, 298) on an 80×24
+  session. Nothing inside `tui` indexes by them, but `grid[m.y][m.x]` is the
+  obvious thing for an app to write and it would have been out of bounds.
+  `run` now narrows them to the live screen before any app sees them, and
+  `parse_input`'s own comment says what its weaker bound does and does not
+  mean.
+
+### The AddressSanitizer result, stated carefully
+
+The instruction was to extend the previous pass's ASan run to a *live session
+under hostile input*, and that was done: an ASan-instrumented server took 45
+classes of hostile input across 123 sessions — pty geometries from `0x0` to
+`2³²-1`, a 48-step window-change storm, 300-byte usernames and `$TERM`s,
+malformed and overlong and surrogate UTF-8, unterminated CSI/OSC/DCS
+sequences, mouse coordinates at `2³²-1`, 4 MiB pastes, client-sent stderr
+floods, oversized `env` requests, `exec`/`subsystem`/`x11` requests, 13
+channels on one connection, 120 rapid connect/close cycles, 40 mid-frame RSTs,
+and a stalling client — **with no AddressSanitizer report from otsh code.** The
+server was checked to be alive after the suite and to still accept and serve a
+brand-new client, rather than merely "not having crashed yet". The suite passes
+under ASan too: 80 tests, no report.
+
+That run produced exactly one ASan report, and it was **not an otsh defect**,
+which is worth spelling out because it would be easy to present either way and
+both would mislead. ASan flagged a stack-buffer-overflow in `tui::screen_clear`
+on the first frame any app draws. It reduces to a 40-line Odin program
+containing no otsh code: an 11-byte struct passed **by value** gets a 12-byte
+store into its 11-byte incoming stack slot. Odin's own codegen, on
+`dev-2026-07a` / arm64 macOS; the write lands in the callee's own frame
+padding, which is why it has never caused an observable failure. A local
+variable of the same type does not trigger it, and padding or aligning the type
+to 12 bytes does not either.
+
+`tui.Style` — `Color`, `Color`, `Attrs` — is exactly 11 bytes, so it hit this
+on every call taking a `Style`. It now carries `#align(4)`, which rounds it to
+12 and puts the store back in bounds. `Cell` is 16 bytes either way, so the
+cell grid costs nothing extra. **This is a workaround for a toolchain issue,
+not a fix for an otsh memory-safety bug** — but it matters, because until it
+was applied ASan aborted on the first frame of every session and could not
+reach anything else. Any future sanitizer work on this codebase depends on it,
+and it is the reason the earlier claim that "an ASan-built `tracker` served a
+full session without a report" should be treated as version-specific rather
+than as a standing property.
+
+### What this pass could not determine
+
+Stated so the gaps are visible rather than implied:
+
+- **Whether `ssh_channel_write`'s unbounded wait is intended libssh behaviour
+  or a libssh bug.** The blocking was measured and the stack confirmed; no
+  attempt was made to read libssh's source to establish which. The fix does not
+  depend on the answer, but the upstream question is open.
+- **Whether the write-stall bound has a false-positive rate on genuinely slow
+  links.** 30 seconds was chosen to be generous and was verified not to disturb
+  a local interactive session. Nothing tested it over a lossy or
+  high-latency path, which is exactly where an honest client could be cut off.
+- **Whether anything else in otsh trips the 11-byte-struct codegen issue.**
+  `tui.Style` was found because it is on the hot path. `Color` is 5 bytes and
+  also passed by value; no report was produced for it during these runs, but
+  runs stop at the first error per code path and no exhaustive search was made.
+- **Anything about libssh's internals**, per "What this is not" above.
+- **Behaviour on Windows and FreeBSD.** Everything measured here ran on arm64
+  macOS against libssh 0.12.0. The cross-platform type-checks still pass, but
+  no measurement on this page was repeated on another platform.
+- **Whether `max_auth_attempts` interacts safely with an `Authenticator` that
+  returns inconsistently.** The accounting was read and looks correct; it was
+  not driven with a deliberately flapping `Authenticator`.
 
 ---
 

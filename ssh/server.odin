@@ -164,6 +164,10 @@ Session :: struct {
 	// by this connection's own session thread just before it calls the handler,
 	// and read only by that same thread — it never crosses a thread boundary.
 	started:       time.Time,
+	// Flow-control stall tracking for `write`. Same single-thread ownership as
+	// `started`: only this connection's own thread touches them.
+	write_stalled: bool,
+	stall_since:   time.Time,
 
 	// fixed storage so libssh callbacks never touch an allocator
 	user_buf:      [64]u8,
@@ -303,7 +307,11 @@ take_input :: proc(s: ^Session, buf: []u8) -> int {
 	}
 	n := ls.channel_read_nonblocking(s.chan, raw_data(buf), u32(len(buf)), 0)
 	if n > 0 {
-		return int(n)
+		// libssh is asked for at most len(buf) and documented to respect it.
+		// Clamped anyway: this count becomes a slice bound in every caller, and
+		// `ssh.read` is public, so a library taking libssh at its word here would
+		// be handing a third party an over-read for the price of one bad return.
+		return min(int(n), len(buf))
 	}
 	// Negative n is EOF or an error; both are reported through s.eof and the
 	// event loop rather than from here.
@@ -319,12 +327,57 @@ take_input :: proc(s: ^Session, buf: []u8) -> int {
 	return 0
 }
 
-// Sends bytes to the client. Returns how many were written, 0 once the
-// connection is gone.
+// Sends bytes to the client. Returns how many were written — which may be
+// fewer than asked for, or 0 — and 0 once the connection is gone.
+//
+// Never blocks waiting for the client to read. That is a deliberate departure
+// from `ssh_channel_write`, which does: once the peer's flow-control window is
+// exhausted it waits inside ssh_handle_packets for a WINDOW_ADJUST, and that
+// wait does not honour SSH_OPTIONS_TIMEOUT. Measured: three clients that
+// authenticated, requested a shell and then simply stopped reading held all
+// three session slots for a full 60 s with `handshake_seconds` at 20, while a
+// fourth was refused with `limit=sessions`. Nothing in that exchange is
+// malformed, so it costs the client one idle socket per pinned server thread.
+//
+// So only what the peer has credit for is handed to libssh, and a window that
+// stays shut past `Limits.write_stall_seconds` ends the session. Callers must
+// cope with a short write: `tui.run` repaints in full on the next frame, since
+// a partially sent frame leaves its diff baseline describing a screen the
+// terminal is not showing.
 write :: proc(s: ^Session, data: []u8) -> int {
 	if len(data) == 0 || s.chan == nil || s.eof {
 		return 0
 	}
+
+	// Not conditional on the limit. `write_stall_seconds` governs when a stalled
+	// session is torn down, NOT whether libssh is allowed to block: the
+	// convention that a negative limit disables a check would otherwise hand
+	// back the unbounded thread pin this whole path exists to prevent, and
+	// silently break the "never blocks" promise above. Negative means "never
+	// disconnect a slow client", and such a client then costs a responsive
+	// thread that still notices shutdown — not one wedged inside libssh.
+	data := data
+	room := int(ls.channel_window_size(s.chan))
+	if room <= 0 {
+		// The peer is not reading. Start (or continue) the stall clock rather
+		// than handing libssh a write it cannot complete.
+		now := time.now()
+		if !s.write_stalled {
+			s.write_stalled = true
+			s.stall_since = now
+			return 0
+		}
+		if secs := s.server.limiter.limits.write_stall_seconds; secs > 0 &&
+		   time.diff(s.stall_since, now) >= time.Duration(secs) * time.Second {
+			// Report the connection as finished. The app's own loop unwinds
+			// through the ordinary path, so its teardown still runs.
+			s.eof = true
+		}
+		return 0
+	}
+	s.write_stalled = false
+	data = data[:min(len(data), room)]
+
 	rc := ls.channel_write(s.chan, raw_data(data), u32(len(data)))
 	if rc == ls.ERROR {
 		s.eof = true
@@ -477,24 +530,76 @@ contains :: proc(haystack, needle: string) -> bool {
 	return strings.contains(haystack, needle)
 }
 
-// Returns false if any list was rejected by libssh.
+// Returns false if any list was rejected by libssh, or if an operator-supplied
+// list contained a name this libssh build does not know.
 //
-// This return value matters more than it looks. libssh rejects a list whose
-// entries are *all* unknown to it and silently keeps its own, broader default —
-// which includes CTR ciphers and non-ETM MACs. Ignoring the result means a typo
-// in Config, or a name this libssh build does not know, downgrades the
-// negotiated crypto with no indication anywhere. Fail closed instead.
+// This is stricter than checking `ssh_bind_options_set`'s return, and the
+// difference is a real downgrade. libssh only fails the call when *every* name
+// in a list is unknown; a list with some known names and some unknown ones
+// returns OK and the unknown entries are silently dropped. Measured on libssh
+// 0.12.0:
+//
+//	ciphers = "chacha20-poly1305@openssh.comTYPO,aes128-ctr"
+//	                      -> negotiated aes128-ctr, a non-AEAD cipher
+//	macs    = "hmac-sha2-256-etm@openssh.comTYPO,hmac-sha1"
+//	                      -> negotiated hmac-sha1
+//	kex     = "curve25519-sha256TYPO,diffie-hellman-group14-sha1"
+//	                      -> the server's entire offered kex set was SHA-1
+//
+// One typo, no error anywhere, and the connection is weaker than the operator
+// wrote down. So every name is checked on its own against a scratch bind, where
+// a single unknown name *is* an all-unknown list and therefore does fail.
+//
+// The two cases are treated differently on purpose:
+//
+//   - An operator-supplied list is refused outright, naming the entry. They
+//     wrote an exact list; silently serving a subset of it is the failure mode
+//     this whole proc exists to prevent.
+//   - A dropped name from otsh's own defaults is a warning, not a fatal error.
+//     Those lists are all-AEAD/all-ETM by construction, so any surviving subset
+//     is still strong, and some real libssh builds legitimately lack an entry
+//     (chacha20-poly1305 is absent from mbedTLS-backed builds). Refusing to
+//     start there would break a working deployment to no benefit.
 @(private)
 set_algorithms :: proc(b: ls.Bind, cfg: Config) -> bool {
+	// Options are probed on a throwaway bind so a rejected name cannot leave
+	// half-applied state on the real one. nil (allocation failure) degrades to
+	// the old whole-list-only check rather than refusing to start.
+	scratch := ls.bind_new()
+	defer if scratch != nil {ls.bind_free(scratch)}
+
 	ok := true
-	// "-" opts out and leaves libssh's defaults alone.
-	apply :: proc(b: ls.Bind, opt: ls.Bind_Option, value, fallback, what: string, ok: ^bool) {
-		v := value == "" ? fallback : value
-		if v == "-" {
-			return
-		}
-		cv := strings.clone_to_cstring(v, context.temp_allocator)
-		if ls.bind_options_set(b, opt, rawptr(cv)) != ls.OK {
+	apply(b, scratch, .Key_Exchange, cfg.key_exchange, DEFAULT_KEX, "key exchange", &ok)
+	apply(b, scratch, .Ciphers_C_S, cfg.ciphers, DEFAULT_CIPHERS, "cipher (client->server)", &ok)
+	apply(b, scratch, .Ciphers_S_C, cfg.ciphers, DEFAULT_CIPHERS, "cipher (server->client)", &ok)
+	apply(b, scratch, .Hmac_C_S, cfg.macs, DEFAULT_MACS, "MAC (client->server)", &ok)
+	apply(b, scratch, .Hmac_S_C, cfg.macs, DEFAULT_MACS, "MAC (server->client)", &ok)
+	apply(b, scratch, .Hostkey_Algorithms, cfg.hostkey_algorithms, DEFAULT_HOSTKEYS, "host key algorithm", &ok)
+	return ok
+}
+
+// One option's worth of the above. "-" opts out and leaves libssh's own default
+// alone; anything else is validated name by name and then applied whole.
+@(private)
+apply :: proc(
+	b, scratch: ls.Bind,
+	opt: ls.Bind_Option,
+	value, fallback, what: string,
+	ok: ^bool,
+) {
+	configured := value != ""
+	v := configured ? value : fallback
+	if v == "-" {
+		return
+	}
+
+	// Name-by-name validation. Only possible with a scratch bind to probe on.
+	if scratch != nil {
+		kept, dropped := split_algorithms(scratch, opt, v)
+		switch {
+		case len(kept) == 0:
+			// Every name unknown. libssh would accept nothing here and keep its
+			// own broader default, so this has to stop the server outright.
 			fmt.eprintfln(
 				"otsh: libssh rejected the %s list %q.\n" +
 				"      Every name in it is unknown to this libssh build, so it would have\n" +
@@ -502,15 +607,72 @@ set_algorithms :: proc(b: ls.Bind, cfg: Config) -> bool {
 				what, v,
 			)
 			ok^ = false
+			return
+		case len(dropped) > 0 && configured:
+			fmt.eprintfln(
+				"otsh: this libssh build does not know %d name(s) in the %s list %q:\n" +
+				"        %s\n" +
+				"      libssh would drop them and negotiate with what is left (%q),\n" +
+				"      which is weaker than the list you wrote. Refusing to start.\n" +
+				"      Fix the spelling, or remove the name if this build cannot provide it.",
+				len(dropped), what, v, join_names(dropped), join_names(kept),
+			)
+			ok^ = false
+			return
+		case len(dropped) > 0 && len(kept) > 0:
+			// A default list, partially supported. Every otsh default is strong,
+			// so the survivors are safe — say what happened and carry on.
+			fmt.eprintfln(
+				"otsh: NOTE this libssh build does not provide %s: %s.\n" +
+				"      Continuing with the rest of the default list (%q).",
+				what, join_names(dropped), join_names(kept),
+			)
+			v = join_names(kept)
 		}
 	}
-	apply(b, .Key_Exchange, cfg.key_exchange, DEFAULT_KEX, "key exchange", &ok)
-	apply(b, .Ciphers_C_S, cfg.ciphers, DEFAULT_CIPHERS, "cipher (client->server)", &ok)
-	apply(b, .Ciphers_S_C, cfg.ciphers, DEFAULT_CIPHERS, "cipher (server->client)", &ok)
-	apply(b, .Hmac_C_S, cfg.macs, DEFAULT_MACS, "MAC (client->server)", &ok)
-	apply(b, .Hmac_S_C, cfg.macs, DEFAULT_MACS, "MAC (server->client)", &ok)
-	apply(b, .Hostkey_Algorithms, cfg.hostkey_algorithms, DEFAULT_HOSTKEYS, "host key algorithm", &ok)
-	return ok
+
+	cv := strings.clone_to_cstring(v, context.temp_allocator)
+	if ls.bind_options_set(b, opt, rawptr(cv)) != ls.OK {
+		fmt.eprintfln(
+			"otsh: libssh rejected the %s list %q.\n" +
+			"      Every name in it is unknown to this libssh build, so it would have\n" +
+			"      fallen back to libssh's own (weaker) default. Refusing to start.",
+			what, v,
+		)
+		ok^ = false
+	}
+}
+
+// Splits a comma-separated algorithm list into the names this libssh build
+// accepts and the ones it does not, by offering each to `scratch` on its own.
+// Both slices come from the temp allocator.
+@(private)
+split_algorithms :: proc(
+	scratch: ls.Bind,
+	opt: ls.Bind_Option,
+	list: string,
+) -> (kept, dropped: []string) {
+	k := make([dynamic]string, 0, 8, context.temp_allocator)
+	d := make([dynamic]string, 0, 4, context.temp_allocator)
+	rest := list
+	for entry in strings.split_iterator(&rest, ",") {
+		name := strings.trim_space(entry)
+		if name == "" {
+			continue // a stray or trailing comma, not a name
+		}
+		cv := strings.clone_to_cstring(name, context.temp_allocator)
+		if ls.bind_options_set(scratch, opt, rawptr(cv)) == ls.OK {
+			append(&k, name)
+		} else {
+			append(&d, name)
+		}
+	}
+	return k[:], d[:]
+}
+
+@(private)
+join_names :: proc(names: []string) -> string {
+	return strings.join(names, ",", context.temp_allocator)
 }
 
 // Defaults applied to a zero-valued Config field. sshtui fills these in too;
@@ -575,6 +737,25 @@ serve :: proc(cfg: Config) -> bool {
 	srv.port = cfg.port
 	limiter_init(&srv.limiter, cfg.limits)
 
+	// Every failure below this point returns false with no session thread ever
+	// created, so the Server and everything it owns can be released — and must
+	// be. `serve` returning false is a recoverable error for the caller (a test
+	// sweeping configurations, a program falling back to another port), not
+	// necessarily an imminent process exit, so leaking here is a leak. The
+	// identity secret in particular is zeroed rather than handed back to the
+	// allocator intact.
+	//
+	// The success path deliberately does NOT free srv: session threads reach the
+	// Server through `Session.server`, and a drain that timed out can still have
+	// one running. It lives for the process.
+	started := false
+	defer if !started {
+		if srv.bind != nil {ls.bind_free(srv.bind)}
+		limiter_destroy(&srv.limiter)
+		wipe_secret(&srv.secret)
+		free(srv)
+	}
+
 	if cfg.identity_secret != "" {
 		secret, ok := load_or_create_secret(cfg.identity_secret)
 		if !ok {
@@ -607,6 +788,8 @@ serve :: proc(cfg: Config) -> bool {
 		return false
 	}
 
+	// Past every failure path: the accept loop owns srv from here.
+	started = true
 	srv.running = true
 	if !cfg.no_signal_handlers {
 		install_signal_handlers()
@@ -778,7 +961,14 @@ session_thread :: proc(s: ^Session) {
 		return
 	}
 
+	// The teardown block above already guards `s.event != nil`, so nil was
+	// considered reachable here; act on it rather than handing a nil straight
+	// back to libssh.
 	s.event = ls.event_new()
+	if s.event == nil {
+		fmt.eprintln("otsh: could not create a session event loop; dropping the connection")
+		return
+	}
 	ls.event_add_session(s.event, s.sess)
 
 	// Pump the protocol until the client has authenticated, opened a session
@@ -994,6 +1184,13 @@ capture_key_identity :: proc "contextless" (s: ^Session, pubkey: ls.Key) {
 
 @(private)
 copy_cstr :: proc "contextless" (dst: []u8, n: ^int, src: cstring) {
+	// Every current call site checks this already. Repeated here because the
+	// next one might not, and the cost of forgetting is a NULL dereference on a
+	// connection thread rather than an empty string.
+	if src == nil {
+		n^ = 0
+		return
+	}
 	p := ([^]u8)(rawptr(src))
 	i := 0
 	for i < len(dst) && p[i] != 0 {
@@ -1058,6 +1255,10 @@ cb_pty_request :: proc "c" (
 	}
 
 	s.pty = Pty {
+		// Borrows term_buf, which copy_cstr has just filled. Assigning the whole
+		// struct without this left the documented `Pty.term` permanently empty —
+		// `term(s)` worked, `s.pty.term` did not.
+		term    = term(s),
 		cols    = clamp(int(width), 1, MAX_PTY_COLS),
 		rows    = clamp(int(height), 1, MAX_PTY_ROWS),
 		px      = clamp(int(pxwidth), 0, 1 << 20),
