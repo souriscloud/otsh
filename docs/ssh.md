@@ -258,7 +258,7 @@ is dropped before the handshake even starts, so it never reaches your
 `write_stall_seconds` apply to a connection already accepted.
 
 One consequence of `write_stall_seconds` reaches the `Backend` contract:
-[`write`](#write) may now return a **short count**, having sent fewer bytes
+[`write`](api-ssh.md#write) may now return a **short count**, having sent fewer bytes
 than it was given, where previously it blocked until all of them were away.
 `tui.run` handles this by repainting the whole screen on the next frame. A
 custom `Handler` that calls `ssh.write` directly must not assume the whole
