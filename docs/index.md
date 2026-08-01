@@ -91,6 +91,7 @@ Use the guides to learn a subsystem, the API pages to look one thing up.
 | --- | --- |
 | [Security model](security.md) | How SSH public key auth actually works, why rejecting keys harvests them, pseudonymous identity, transport hardening, and an honest threat model |
 | [Architecture](architecture.md) | Internals: layering, connection lifecycle, the C callback boundary, the diff renderer, the `ssh_event_dopoll` blocking problem, concurrency and ownership |
+| [Maintaining the libssh bindings](bindings.md) | Working on `libssh/libssh.odin`: mirroring a C struct, `proc "c"` and the missing context, type-mapping traps, adding a binding, and the checker that compares it against the installed headers |
 
 ## Operations
 

@@ -46,6 +46,11 @@ echo "docs"
 step "api reference is current" python3 docs/tools/gen_api.py --check
 step "site builds and validates" python3 docs/tools/build_site.py --check
 
+echo "bindings"
+# Compares libssh/libssh.odin against the libssh headers installed here. Skips
+# with exit 0 where those headers are absent — see docs/bindings.md.
+step "bindings match installed libssh" python3 docs/tools/check_bindings.py --check
+
 echo
 if [ "$fails" -eq 0 ]; then
 	echo "all checks passed"
