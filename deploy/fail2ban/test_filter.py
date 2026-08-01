@@ -368,9 +368,16 @@ def main():
     print("verified against a real fail2ban-regex 1.1.0 (Alpine): the current")
     print("failregexes match exactly the failure lines of this corpus, v4 and")
     print("v6, bare and prefixed, extracting addr= every time.")
+    print("the systemd-backend prefix modeled in group (c) is now confirmed")
+    print("live: on Debian 13 / systemd 257 / fail2ban 1.1.0, journald stores")
+    print("MESSAGE as the bare 'otsh: audit ...' line, and fail2ban's")
+    print("formatJournalEntry rebuilds '<_HOSTNAME> otsh[<_PID>]: <MESSAGE>'")
+    print("from separate fields — exactly the shape above — and banned real")
+    print("IPv4 sources through it (see docs/deploy.md, 'What was verified').")
     print("still not verified anywhere:")
-    print("  * the exact MESSAGE shape a live journald hands the systemd")
-    print("    backend (journalmatch has not run against a real journal);")
+    print("  * IPv6 addr= lines against a live journal (the container test")
+    print("    network was IPv4-only); the corpus above covers the regex,")
+    print("    not the end-to-end journal path for v6;")
     print("  * fail2ban 0.9, whose <HOST> cannot match IPv6 at all.")
     return 0
 

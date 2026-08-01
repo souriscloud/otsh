@@ -194,6 +194,17 @@ SystemCallArchitectures=native
 # fail with EPERM rather than SIGSYS, so a probe is a failed call, not a crash.
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources @obsolete
+# sched_setscheduler is in @resources, and otsh cannot live without it: Odin's
+# core:thread creates every session thread with an explicitly-set scheduling
+# policy (pthread_attr_setinheritsched(EXPLICIT_SCHED), thread_unix.odin), so
+# glibc's pthread_create calls sched_setscheduler(tid, SCHED_OTHER, ...) in the
+# new thread. Denied, that EPERM aborts pthread_create, and the server drops
+# EVERY connection with "could not start a session thread" — measured on
+# Debian 13/systemd 257, where the un-amended filter turned the service into
+# one that starts cleanly and serves nobody. Listing the syscall here adds it
+# back to the allow set. This is not a realtime hole: RestrictRealtime=yes
+# above still refuses SCHED_FIFO/SCHED_RR regardless of this line.
+SystemCallFilter=sched_setscheduler
 SystemCallErrorNumber=EPERM
 # TCP over IPv4/IPv6 is the entire network surface of an SSH server: no unix
 # sockets, no AF_NETLINK, no AF_PACKET. Note that otsh does no DNS at all —

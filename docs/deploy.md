@@ -66,9 +66,11 @@ earlier.
 ## Layer 1: kernel rate limiting
 
 [`../deploy/nftables-ratelimit.conf`](../deploy/nftables-ratelimit.conf) is a
-standalone nftables table. It passes `nft -c` (checked against nftables 1.1 —
-which is also how a syntax error in an earlier draft was caught), but it has
-not run against live traffic; load it, then watch its counters:
+standalone nftables table. It passes `nft -c`, and — as of 2026-08-01 — it has
+also run against live traffic: on nftables 1.1.3 in a `NET_ADMIN` container, a
+second container drove each rule until its counter moved (the measurements are
+in [What was verified](#what-was-verified-and-where)). Load it, then watch its
+counters:
 
 ```sh
 nft -c -f deploy/nftables-ratelimit.conf   # syntax check, changes nothing
@@ -167,6 +169,22 @@ fail2ban-client status otsh
 A `.local` file in `jail.d/` is the supported way to add a jail without
 editing `jail.conf`, which your package manager owns and will overwrite.
 
+### The ban action must match your firewall
+
+The jail sets `banaction = nftables-multiport` explicitly rather than inheriting
+it, and that is not cosmetic. fail2ban 1.1.0's `jail.conf` defaults to
+`iptables-multiport`, and on an nftables-only host with no `iptables` binary —
+a minimal Debian 13 is exactly that — the inherited default **fails open**:
+`fail2ban-client status otsh` reports the address as banned while every
+`actionban` invocation dies with `iptables: not found` in `fail2ban.log`, and
+the "banned" client connects and authenticates as though nothing happened.
+Measured on 2026-08-01; it is the difference between a ban and a log line that
+says the word *ban*. Since layer 1 already requires nftables, the nftables
+action is the right dependency; if your firewall really is legacy iptables, set
+`iptables-multiport` here instead — and whichever you choose, prove it once by
+banning yourself from a non-loopback address and watching the connection
+actually die.
+
 ### What the filter matches
 
 Three events, all three of which carry `addr` by contract:
@@ -250,11 +268,29 @@ matched timestamp text from the line before `failregex` runs, so the regexes
 match a timestamp *slot* (`ts=\S*\s+`), never the timestamp itself — a filter
 that spells out the `ts=` value matches nothing, silently.
 
-Still unverified anywhere: the exact `MESSAGE` shape a live journald hands the
-systemd backend (`journalmatch` has not run against a real journal), and
-fail2ban 0.9, whose `<HOST>` cannot match IPv6 at all — on 0.9 an IPv6 audit
-line matches nothing, silently. Check `fail2ban-client version` before
-assuming your v6 listener is covered.
+The `MESSAGE` shape a live journald hands the systemd backend — the one thing
+the file-corpus tests above could not reach — is now measured. On Debian 13
+(systemd 257, fail2ban 1.1.0), journald stores the `MESSAGE` field as the
+**bare** audit line, `otsh: audit ts=… event=… addr=…`, byte-for-byte what the
+process wrote to stderr, with no syslog prefix embedded. fail2ban's systemd
+backend then reconstructs the line its `failregex` sees from *separate* journal
+fields, as `<_HOSTNAME> otsh[<_PID>]: <MESSAGE>` — e.g.
+
+```
+sut otsh[379]: otsh: audit ts=2026-08-01T19:05:19Z event=auth addr=10.77.0.20 method=none user=mallory ok=false
+```
+
+so the filter's leading `^(?:.*?\s)?otsh: audit` is what absorbs that
+prefix, and the `ts=…` value survives intact (the journal carries its own
+timestamp, so nothing is excised from the message). With
+`journalmatch = _SYSTEMD_UNIT=otsh.service` this matched real failures and
+issued real bans; see [What was verified](#what-was-verified-and-where).
+
+Still unverified: IPv6 `addr=` lines against a *live* journal (the container
+test network was IPv4-only — the regex handles v6, the end-to-end journal path
+for v6 was not exercised), and fail2ban 0.9, whose `<HOST>` cannot match IPv6
+at all — on 0.9 an IPv6 audit line matches nothing, silently. Check
+`fail2ban-client version` before assuming your v6 listener is covered.
 
 ## Layer 3: the built-in `Limits`
 
@@ -371,11 +407,15 @@ Remember that the fail2ban layer does nothing until your app sets
 
 ### Checking it works
 
-The unit itself lints clean — `systemd-analyze verify` under systemd 257
-reports nothing once the binary exists (and that check is how a silently
-ignored `StartLimitIntervalSec` in the wrong section was caught). It has not
-supervised a real workload; these are the commands that tell you how yours is
-doing:
+The unit lints clean — `systemd-analyze verify` under systemd 257 reports
+nothing once the binary exists (and that check is how a silently ignored
+`StartLimitIntervalSec` in the wrong section was caught). As of 2026-08-01 it
+has also *supervised* one: a container running the same unit started the
+service, restarted it under a live client with the terminal restored, stopped
+it cleanly at exit 0, and scored `systemd-analyze security` at 1.3 — see
+[What was verified](#what-was-verified-and-where), including the one syscall the
+filter had to add back before any session could start. These are the commands
+that tell you how yours is doing:
 
 ```sh
 systemctl status otsh                      # running, and under which limits
@@ -387,6 +427,80 @@ fail2ban-client status otsh                # currently banned addresses
 
 `systemd-analyze security` is worth running once after any edit to the unit: it
 will tell you which directive you dropped.
+
+## What was verified, and where
+
+Every claim on this page above the line "has not run" once rested on a linter.
+On **2026-08-01** the whole stack was stood up in Docker and driven with real
+traffic. The bench: Debian 13 (trixie), systemd 257 (257.13), fail2ban 1.1.0,
+nftables 1.1.3, libssh 0.11.2, Odin `dev-2026-07a`, on an `aarch64` host — a
+system-manager container (`--privileged`, no host cgroup mount) as the server,
+a second `NET_ADMIN` container on a user-defined bridge as the client, so every
+source address was a real non-loopback peer rather than `127.0.0.1`. The
+reproduction lives under `deploy/verify/`: a
+[`Dockerfile`](../deploy/verify/Dockerfile) that builds the audited app and
+installs the shipped configs verbatim, and a tiny tracker-shaped app at
+`deploy/verify/app/main.odin` that differs from `examples/tracker` only by
+setting `Config.audit` (so there is something for fail2ban to read) and
+refusing user `mallory` (so auth failures can be generated on demand).
+
+| Layer | Proved, with evidence | Command that showed it |
+| --- | --- | --- |
+| **systemd** | Service `active (running)`; host key + identity secret land 0600 at `/var/lib/private/otsh/` owned by the transient UID; `DynamicUser` gives UID 65057, no account left behind | `systemctl status`, `ls -l /var/lib/private/otsh` |
+| **systemd restart** | Graceful: `systemctl restart` took 0.19 s with a client attached, and the client's byte stream ended in `ESC[?1049l` (leave alt-screen) + `ESC[?25h` (show cursor) — the terminal was restored, not cut off | pty recording of an `ssh` session across a restart |
+| **systemd stop** | Clean: `systemctl stop` returned in 0.06 s with `Result=success`, `ExecMainStatus=0` — exited on its own, not SIGKILLed at `TimeoutStopSec` | `systemctl show -p Result,ExecMainStatus` |
+| **security score** | `systemd-analyze security otsh.service` → **1.3 OK**. Worst offenders are all inherent to a public network service: `PrivateNetwork=` (0.5), `RestrictAddressFamilies=~AF_INET*` (0.3), `IPAddressDeny=`/`PrivateUsers=`/`SystemCallFilter=~@resources` (0.2 each). The `@resources` line is the one this exercise added on purpose (below) | `systemd-analyze security otsh.service` |
+| **audit → journald** | Audit lines reach the journal under `SyslogIdentifier=otsh`; `MESSAGE` is stored as the **bare** `otsh: audit …` line, identical to stderr | `journalctl -u otsh -o json` |
+| **fail2ban filter** | Reading the live journal via `journalmatch = _SYSTEMD_UNIT=otsh.service`, it matched all three failure events — `auth ok=false`, `reject limit=per_ip`, `kex_fail` — generated by a real `ssh`/`nc` client | `fail2ban-client status otsh` (Total failed climbed) |
+| **fail2ban ban** | At `maxretry`, the offender was written into `inet f2b-table`'s `addr-set-otsh`, and the banned address was then **blocked** (connection refused with icmp port-unreachable), while a fresh source got through | `nft list table inet f2b-table`; `nc` from banned vs. fresh source |
+| **nft per-source rate** | Rule 2 dropped 22 packets from one source doing 15 rapid connects; the aggregate counter stayed 0 — clean separation | `nft list chain inet otsh otsh_new` |
+| **nft concurrent cap** | Rule 3 `reject`ed the 9th simultaneous connection from one source (counter +1); otsh logged exactly 8 `accept`/`session_start`, never a 9th | counters + `journalctl` accept count |
+| **nft aggregate** | Rule 4 dropped 66 packets under 180 connections from 60 sources; a distributed spray no per-source rule catches | `nft list chain inet otsh otsh_new` |
+| **nft banned set** | Operator `banned4` element dropped its source (counter +3); confirms the manual "banned tier" | `nft add element … banned4`, then `nc` |
+| **nft policy accept** | An unrelated port (9999) and ICMP passed untouched, and an already-established otsh session survived a flood — the table only removes traffic on its one port | `nc`/`ping` to an off-rule target |
+| **coexistence** | `inet otsh` (standing limits) and `inet f2b-table` (fail2ban's bans) were loaded at once, each dropping its own traffic, neither touching the other | `nft list tables` |
+
+**The two defects this found, both in `deploy/`, both now fixed and re-tested:**
+
+1. **The syscall filter denied the one call every session needs.**
+   `SystemCallFilter=~@resources` includes `sched_setscheduler`, and Odin's
+   `core:thread` creates each session thread with an explicit scheduling policy
+   (`pthread_attr_setinheritsched(EXPLICIT_SCHED)`), so glibc's `pthread_create`
+   calls `sched_setscheduler` in the new thread. Denied, that `EPERM` aborted
+   thread creation and the server dropped **every** connection with "could not
+   start a session thread" — it started cleanly and served nobody, which no
+   linter can see. The unit now adds `SystemCallFilter=sched_setscheduler` back
+   (the single most impactful line in this whole exercise). This is not a
+   realtime hole: `RestrictRealtime=yes` still refuses `SCHED_FIFO`/`SCHED_RR`.
+   It is also the sole reason the security score is 1.3 rather than lower.
+2. **The ban action failed open.** Covered under
+   [The ban action](#the-ban-action-must-match-your-firewall) above: the jail
+   now pins `banaction = nftables-multiport` instead of inheriting the
+   iptables default that no-ops on an nftables-only host.
+
+**What a container test still cannot tell you.** A container is not a VM, and
+these gaps are real:
+
+- **`DynamicUser` and cgroup behaviour may differ.** The transient UID, the
+  `StateDirectory` chown, `TasksMax`/`MemoryMax` accounting and `MemoryPeak` all
+  reported sensibly here, but the container shares the host kernel and its
+  cgroup hierarchy; a bare-metal or VM cgroup2 tree can enforce or account
+  differently. The `systemd-modules-load` unit also fails in a container (no
+  module loading) — harmless here, but it means the boot was `degraded`, not
+  `running`, which you would not accept on a real host.
+- **The security score is measured against a container's context.** Two of the
+  offenders systemd names (`RootDirectory=`, the `char-rtc` device ACL) are
+  artifacts of running under Docker, and `--privileged` weakens the very
+  sandbox the unit builds. The number 1.3 is a floor, not the score a hardened
+  VM would print.
+- **IPv6 was not exercised end to end.** The test bridge was IPv4-only. The
+  filter regex handles v6 addresses (the corpus in
+  [`../deploy/fail2ban/test_filter.py`](../deploy/fail2ban/test_filter.py)
+  covers them), but no v6 `addr=` line travelled a real journal into a real
+  ban, and the fail2ban 0.9 `<HOST>`/IPv6 caveat above stands unmeasured.
+- **Nothing here is a load or soak test.** "256 sessions flooded at once",
+  the `MemoryMax` backstop, and `TimeoutStopSec` under a slow-draining app were
+  reasoned about, not driven to their limits.
 
 ## What this still does not stop
 
