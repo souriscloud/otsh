@@ -32,6 +32,14 @@ describes how one is made.
 
 ## Unreleased
 
+## 0.2.0 — 2026-08-01
+
+A security-review release. `ssh.write` changes its contract, which is why this
+is a minor rather than a patch: it may now return a short count instead of
+blocking until every byte is gone. Apps built on `sshtui`/`tui` are unaffected
+— `tui.run` already handles short writes — but code calling `ssh.write`
+directly and ignoring the return value should check it.
+
 ### Added
 
 - `Limits.write_stall_seconds` (default 30): how long a client may leave its

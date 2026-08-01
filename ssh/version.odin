@@ -36,13 +36,13 @@
 package ssh
 
 VERSION_MAJOR :: 0
-VERSION_MINOR :: 1
+VERSION_MINOR :: 2
 VERSION_PATCH :: 0
 
-// The same version as a string, for banners and log lines: "0.1.0".
+// The same version as a string, for banners and log lines: "0.2.0".
 //
 // Written out rather than composed from the three constants above, because Odin
 // has no compile-time integer-to-string. tests/version_test.odin asserts the two
 // spellings agree, since a bumped triple beside a stale string is exactly the
 // mistake a release makes.
-VERSION :: "0.1.0"
+VERSION :: "0.2.0"
