@@ -8,7 +8,7 @@ Generated from `sshtui/*.odin` by `docs/tools/gen_api.py`. For how these fit tog
 
 **Types** — [`Config`](#config), [`Create_Proc`](#create-proc), [`Destroy_Proc`](#destroy-proc), [`Info`](#info)
 
-**Constants** — [`DEFAULT_FPS`](#default-fps)
+**Constants** — [`DEFAULT_FPS`](#default-fps), [`VERSION`](#version), [`VERSION_MAJOR`](#version-major), [`VERSION_MINOR`](#version-minor), [`VERSION_PATCH`](#version-patch)
 
 **Procedures** — [`clone_info`](#clone-info), [`delete_info`](#delete-info), [`run_local`](#run-local), [`serve`](#serve)
 
@@ -154,6 +154,49 @@ Config :: struct {
 Frame rate used when `Config.fps` is zero.
 
 *sshtui/sshtui.odin:84*
+
+### `VERSION`
+
+```odin
+VERSION :: ssh.VERSION
+```
+
+The version as a string, for banners and log lines: "0.1.0".
+
+*sshtui/version.odin:15*
+
+### `VERSION_MAJOR`
+
+```odin
+VERSION_MAJOR :: ssh.VERSION_MAJOR
+VERSION_MINOR :: ssh.VERSION_MINOR
+VERSION_PATCH :: ssh.VERSION_PATCH
+// The version as a string, for banners and log lines: "0.1.0".
+VERSION :: ssh.VERSION
+```
+
+*sshtui/version.odin:11*
+
+### `VERSION_MINOR`
+
+```odin
+VERSION_MINOR :: ssh.VERSION_MINOR
+VERSION_PATCH :: ssh.VERSION_PATCH
+// The version as a string, for banners and log lines: "0.1.0".
+VERSION :: ssh.VERSION
+```
+
+*sshtui/version.odin:12*
+
+### `VERSION_PATCH`
+
+```odin
+VERSION_PATCH :: ssh.VERSION_PATCH
+// The version as a string, for banners and log lines: "0.1.0".
+VERSION :: ssh.VERSION
+```
+
+*sshtui/version.odin:13*
 
 ## Procedures
 

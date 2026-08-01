@@ -100,6 +100,20 @@ Running one for real, and the parts of that job the library cannot do for you.
 | --- | --- |
 | [Deployment and abuse mitigation](deploy.md) | The layers that go in front of the process: a hardened systemd unit, fail2ban on the audit log, nftables/pf rate limiting — plus what none of them stop. Ships working configs in `deploy/` |
 
+## Releases
+
+otsh is `0.MINOR.PATCH`: a minor bump may break your build, a patch bump may
+not. You pin it by checking out a tag — `-collection:otsh=` points the compiler
+at a source tree, so the tag is the artefact. `ssh.VERSION` and its
+major/minor/patch companions are re-exported from `sshtui`, so an app can log or
+assert the version it was built against.
+
+| Page | What it covers |
+| --- | --- |
+| [Changelog](../CHANGELOG.md) | Every notable change, grouped by release, each entry traceable to a commit |
+| [Releasing](releasing.md) | How a version is cut: deciding the bump, what must be green, what a `v*` tag triggers, and a pre-release checklist |
+| [Migrating](migrating.md) | The breaking changes, one section each, with what to do instead |
+
 ## The shape of an app
 
 Three procs and a config. Everything else is detail:

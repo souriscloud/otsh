@@ -8,7 +8,7 @@ Generated from `ssh/*.odin` by `docs/tools/gen_api.py`. For how these fit togeth
 
 **Types** — [`Audit_Event`](#audit-event), [`Audit_Kind`](#audit-kind), [`Audit_Limit`](#audit-limit), [`Audit_Sink`](#audit-sink), [`Auth_Method`](#auth-method), [`Auth_Methods`](#auth-methods), [`Auth_Request`](#auth-request), [`Authenticator`](#authenticator), [`Config`](#config), [`Handler`](#handler), [`Identity_Secret`](#identity-secret), [`Limits`](#limits), [`Pty`](#pty), [`Server`](#server), [`Session`](#session)
 
-**Constants** — [`ALL_AUTH`](#all-auth), [`AUDIT_LINE_MAX`](#audit-line-max), [`DEFAULT_CIPHERS`](#default-ciphers), [`DEFAULT_HOST`](#default-host), [`DEFAULT_HOST_KEY`](#default-host-key), [`DEFAULT_HOSTKEYS`](#default-hostkeys), [`DEFAULT_KEX`](#default-kex), [`DEFAULT_LIMITS`](#default-limits), [`DEFAULT_MACS`](#default-macs), [`DEFAULT_PORT`](#default-port), [`DEFAULT_SHUTDOWN_SECONDS`](#default-shutdown-seconds), [`ID_BYTES`](#id-bytes), [`ID_SIZE`](#id-size), [`MAX_PTY_COLS`](#max-pty-cols), [`MAX_PTY_ROWS`](#max-pty-rows), [`SECRET_SIZE`](#secret-size)
+**Constants** — [`ALL_AUTH`](#all-auth), [`AUDIT_LINE_MAX`](#audit-line-max), [`DEFAULT_CIPHERS`](#default-ciphers), [`DEFAULT_HOST`](#default-host), [`DEFAULT_HOST_KEY`](#default-host-key), [`DEFAULT_HOSTKEYS`](#default-hostkeys), [`DEFAULT_KEX`](#default-kex), [`DEFAULT_LIMITS`](#default-limits), [`DEFAULT_MACS`](#default-macs), [`DEFAULT_PORT`](#default-port), [`DEFAULT_SHUTDOWN_SECONDS`](#default-shutdown-seconds), [`ID_BYTES`](#id-bytes), [`ID_SIZE`](#id-size), [`MAX_PTY_COLS`](#max-pty-cols), [`MAX_PTY_ROWS`](#max-pty-rows), [`SECRET_SIZE`](#secret-size), [`VERSION`](#version), [`VERSION_MAJOR`](#version-major), [`VERSION_MINOR`](#version-minor), [`VERSION_PATCH`](#version-patch)
 
 **Procedures** — [`audit_format`](#audit-format), [`audit_stderr`](#audit-stderr), [`ensure_host_key`](#ensure-host-key), [`fingerprint`](#fingerprint), [`id`](#id), [`ids_equal`](#ids-equal), [`key_type`](#key-type), [`load_or_create_secret`](#load-or-create-secret), [`pseudonym`](#pseudonym), [`read`](#read), [`remote_addr`](#remote-addr), [`serve`](#serve), [`shutdown`](#shutdown), [`shutting_down`](#shutting-down), [`size`](#size), [`take_resize`](#take-resize), [`term`](#term), [`user`](#user), [`warn_if_world_readable`](#warn-if-world-readable), [`write`](#write), [`write_string`](#write-string)
 
@@ -809,6 +809,72 @@ Identity_Secret :: struct {
 Length of the identity secret, in bytes.
 
 *ssh/identity.odin:21*
+
+### `VERSION`
+
+```odin
+VERSION :: "0.1.0"
+```
+
+The same version as a string, for banners and log lines: "0.1.0".
+
+Written out rather than composed from the three constants above, because Odin
+has no compile-time integer-to-string. tests/version_test.odin asserts the two
+spellings agree, since a bumped triple beside a stale string is exactly the
+mistake a release makes.
+
+*ssh/version.odin:48*
+
+### `VERSION_MAJOR`
+
+```odin
+VERSION_MAJOR :: 0
+VERSION_MINOR :: 1
+VERSION_PATCH :: 0
+
+// The same version as a string, for banners and log lines: "0.1.0".
+//
+// Written out rather than composed from the three constants above, because Odin
+// has no compile-time integer-to-string. tests/version_test.odin asserts the two
+// spellings agree, since a bumped triple beside a stale string is exactly the
+// mistake a release makes.
+VERSION :: "0.1.0"
+```
+
+*ssh/version.odin:38*
+
+### `VERSION_MINOR`
+
+```odin
+VERSION_MINOR :: 1
+VERSION_PATCH :: 0
+
+// The same version as a string, for banners and log lines: "0.1.0".
+//
+// Written out rather than composed from the three constants above, because Odin
+// has no compile-time integer-to-string. tests/version_test.odin asserts the two
+// spellings agree, since a bumped triple beside a stale string is exactly the
+// mistake a release makes.
+VERSION :: "0.1.0"
+```
+
+*ssh/version.odin:39*
+
+### `VERSION_PATCH`
+
+```odin
+VERSION_PATCH :: 0
+
+// The same version as a string, for banners and log lines: "0.1.0".
+//
+// Written out rather than composed from the three constants above, because Odin
+// has no compile-time integer-to-string. tests/version_test.odin asserts the two
+// spellings agree, since a bumped triple beside a stale string is exactly the
+// mistake a release makes.
+VERSION :: "0.1.0"
+```
+
+*ssh/version.odin:40*
 
 ## Procedures
 
