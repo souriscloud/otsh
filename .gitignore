@@ -17,6 +17,7 @@ id_rsa*
 /members
 /guestbook
 /stopwatch
+/notes
 # The two apps the docs have you build yourself: docs/getting-started.md walks
 # through `./build.sh ~/src/greeter`, docs/ssh.md through the sshdoc example.
 # Both land in the repo root too, the same way the bundled examples do.

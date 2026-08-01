@@ -10,6 +10,7 @@ instead; see its own docs for that half.
 
 An app is three procedures glued to a `Program` by an `App` value:
 
+<!-- check:verbatim tui/tui.odin -->
 ```odin
 App :: struct {
 	data:   rawptr,
@@ -22,6 +23,7 @@ App :: struct {
 `data` is your model, stored as a `rawptr` and cast back to your own struct
 pointer at the top of `update` and `view`:
 
+<!-- check:skip fragment with a literal "..." elision, illustrating the p.app.data cast pattern -->
 ```odin
 Model :: struct { count: int }
 
@@ -55,6 +57,7 @@ drawing is always "paint everything, every time."
 
 ## Backend — what makes an App transport-agnostic
 
+<!-- check:verbatim tui/tui.odin -->
 ```odin
 Backend :: struct {
 	data:  rawptr,
@@ -97,6 +100,7 @@ Two backends exist in this codebase:
 
 ## Program
 
+<!-- check:verbatim tui/tui.odin -->
 ```odin
 Program :: struct {
 	backend:     Backend,
@@ -130,6 +134,7 @@ space; treat them as implementation detail. The fields an app reads (and, for
 | `screen` | `Screen` | the cell grid; `view` draws into `&p.screen` |
 | `quit` | `bool` | set by `tui.quit(p)` to stop the loop after this tick |
 
+<!-- check:skip signature fragment; `Program` is defined above, body in tui/tui.odin -->
 ```odin
 quit :: proc(p: ^Program)
 ```
@@ -141,6 +146,7 @@ handling in `examples/whoami/main.odin` and `examples/tracker/main.odin`).
 
 ## `run` — the frame loop
 
+<!-- check:skip signature fragment; `Program`/`App` are defined above, body in tui/tui.odin -->
 ```odin
 run :: proc(p: ^Program, app: App)
 ```
@@ -188,6 +194,7 @@ or a resize that never comes.
 
 ## `Msg`
 
+<!-- check:verbatim tui/tui.odin -->
 ```odin
 Msg :: union {
 	Key,
@@ -250,6 +257,7 @@ its "changed just now" markers: `m.spinner += e.dt`.
 
 ### Keys
 
+<!-- check:decls Key_Kind's members condensed onto fewer lines than tui/key.odin -->
 ```odin
 Key_Kind :: enum u8 {
 	None, Rune, Enter, Tab, Shift_Tab, Backspace, Esc, Space,
@@ -282,6 +290,7 @@ incomplete sequence stays incomplete for two ticks in a row, the leading
 
 ### Mouse
 
+<!-- check:verbatim tui/key.odin -->
 ```odin
 Mouse_Kind :: enum u8 {
 	Press,
@@ -297,6 +306,7 @@ events are also `Mouse` values, distinguished by `kind`.
 
 ### Display names
 
+<!-- check:skip signature fragment; `Key` is defined above, body in tui/key.odin -->
 ```odin
 key_name :: proc(k: Key, buf: []u8) -> string
 ```
@@ -307,6 +317,7 @@ overlays. It does not allocate.
 
 ### Driving the parser directly
 
+<!-- check:skip signature fragment; `Input` is defined in prose just below, body in tui/key.odin -->
 ```odin
 parse_input :: proc(buf: []u8) -> (ev: Input, n: int, ok: bool)
 ```
@@ -335,6 +346,7 @@ outside `[0, w) x [0, h)` are silently ignored rather than causing an error
 or wrapping. An out-of-bounds call has no effect: it cannot corrupt memory
 or scroll the view.
 
+<!-- check:skip signature fragment; `Screen`/`Style` are defined below, bodies in tui/screen.odin -->
 ```odin
 set_cell          :: proc(s: ^Screen, x, y: int, r: rune, style: Style)
 draw_text         :: proc(s: ^Screen, x, y: int, text: string, style: Style) -> int
@@ -367,6 +379,7 @@ set_cursor        :: proc(s: ^Screen, x, y: int)
 
 ### Borders
 
+<!-- check:decls self-contained, but tui/screen.odin declares the four BORDER_* constants elsewhere -->
 ```odin
 Border :: struct {
 	tl, tr, bl, br, h, v: rune,
@@ -383,6 +396,7 @@ or a custom `Border` value for a different corner/edge style.
 
 ## Style and color
 
+<!-- check:decls self-contained; gathers Color's type and constructors from tui/screen.odin into one block -->
 ```odin
 Color_Mode :: enum u8 { Default, Palette, True }
 
@@ -404,6 +418,7 @@ color support — pick whichever fits the app; `examples/whoami/main.odin`
 uses the 256-color palette (`tui.ansi(8)`, `tui.ansi(15)`), `examples/tracker`
 uses true color throughout.
 
+<!-- check:skip `Color`, used in the `Style.fg`/`.bg` fields, is defined just above; body/fields split from it here -->
 ```odin
 Attr :: enum u8 {
 	Bold,
@@ -425,6 +440,7 @@ Style :: struct {
 A zero-value `Style{}` is default foreground, default background, no
 attributes — always a safe starting point.
 
+<!-- check:skip signature fragment; `Style`/`Color` are defined above, bodies in tui/screen.odin -->
 ```odin
 with_fg    :: proc "contextless" (s: Style, c: Color) -> Style
 with_bg    :: proc "contextless" (s: Style, c: Color) -> Style
@@ -438,6 +454,7 @@ not only the last one applied.
 
 ## Text metrics
 
+<!-- check:decls signatures only; bodies in tui/screen.odin and tui/width_table.odin -->
 ```odin
 rune_width :: proc "contextless" (r: rune) -> int
 text_width :: proc "contextless" (text: string) -> int
@@ -497,6 +514,7 @@ string contains a wide or zero-width rune. `examples/tracker/main.odin` uses
 centering the "terminal too small" message, computing where the receipt text
 starts.
 
+<!-- check:verbatim tui/screen.odin -->
 ```odin
 WIDE_CONT :: rune(-1) // right half of a double-width cell
 ```
@@ -512,6 +530,7 @@ re-issue a cursor move.
 
 ## Screen internals
 
+<!-- check:skip `Style`, used in `Cell.style`, is defined earlier on this page, not in this block; struct bodies in tui/screen.odin -->
 ```odin
 Screen :: struct {
 	w, h:           int,
@@ -536,6 +555,7 @@ s.h < MIN_H`, its 56x16 floor, gates a "too small" screen). `cur` is the buffer 
 the primitives in the Drawing section; `prev` is what was last actually sent, used by `flush`
 to compute the diff.
 
+<!-- check:skip signature fragment; `Screen`/`Style` are defined above, bodies in tui/screen.odin -->
 ```odin
 screen_init    :: proc(s: ^Screen, w, h: int)
 screen_destroy :: proc(s: ^Screen)
@@ -554,6 +574,7 @@ tool from driving one standalone, without `Program`/`run` at all.
 
 ## Local terminal use without SSH
 
+<!-- check:skip `Backend`, returned by `local_backend`, is defined earlier on this page, not in this block; bodies in tui/local.odin -->
 ```odin
 Local :: struct {
 	orig:      posix.termios,
@@ -575,6 +596,7 @@ mode line-buffers input, echoes what you type, and turns Ctrl+C into a
 `SIGINT` — all things a TUI has to do itself instead. `local_enter_raw`
 disables that:
 
+<!-- check:verbatim tui/local.odin -->
 ```odin
 raw.c_iflag -= {.BRKINT, .ICRNL, .INPCK, .ISTRIP, .IXON}
 raw.c_oflag -= {.OPOST}
@@ -598,6 +620,7 @@ termios code whatsoever.
 
 Typical local wiring (this is what `sshtui.run_local` does under the hood):
 
+<!-- check:skip usage sketch, not a file-scope declaration; references an `app` from surrounding context -->
 ```odin
 l: tui.Local
 if !tui.local_enter_raw(&l) {
@@ -616,6 +639,7 @@ tui.run(&p, app)
 A counter, run directly against the local terminal — no `ssh`, no `sshtui`.
 Up/Down change the count, `q` or `Esc` quits.
 
+<!-- check:file -->
 ```odin
 package main
 

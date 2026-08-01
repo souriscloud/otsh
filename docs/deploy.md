@@ -13,15 +13,20 @@ closing section says plainly what none of this covers.
 
 ## The blind spot this page exists for
 
-`ssh/limits.odin` gives every server four limits, applied before any crypto
-work happens:
+`ssh/limits.odin` gives every server five limits — the first four applied
+before any crypto work happens, and a write-stall cap (added in 0.2.0) that
+bounds an established session whose client has stopped reading:
 
+<!-- check:verbatim ssh/limits.odin -->
 ```odin
 DEFAULT_LIMITS :: Limits {
-    max_sessions      = 256,
-    max_per_ip        = 8,
-    handshake_seconds = 20,
-    max_auth_attempts = 6,
+	max_sessions        = 256,
+	max_per_ip          = 8,
+	handshake_seconds   = 20,
+	max_auth_attempts   = 6,
+	// Generous: a real client on a bad link recovers in well under this, and an
+	// app that draws at 30fps notices the window shut within one frame.
+	write_stall_seconds = 30,
 }
 ```
 
@@ -134,6 +139,7 @@ deliberate privacy decision, documented in [`./ssh.md`](./ssh.md#audit).
 `examples/tracker` ships without it, so a stock tracker is not protected by
 this layer. In your own app:
 
+<!-- check:skip config sketch; create/destroy are the app's own procs, defined elsewhere on this page's terms -->
 ```odin
 import "otsh:ssh"
 import "otsh:sshtui"

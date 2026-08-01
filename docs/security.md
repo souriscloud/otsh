@@ -52,6 +52,7 @@ In `ssh/server.odin`, `cb_auth_pubkey` receives both messages as the same
 callback, distinguished by a `signature_state` parameter (`ls.Pubkey_State`:
 `None`, `Valid`, `Wrong`, `Error`). The handling is:
 
+<!-- check:verbatim ssh/server.odin -->
 ```odin
 state := ls.Pubkey_State(i8(signature_state))
 if state != .Valid {
@@ -132,6 +133,7 @@ accept. `Server.methods` (from `Config.methods`) defaults to `ALL_AUTH`,
 which is `{.None, .Password, .Publickey}`. If `none` is offered and nothing
 rejects it, `cb_auth_none` authenticates the connection immediately:
 
+<!-- check:verbatim ssh/server.odin -->
 ```odin
 if !allow(s, Auth_Request{user = user(s), method = .None, remote_addr = remote_addr(s)}) {
     return c.int(ls.Auth.Denied)
@@ -228,6 +230,7 @@ contents of a real id, and that is the property the function exists for.
 `ssh/server.odin` defines these defaults and applies them unless
 overridden:
 
+<!-- check:verbatim ssh/server.odin -->
 ```odin
 DEFAULT_KEX :: "curve25519-sha256,curve25519-sha256@libssh.org"
 DEFAULT_CIPHERS :: "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com"
@@ -350,6 +353,7 @@ pins a thread forever." `otsh` runs one OS thread per connection
 and a thread blocked in a handshake that never completes is a thread that
 never comes back.
 
+<!-- check:verbatim ssh/limits.odin -->
 ```odin
 DEFAULT_LIMITS :: Limits {
     max_sessions        = 256,

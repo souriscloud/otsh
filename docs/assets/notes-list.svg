@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="872" height="566" viewBox="0 0 872.0 566.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.0">
+<rect width="872.0" height="566.0" rx="8" fill="#1c1b22"/>
+<rect width="872.0" height="28" rx="8" fill="#26252e"/>
+<rect y="20" width="872.0" height="8" fill="#26252e"/>
+<circle cx="18" cy="14.0" r="5" fill="#e05561"/>
+<circle cx="34" cy="14.0" r="5" fill="#e9a658"/>
+<circle cx="50" cy="14.0" r="5" fill="#7ec490"/>
+<text x="436.0" y="18.0" fill="#8b8797" font-size="11.5" text-anchor="middle">ssh -p 2224 localhost</text>
+<rect x="158.8" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="167.2" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="175.6" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="184.0" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="192.4" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="200.8" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="209.2" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="217.6" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="226.0" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="234.4" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="242.8" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="251.2" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="259.6" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="268.0" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="276.4" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="284.8" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="293.2" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="301.6" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="310.0" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="318.4" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<rect x="326.8" y="110.0" width="8.9" height="17.0" fill="#ffffff"/>
+<text x="142.0" y="70.5" fill="#96c88c" xml:space="preserve">╭─ 82c09527 — 3 note(s) ─────────────────────────────────────────────╮</text>
+<text x="142.0" y="87.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="87.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="104.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="104.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="121.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="158.8" y="121.5" fill="#1c1b22" xml:space="preserve">01. remember the milk</text>
+<text x="721.6" y="121.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="138.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="158.8" y="138.5" fill="#ffffff" xml:space="preserve">02. fix the door hinge</text>
+<text x="721.6" y="138.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="155.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="158.8" y="155.5" fill="#ffffff" xml:space="preserve">03. write up the deploy notes</text>
+<text x="721.6" y="155.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="172.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="172.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="189.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="189.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="206.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="206.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="223.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="223.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="240.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="240.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="257.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="257.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="274.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="274.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="291.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="291.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="308.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="308.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="325.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="325.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="342.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="342.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="359.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="359.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="376.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="376.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="393.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="393.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="410.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="410.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="427.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="427.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="444.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="444.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="461.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="461.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="478.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="478.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="495.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="495.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="512.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="158.8" y="512.5" fill="#7f7f7f" xml:space="preserve">↑↓/jk move · n new · d delete · ? help · q quit</text>
+<text x="721.6" y="512.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="529.5" fill="#96c88c" xml:space="preserve">╰────────────────────────────────────────────────────────────────────╯</text>
+</svg>

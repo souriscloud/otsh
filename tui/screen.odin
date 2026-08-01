@@ -31,12 +31,24 @@ Color :: struct {
 
 // The terminal's own default colour. Prefer this for backgrounds so the user's
 // theme shows through.
+//
+// Example:
+//
+//	style := tui.Style{bg = tui.no_color()}
 no_color :: proc "contextless" () -> Color {return Color{mode = .Default}}
 // One of the terminal's 256 palette entries. 0-7 are the base colours, 8-15 the
 // bright ones; those sixteen follow the user's theme, 16-255 do not.
+//
+// Example:
+//
+//	green := tui.Style{fg = tui.ansi(2)}
 ansi :: proc "contextless" (idx: u8) -> Color {return Color{mode = .Palette, idx = idx}}
 // A 24-bit colour, emitted as an SGR truecolor sequence. Not a compile-time
 // constant — use a `:=` package variable, not `::`, for a palette.
+//
+// Example:
+//
+//	orange := tui.Style{fg = tui.rgb(255, 128, 0)}
 rgb :: proc "contextless" (r, g, b: u8) -> Color {
 	return Color{mode = .True, r = r, g = g, b = b}
 }
@@ -71,6 +83,10 @@ Attrs :: distinct bit_set[Attr;u8]
 // parameter is defaulted or explicit; the same struct as a local does not; the
 // same struct padded or aligned to 12 does not. `Cell` is 16 bytes either way,
 // so the cell grid — the only place these are stored in bulk — costs nothing.
+//
+// Example:
+//
+//	style := tui.Style{fg = tui.ansi(2), bg = tui.no_color(), attrs = {.Bold}}
 Style :: struct #align (4) {
 	fg:    Color,
 	bg:    Color,
@@ -78,14 +94,26 @@ Style :: struct #align (4) {
 }
 
 // Returns a copy of `s` with the foreground replaced.
+//
+// Example:
+//
+//	warn := tui.with_fg(base, tui.ansi(1)) // red on whatever base's background is
 with_fg :: proc "contextless" (s: Style, c: Color) -> Style {
 	s := s;s.fg = c;return s
 }
 // Returns a copy of `s` with the background replaced.
+//
+// Example:
+//
+//	selected := tui.with_bg(base, tui.ansi(4)) // highlight a row
 with_bg :: proc "contextless" (s: Style, c: Color) -> Style {
 	s := s;s.bg = c;return s
 }
 // Returns a copy of `s` with `a` added to its attributes.
+//
+// Example:
+//
+//	bold := tui.with_attrs(base, {.Bold})
 with_attrs :: proc "contextless" (s: Style, a: Attrs) -> Style {
 	s := s;s.attrs += a;return s
 }
@@ -142,6 +170,12 @@ MAX_ROWS :: 300
 
 // Resizes the grids, forcing a full repaint on the next flush. A no-op if the
 // size is unchanged. Dimensions are clamped to MAX_COLS/MAX_ROWS.
+//
+// Driving a Program without `run` (e.g. in a test):
+//
+// Example:
+//
+//	tui.screen_resize(&p.screen, 100, 40)
 screen_resize :: proc(s: ^Screen, w, h: int) {
 	w, h := clamp(w, 1, MAX_COLS), clamp(h, 1, MAX_ROWS)
 	if s.w == w && s.h == h && s.cur != nil {
@@ -172,6 +206,10 @@ screen_clear :: proc(s: ^Screen, style := Style{}) {
 // Paints one cell, clipped to the screen. A double-width rune also claims the
 // cell to its right; in the last column, where there is no such cell, a space
 // is drawn instead. A zero-width rune is ignored.
+//
+// Example:
+//
+//	tui.set_cell(s, 0, 0, '*', tui.Style{fg = tui.ansi(3)})
 set_cell :: proc(s: ^Screen, x, y: int, r: rune, style: Style) {
 	if x < 0 || y < 0 || x >= s.w || y >= s.h {
 		return
@@ -240,6 +278,10 @@ set_cell :: proc(s: ^Screen, x, y: int, r: rune, style: Style) {
 }
 
 // Returns the number of columns consumed.
+//
+// Example:
+//
+//	tui.draw_text(s, 2, 1, "score: 42", tui.Style{})
 draw_text :: proc(s: ^Screen, x, y: int, text: string, style: Style) -> int {
 	col := x
 	for r in text {
@@ -253,6 +295,10 @@ draw_text :: proc(s: ^Screen, x, y: int, text: string, style: Style) -> int {
 }
 
 // Draws text clipped to `max_w` columns, appending "…" when it does not fit.
+//
+// Example:
+//
+//	tui.draw_text_clipped(s, 0, 0, 12, "a very long label", tui.Style{})
 draw_text_clipped :: proc(s: ^Screen, x, y, max_w: int, text: string, style: Style) -> int {
 	if max_w <= 0 {
 		return 0
@@ -275,6 +321,10 @@ draw_text_clipped :: proc(s: ^Screen, x, y, max_w: int, text: string, style: Sty
 }
 
 // Fills a rectangle with one rune. Clipped to the screen.
+//
+// Example:
+//
+//	tui.fill_rect(s, 0, 0, s.w, 1, ' ', tui.Style{bg = tui.ansi(4)}) // status bar
 fill_rect :: proc(s: ^Screen, x, y, w, h: int, r: rune, style: Style) {
 	for row in y ..< y + h {
 		for col in x ..< x + w {
@@ -299,6 +349,10 @@ BORDER_THICK :: Border{'┏', '┓', '┗', '┛', '━', '┃'}
 
 // Draws a box outline with an optional title inset into the top edge. Nothing is
 // drawn inside it. Silently does nothing if smaller than 2x2.
+//
+// Example:
+//
+//	tui.draw_box(s, 2, 1, 40, 10, tui.Style{fg = tui.ansi(6)}, tui.BORDER_ROUND, " files ")
 draw_box :: proc(s: ^Screen, x, y, w, h: int, style: Style, b := BORDER_ROUND, title := "") {
 	if w < 2 || h < 2 {
 		return
@@ -323,6 +377,11 @@ draw_box :: proc(s: ^Screen, x, y, w, h: int, style: Style, b := BORDER_ROUND, t
 // Shows the terminal cursor at this cell for the current frame. Call it every
 // frame you want the cursor visible — `screen_clear` hides it again. Use it for
 // text input, so the caret lands where the user is typing.
+//
+// Example:
+//
+//	m := (^Model)(p.app.data)
+//	tui.set_cursor(s, m.cursor_x, m.cursor_y)
 set_cursor :: proc(s: ^Screen, x, y: int) {
 	s.cursor_visible = true
 	s.cursor_x, s.cursor_y = x, y
@@ -343,6 +402,10 @@ set_cursor :: proc(s: ^Screen, x, y: int) {
 // package draws its own borders from — `BORDER_ROUND` and friends, via
 // `draw_box` — is ambiguous: at width 2 every border in every app would be
 // twice as wide as the box it frames.
+//
+// Example:
+//
+//	w := tui.rune_width('字') // 2 — East Asian Wide
 rune_width :: proc "contextless" (r: rune) -> int {
 	// ASCII is nearly every cell of nearly every frame, and this runs per cell
 	// per frame, so answer it before touching the table.
@@ -384,6 +447,11 @@ rune_width :: proc "contextless" (r: rune) -> int {
 
 // Total display width of a string in terminal columns. Use this, never `len`,
 // for centering or alignment.
+//
+// Example:
+//
+//	title := "status"
+//	x := (s.w - tui.text_width(title)) / 2 // center it
 text_width :: proc "contextless" (text: string) -> int {
 	w := 0
 	for r in text {

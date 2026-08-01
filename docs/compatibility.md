@@ -116,6 +116,7 @@ verified before being relied on.
 
 The assert is guarded rather than absolute:
 
+<!-- check:skip message argument abbreviated to "..."; see libssh/libssh.odin for the literal #assert -->
 ```odin
 ODIN_VERSION_IS_DATED :: len(ODIN_VERSION) >= 11 && ODIN_VERSION[:4] == "dev-"
 #assert(!ODIN_VERSION_IS_DATED || ODIN_VERSION >= MIN_ODIN_VERSION, "...")
@@ -377,7 +378,8 @@ A checklist for whoever moves a pin. All of it is runnable from the repo.
    against Odin's `master` weekly. If it is red, read it before upgrading —
    it is telling you what will break.
 2. Get the new compiler, point `.odin-path` at it, and run **`./check.sh`**.
-   That is the whole gate: 6 builds, 71 tests, 2 doc checks. It must be green.
+   That is the whole gate: 6 builds, 80 tests, 3 doc checks and the bindings
+   check. It must be green.
 3. Update `ODIN_RELEASE` in `.github/workflows/ci.yml`.
 4. If the new release is *older* than the floor, or if you want to re-derive
    the floor, bisect it. The method: a container, the prebuilt tarball, and

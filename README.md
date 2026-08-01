@@ -60,9 +60,11 @@ implementation of the same idea, not a port.)
 
 ## Three procs and a config
 
+<!-- check:file -->
 ```odin
 package main
 
+import "core:fmt"
 import "otsh:sshtui"
 import "otsh:tui"
 
@@ -129,11 +131,12 @@ main :: proc() {
   throughput ~530 B/s, one keypress ~230 B. Four concurrent animated sessions
   cost ~3.7% of one core. The diff renderer is why — it emits only the escape
   sequences needed to reconcile a frame, not a repaint.
-- **71 tests, no network needed** (`./test.sh`) — text metrics, input
+- **80 tests, no network needed** (`./test.sh`) — text metrics, input
   decoding, the diff renderer checked against a model terminal, audit-line
   formatting, resource limits, shutdown defaults, fuzzed parser and renderer
-  input, and identity properties (same key → same id, different secrets →
-  unlinkable ids).
+  input, identity properties (same key → same id, different secrets →
+  unlinkable ids) pinned against an independent HMAC implementation, and the
+  crypto algorithm lists validated name by name against libssh.
 
 ## Screenshots
 
@@ -150,6 +153,10 @@ main :: proc() {
 <td width="50%"><img src="docs/assets/guestbook.svg" alt="The shared guestbook example"><br><sub><code>guestbook</code> — shared state across sessions</sub></td>
 <td width="50%"><img src="docs/assets/stopwatch.svg" alt="The local-only stopwatch example"><br><sub><code>stopwatch</code> — local-only, no SSH involved</sub></td>
 </tr>
+<tr>
+<td width="50%"><img src="docs/assets/notes-list.svg" alt="The notes example: per-key private notes"><br><sub><code>notes</code> — multi-view, per-key private state</sub></td>
+<td width="50%"><img src="docs/assets/members.svg" alt="The members example recognising a key"><br><sub><code>members</code> — recognised by key, no password, no signup</sub></td>
+</tr>
 </table>
 
 Every screenshot here and in `docs/` is a real capture: a script drives a real
@@ -158,11 +165,15 @@ None of these are mockups.
 
 ## Documentation
 
-Full docs are in [docs/](docs/index.md), including two build-it-yourself
-tutorials, and render as a local website with `python3 docs/tools/build_site.py --serve`.
+Full docs are in [docs/](docs/index.md), including four build-it-yourself
+tutorials and a from-zero [concepts page](docs/concepts.md) for anyone who has
+never written a TUI. They render as a local website with
+`python3 docs/tools/build_site.py --serve`.
 
-Tutorials: [a stopwatch, no SSH](docs/tutorial-tui.md) ·
-[a shared guestbook](docs/tutorial-guestbook.md)
+Tutorials: [a first app in ten minutes](docs/tutorial-first-app.md) ·
+[a stopwatch, no SSH](docs/tutorial-tui.md) ·
+[a shared guestbook](docs/tutorial-guestbook.md) ·
+[a multi-view notes app](docs/tutorial-notes.md)
 
 Reference: [getting started](docs/getting-started.md) ·
 [cookbook](docs/cookbook.md) ·
@@ -185,7 +196,12 @@ on first draw, and a cross-thread allocator mismatch that could `SIGABRT` it
 from a single unauthenticated connection. All ten are fixed, and all ten are
 documented in [§11](docs/security.md#11-independent-audit-findings) with what
 was broken and how it was found, because the class of mistake is more useful
-than the patch.
+than the patch. A fourth adversarial pass before 0.2.0 found three more — an
+algorithm-list typo that silently downgraded the negotiated crypto, a client
+that stopped reading pinning its session thread indefinitely, and leaks on
+`serve`'s startup-failure paths — fixed and documented in
+[§13](docs/security.md), which is equally explicit about what a review like
+that is not.
 
 That is diligence, not a certificate. **This has not been professionally
 audited, and nobody should claim "secure" about network-facing code without
@@ -215,7 +231,7 @@ MIT. See [LICENSE](LICENSE).
 ## Contributing
 
 Issues and pull requests are welcome. Run `./test.sh` before submitting; CI
-builds every package and example on Linux for every push, runs the 71 tests
+builds every package and example on Linux for every push, runs the 80 tests
 there along with the Windows and FreeBSD cross-type-checks, and runs the
 macOS and Windows jobs on pull requests, weekly, and on release tags. This is a
 security-sensitive library — a careful read of `ssh/` or `libssh/` looking

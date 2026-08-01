@@ -41,6 +41,7 @@ interactive sessions.
 
 ## Serving
 
+<!-- check:skip signature fragment; `Config` is defined below, `serve`'s body in ssh/server.odin -->
 ```odin
 serve :: proc(cfg: Config) -> bool
 ```
@@ -78,6 +79,7 @@ in below) — not Odin literals of any structured type.
 
 ## Handler
 
+<!-- check:verbatim ssh/server.odin -->
 ```odin
 Handler :: #type proc(s: ^Session)
 ```
@@ -93,6 +95,7 @@ beyond whatever you allocated for the connection.
 The struct itself carries fixed-size buffers and libssh handles you are not
 meant to touch directly; treat the procs below as the API.
 
+<!-- check:skip signature cheat-sheet gathered from several places in ssh/server.odin; `Session` is opaque here, not contiguous source -->
 ```odin
 user         :: proc "contextless" (s: ^Session) -> string
 term         :: proc "contextless" (s: ^Session) -> string
@@ -120,6 +123,7 @@ take_resize  :: proc "contextless" (s: ^Session) -> bool
 
 `read` and `write`/`write_string` are the actual byte stream:
 
+<!-- check:skip signature fragment; `Session` is opaque here, body in ssh/server.odin -->
 ```odin
 read :: proc(s: ^Session, buf: []u8, timeout_ms: int) -> (n: int, ok: bool)
 ```
@@ -139,6 +143,7 @@ backpressure"). `write` and `write_string` push bytes out over the channel
 immediately and return the number of bytes written (`0` if the connection is
 already gone or `data`/`str` was empty).
 
+<!-- check:skip signature fragment; `Session` is opaque here, bodies in ssh/server.odin -->
 ```odin
 write        :: proc(s: ^Session, data: []u8) -> int
 write_string :: proc(s: ^Session, str: string) -> int
@@ -146,12 +151,14 @@ write_string :: proc(s: ^Session, str: string) -> int
 
 ## Auth
 
+<!-- check:decls reformatted onto three lines; ssh/server.odin spells the enum out over several -->
 ```odin
 Auth_Method  :: enum u8 { None, Password, Publickey }
 Auth_Methods :: distinct bit_set[Auth_Method;u8]
 ALL_AUTH     :: Auth_Methods{.None, .Password, .Publickey}
 ```
 
+<!-- check:verbatim ssh/server.odin -->
 ```odin
 Auth_Request :: struct {
 	user:        string,
@@ -195,6 +202,7 @@ stops at its first key, because that key is accepted.
 
 ## Algorithm defaults
 
+<!-- check:decls realigned into one block; ssh/server.odin declares each constant separately with its own comment -->
 ```odin
 DEFAULT_KEX      :: "curve25519-sha256,curve25519-sha256@libssh.org"
 DEFAULT_CIPHERS  :: "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com"
@@ -220,6 +228,7 @@ neither algorithm is in the lists above.
 
 ## Limits
 
+<!-- check:decls field comments stripped from ssh/limits.odin's Limits/DEFAULT_LIMITS, which changes odin fmt's column alignment -->
 ```odin
 Limits :: struct {
 	max_sessions:        int,
@@ -258,7 +267,7 @@ is dropped before the handshake even starts, so it never reaches your
 `write_stall_seconds` apply to a connection already accepted.
 
 One consequence of `write_stall_seconds` reaches the `Backend` contract:
-[`write`](#write) may now return a **short count**, having sent fewer bytes
+[`write`](api-ssh.md#write) may now return a **short count**, having sent fewer bytes
 than it was given, where previously it blocked until all of them were away.
 `tui.run` handles this by repainting the whole screen on the next frame. A
 custom `Handler` that calls `ssh.write` directly must not assume the whole
@@ -266,6 +275,7 @@ slice was sent.
 
 ## Shutdown
 
+<!-- check:skip signature fragment; `Server` is opaque here, bodies in ssh/shutdown.odin -->
 ```odin
 shutdown      :: proc(srv: ^Server)
 shutting_down :: proc "contextless" () -> bool
@@ -317,6 +327,7 @@ whether it has been asked to stop.
 
 ## Identity
 
+<!-- check:decls realigned from ssh/identity.odin, which declares each constant on its own line with its own comment -->
 ```odin
 SECRET_SIZE :: 32
 ID_BYTES    :: 16
@@ -361,6 +372,7 @@ you have on file. Full rationale: [`./security.md`](./security.md).
 
 ## Audit
 
+<!-- check:skip signature fragment; `Audit_Event` is defined further down this page (ssh/audit.odin), not in this block -->
 ```odin
 Audit_Sink :: #type proc(e: Audit_Event)
 
@@ -376,6 +388,7 @@ every authentication attempt with its verdict, and every session's start and
 end. `ssh.audit_stderr` is a ready-made sink; anything matching `Audit_Sink`
 works.
 
+<!-- check:skip usage sketch, not a file-scope declaration -->
 ```odin
 ssh.serve(ssh.Config{handler = handle, audit = ssh.audit_stderr})
 ```
@@ -461,6 +474,7 @@ method first, as it always does; this server was configured with
 
 ### Writing your own sink
 
+<!-- check:verbatim ssh/audit.odin -->
 ```odin
 Audit_Event :: struct {
 	kind:     Audit_Kind,
@@ -497,6 +511,7 @@ buffer you own (`AUDIT_LINE_MAX` bytes is always enough, newline included).
 
 ## Host key
 
+<!-- check:skip signature fragment; `DEFAULT_HOSTKEYS` and the body are in ssh/server.odin -->
 ```odin
 ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool
 ```
@@ -522,6 +537,7 @@ Pre-creating the file avoids that — `fopen("wb")` on an existing file
 truncates but leaves the mode alone, so `0600` is the only mode the key is
 ever observable at.
 
+<!-- check:decls signature only; body in ssh/server.odin -->
 ```odin
 warn_if_world_readable :: proc(path: string)
 ```
@@ -541,6 +557,7 @@ private key.
 A handler that writes one line and disconnects — no `tui`, no pty tracking
 beyond what `ssh` already does for you:
 
+<!-- check:file -->
 ```odin
 package main
 

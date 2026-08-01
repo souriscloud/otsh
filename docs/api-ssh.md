@@ -146,7 +146,18 @@ Auth_Request :: struct {
 What an `Authenticator` is told. For `.Publickey`, the key's signature has
 already been verified — unverified probes never reach application code.
 
-*ssh/server.odin:69*
+Example:
+
+```odin
+authenticate :: proc(req: ssh.Auth_Request) -> bool {
+	if req.method == .Publickey {
+		return req.fingerprint == allowed_fingerprint
+	}
+	return false
+}
+```
+
+*ssh/server.odin:78*
 
 ### `Authenticator`
 
@@ -166,7 +177,15 @@ If you want a members-only app, do not reject here. Accept the key, take the
 inside the app. They are equally excluded and you learn exactly one key.
 See examples/members.
 
-*ssh/server.odin:93*
+Example:
+
+```odin
+authenticate :: proc(req: ssh.Auth_Request) -> bool {
+	return true // accept everyone; authorize inside the app instead
+}
+```
+
+*ssh/server.odin:108*
 
 ### `Config`
 
@@ -216,7 +235,17 @@ Config :: struct {
 How to run the server. Every field has a documented default, so the zero value
 is a working — if wide open — public server on port 2222.
 
-*ssh/server.odin:405*
+Example:
+
+```odin
+ssh.serve(ssh.Config{
+	host_key_path = "hostkey",
+	handler       = handler,
+	authenticate  = authenticate,
+})
+```
+
+*ssh/server.odin:465*
 
 ### `Handler`
 
@@ -289,7 +318,14 @@ Per field: 0 means "use the default below", negative means "no limit".
 That way the zero value of the whole struct is the safe default rather than
 an accidental free-for-all, and you can still opt out of any single limit.
 
-*ssh/limits.odin:16*
+Example:
+
+```odin
+limits := ssh.Limits{max_sessions = 64, max_per_ip = 4} // tighter than DEFAULT_LIMITS
+ssh.serve(ssh.Config{limits = limits, handler = handler})
+```
+
+*ssh/limits.odin:21*
 
 ### `Pty`
 
@@ -307,7 +343,7 @@ Pty :: struct {
 The terminal geometry the client asked for. No pseudo-terminal is actually
 allocated — this is just what the client told us about its own.
 
-*ssh/server.odin:138*
+*ssh/server.odin:153*
 
 ### `Server`
 
@@ -349,7 +385,7 @@ Server :: struct {
 Server-wide state, shared by every connection. Internal; reach it through
 `Session.server` only if you know what you are doing.
 
-*ssh/server.odin:97*
+*ssh/server.odin:112*
 
 ### `Session`
 
@@ -398,7 +434,7 @@ One connection. Created and freed by the accept loop; your `Handler` owns it
 for the duration of the call. All its string accessors borrow memory that
 dies with the session.
 
-*ssh/server.odin:150*
+*ssh/server.odin:165*
 
 ## Constants
 
@@ -424,14 +460,10 @@ AUDIT_LINE_MAX :: 320
 // because events fire from the accept loop and from every session thread at
 // once: two partial writes would interleave into a line no filter can parse.
 // Nothing here allocates, so it is safe on the connection's critical path.
-audit_stderr :: proc(e: Audit_Event) {
-	buf: [AUDIT_LINE_MAX]u8
-	// One byte held back so the newline always fits, even in the (unreachable)
-	// case of a line that filled the buffer.
-	n := len(audit_format(e, buf[:AUDIT_LINE_MAX - 1]))
-	buf[n] = '\n'
-	os.write(os.stderr, buf[:n + 1])
-}
+//
+// Example:
+//
+//	ssh.serve(ssh.Config{audit = ssh.audit_stderr, handler = handler})
 ```
 
 Upper bound on one formatted line, newline included. The longest line is a
@@ -486,7 +518,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 
 AEAD ciphers only: no CBC, no stream ciphers with separate MACs.
 
-*ssh/server.odin:455*
+*ssh/server.odin:515*
 
 ### `DEFAULT_HOST`
 
@@ -497,35 +529,27 @@ DEFAULT_PORT :: 2222
 // Host key path used when `Config.host_key_path` is empty.
 DEFAULT_HOST_KEY :: "hostkey"
 
-// Binds, listens, and accepts connections until the process exits, spawning one
-// thread per connection. Returns false if setup fails; otherwise blocks.
-// Refuses to continue on a libssh too old to have the Terrapin fix. The check
-// is at runtime, not compile time, because the shared library that gets loaded
-// is not necessarily the one the bindings were compiled against.
-@(private)
+// Guards `serve` against a libssh too old to have the Terrapin fix (see
+// `serve`'s own doc comment). The check is at runtime, not compile time,
 ```
 
 Defaults applied to a zero-valued Config field. sshtui fills these in too;
 they live here as well so calling ssh.serve directly cannot bind port 0.
 
-*ssh/server.odin:680*
+*ssh/server.odin:740*
 
 ### `DEFAULT_HOST_KEY`
 
 ```odin
 DEFAULT_HOST_KEY :: "hostkey"
 
-// Binds, listens, and accepts connections until the process exits, spawning one
-// thread per connection. Returns false if setup fails; otherwise blocks.
-// Refuses to continue on a libssh too old to have the Terrapin fix. The check
-// is at runtime, not compile time, because the shared library that gets loaded
-// is not necessarily the one the bindings were compiled against.
-@(private)
+// Guards `serve` against a libssh too old to have the Terrapin fix (see
+// `serve`'s own doc comment). The check is at runtime, not compile time,
 ```
 
 Host key path used when `Config.host_key_path` is empty.
 
-*ssh/server.odin:684*
+*ssh/server.odin:744*
 
 ### `DEFAULT_HOSTKEYS`
 
@@ -573,7 +597,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 
 Ed25519 only — matches the key `ensure_host_key` generates.
 
-*ssh/server.odin:459*
+*ssh/server.odin:519*
 
 ### `DEFAULT_KEX`
 
@@ -623,7 +647,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 Modern-only. Every one of these is an AEAD or an ETM MAC with a
 curve25519 exchange; nothing here depends on SHA-1, CBC, or NIST curves.
 
-*ssh/server.odin:453*
+*ssh/server.odin:513*
 
 ### `DEFAULT_LIMITS`
 
@@ -642,7 +666,7 @@ DEFAULT_LIMITS :: Limits {
 Applied to any `Limits` field left at zero. Deliberately conservative — raise
 them deliberately rather than discovering you had none.
 
-*ssh/limits.odin:56*
+*ssh/limits.odin:61*
 
 ### `DEFAULT_MACS`
 
@@ -691,7 +715,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 
 Encrypt-then-MAC only, SHA-2 only.
 
-*ssh/server.odin:457*
+*ssh/server.odin:517*
 
 ### `DEFAULT_PORT`
 
@@ -700,17 +724,13 @@ DEFAULT_PORT :: 2222
 // Host key path used when `Config.host_key_path` is empty.
 DEFAULT_HOST_KEY :: "hostkey"
 
-// Binds, listens, and accepts connections until the process exits, spawning one
-// thread per connection. Returns false if setup fails; otherwise blocks.
-// Refuses to continue on a libssh too old to have the Terrapin fix. The check
-// is at runtime, not compile time, because the shared library that gets loaded
-// is not necessarily the one the bindings were compiled against.
-@(private)
+// Guards `serve` against a libssh too old to have the Terrapin fix (see
+// `serve`'s own doc comment). The check is at runtime, not compile time,
 ```
 
 Port used when `Config.port` is zero.
 
-*ssh/server.odin:682*
+*ssh/server.odin:742*
 
 ### `DEFAULT_SHUTDOWN_SECONDS`
 
@@ -794,7 +814,7 @@ Upper bounds on client-supplied terminal geometry, matching tui's own limits.
 pty-req and window-change both carry uint32 dimensions chosen by the client;
 unclamped they are an allocation-size overflow and a remote crash.
 
-*ssh/server.odin:133*
+*ssh/server.odin:148*
 
 ### `MAX_PTY_ROWS`
 
@@ -813,7 +833,7 @@ Pty :: struct {
 }
 ```
 
-*ssh/server.odin:134*
+*ssh/server.odin:149*
 
 ### `SECRET_SIZE`
 
@@ -850,7 +870,7 @@ has no compile-time integer-to-string. tests/version_test.odin asserts the two
 spellings agree, since a bumped triple beside a stale string is exactly the
 mistake a release makes.
 
-*ssh/version.odin:48*
+*ssh/version.odin:54*
 
 ### `VERSION_MAJOR`
 
@@ -868,7 +888,16 @@ VERSION_PATCH :: 0
 VERSION :: "0.2.0"
 ```
 
-*ssh/version.odin:38*
+The first of the three numbers described above. Assert against it at
+compile time if your app needs a particular API:
+
+Example:
+
+```odin
+#assert(ssh.VERSION_MAJOR == 0 && ssh.VERSION_MINOR >= 1)
+```
+
+*ssh/version.odin:44*
 
 ### `VERSION_MINOR`
 
@@ -885,7 +914,7 @@ VERSION_PATCH :: 0
 VERSION :: "0.2.0"
 ```
 
-*ssh/version.odin:39*
+*ssh/version.odin:45*
 
 ### `VERSION_PATCH`
 
@@ -901,7 +930,7 @@ VERSION_PATCH :: 0
 VERSION :: "0.2.0"
 ```
 
-*ssh/version.odin:40*
+*ssh/version.odin:46*
 
 ## Procedures
 
@@ -933,7 +962,13 @@ because events fire from the accept loop and from every session thread at
 once: two partial writes would interleave into a line no filter can parse.
 Nothing here allocates, so it is safe on the connection's critical path.
 
-*ssh/audit.odin:174*
+Example:
+
+```odin
+ssh.serve(ssh.Config{audit = ssh.audit_stderr, handler = handler})
+```
+
+*ssh/audit.odin:178*
 
 ### `ensure_host_key`
 
@@ -945,7 +980,7 @@ Creates the host key if it does not exist yet — the SSH equivalent of a TLS
 certificate. Clients pin it in ~/.ssh/known_hosts, so it must be stable
 across restarts.
 
-*ssh/server.odin:464*
+*ssh/server.odin:524*
 
 ### `fingerprint`
 
@@ -956,7 +991,15 @@ fingerprint :: proc "contextless" (s: ^Session) -> string
 SHA256 fingerprint of the key the client authenticated with, or "" if they
 did not use one. Stable across connections — use it as an account id.
 
-*ssh/server.odin:204*
+Example:
+
+```odin
+handler :: proc(s: ^ssh.Session) {
+	fp := ssh.fingerprint(s) // "" unless the client used a key
+}
+```
+
+*ssh/server.odin:237*
 
 ### `id`
 
@@ -968,7 +1011,15 @@ Pseudonymous account id: HMAC(server secret, fingerprint). Empty unless an
 identity secret is configured and the client used a key. Store this, not the
 fingerprint. See identity.odin.
 
-*ssh/server.odin:217*
+Example:
+
+```odin
+handler :: proc(s: ^ssh.Session) {
+	account := ssh.id(s) // "" unless Config.identity_secret is set
+}
+```
+
+*ssh/server.odin:256*
 
 ### `ids_equal`
 
@@ -979,7 +1030,7 @@ ids_equal :: proc "contextless" (a, b: string) -> bool
 Compares two ids without leaking where they differ via timing. Use this
 rather than `==` when checking an id against a stored one.
 
-*ssh/identity.odin:106*
+*ssh/identity.odin:113*
 
 ### `key_type`
 
@@ -990,7 +1041,7 @@ key_type :: proc "contextless" (s: ^Session) -> string
 The verified key's algorithm, e.g. "ssh-ed25519". Empty unless public-key
 auth was used.
 
-*ssh/server.odin:210*
+*ssh/server.odin:243*
 
 ### `load_or_create_secret`
 
@@ -1003,7 +1054,16 @@ exactly like the host key: back it up, keep it 0600, never commit it.
 Losing it does not leak anything — it just re-pseudonymises everybody, which
 means every user looks like a new user.
 
-*ssh/identity.odin:39*
+Most apps just set Config.identity_secret and never call this directly.
+It exists for tooling that needs the secret without starting a server:
+
+Example:
+
+```odin
+secret, ok := ssh.load_or_create_secret("identity-secret")
+```
+
+*ssh/identity.odin:46*
 
 ### `pseudonym`
 
@@ -1015,7 +1075,7 @@ Stable per-server id for a verified key fingerprint. Writes into `dst`
 (needs ID_SIZE bytes) and returns a string viewing it, so this allocates
 nothing and can run on a session thread without touching an allocator.
 
-*ssh/identity.odin:81*
+*ssh/identity.odin:88*
 
 ### `read`
 
@@ -1031,7 +1091,17 @@ actually block for us — it returns immediately every time, which would spin
 a core per session. So libssh gets to do the parsing while we do the waiting,
 on the session socket directly.
 
-*ssh/server.odin:244*
+Example:
+
+```odin
+buf: [4096]u8
+n, ok := ssh.read(s, buf[:], 100) // waits up to 100ms
+if !ok {
+	return // connection is gone
+}
+```
+
+*ssh/server.odin:291*
 
 ### `remote_addr`
 
@@ -1041,7 +1111,7 @@ remote_addr :: proc "contextless" (s: ^Session) -> string
 
 Numeric peer address, no reverse DNS.
 
-*ssh/server.odin:222*
+*ssh/server.odin:261*
 
 ### `serve`
 
@@ -1049,7 +1119,23 @@ Numeric peer address, no reverse DNS.
 serve :: proc(cfg: Config) -> bool
 ```
 
-*ssh/server.odin:709*
+Binds, listens, and accepts connections until the process exits, spawning one
+thread per connection. Returns false if setup fails; otherwise blocks.
+Refuses to continue on a libssh too old to have the Terrapin fix.
+
+Most apps want `sshtui.serve`, which adapts a `tui.App` for you. Use this
+directly only when working with the byte stream yourself:
+
+Example:
+
+```odin
+handler :: proc(s: ^ssh.Session) {
+	ssh.write_string(s, fmt.tprintf("hello, %s\r\n", ssh.user(s)))
+}
+ssh.serve(ssh.Config{handler = handler})
+```
+
+*ssh/server.odin:781*
 
 ### `shutdown`
 
@@ -1061,7 +1147,17 @@ Asks `srv` to stop: the accept loop exits, connected sessions are told their
 input has finished, and `serve` returns once they are gone or the deadline
 passes. Safe to call from any thread, including from inside a Handler.
 
-*ssh/shutdown.odin:60*
+Example:
+
+```odin
+handler :: proc(s: ^ssh.Session) {
+	if ssh.user(s) == "admin-stop" {
+		ssh.shutdown(s.server) // ask the whole server to stop
+	}
+}
+```
+
+*ssh/shutdown.odin:68*
 
 ### `shutting_down`
 
@@ -1083,7 +1179,7 @@ size :: proc "contextless" (s: ^Session) -> (cols, rows: int)
 Current terminal geometry in cells, falling back to 80x24 if the client never
 said.
 
-*ssh/server.odin:228*
+*ssh/server.odin:267*
 
 ### `take_resize`
 
@@ -1093,7 +1189,7 @@ take_resize :: proc "contextless" (s: ^Session) -> bool
 
 True exactly once after each window resize.
 
-*ssh/server.odin:395*
+*ssh/server.odin:447*
 
 ### `term`
 
@@ -1103,7 +1199,15 @@ term :: proc "contextless" (s: ^Session) -> string
 
 The client's `$TERM`, e.g. "xterm-256color". Empty if no pty was requested.
 
-*ssh/server.odin:198*
+Example:
+
+```odin
+handler :: proc(s: ^ssh.Session) {
+	t := ssh.term(s) // "xterm-256color", "", ...
+}
+```
+
+*ssh/server.odin:225*
 
 ### `user`
 
@@ -1114,7 +1218,15 @@ user :: proc "contextless" (s: ^Session) -> string
 The username the client offered. Client-chosen and unverified — never use it
 as identity; use `id` instead.
 
-*ssh/server.odin:193*
+Example:
+
+```odin
+handler :: proc(s: ^ssh.Session) {
+	name := ssh.user(s) // client-chosen; do not treat it as verified identity
+}
+```
+
+*ssh/server.odin:214*
 
 ### `warn_if_world_readable`
 
@@ -1151,7 +1263,14 @@ cope with a short write: `tui.run` repaints in full on the next frame, since
 a partially sent frame leaves its diff baseline describing a screen the
 terminal is not showing.
 
-*ssh/server.odin:347*
+Example:
+
+```odin
+msg := "hello\r\n"
+n := ssh.write(s, transmute([]u8)msg)
+```
+
+*ssh/server.odin:399*
 
 ### `write_string`
 
@@ -1161,4 +1280,4 @@ write_string :: proc(s: ^Session, str: string) -> int
 
 `write` for a string.
 
-*ssh/server.odin:390*
+*ssh/server.odin:442*

@@ -6,6 +6,12 @@ package tui
 import "core:time"
 
 // A source of terminal bytes and a sink for them.
+//
+// Wiring in a transport that is not ssh (which already provides one):
+//
+// Example:
+//
+//	p.backend = tui.Backend{data = conn, write = my_write, poll = my_poll, size = my_size}
 Backend :: struct {
 	data:  rawptr,
 	// Writes rendered output. Returns bytes written.
@@ -32,6 +38,16 @@ Tick :: struct {
 }
 
 // Everything `update` can receive.
+//
+// Example:
+//
+//	m := (^Model)(p.app.data)
+//	#partial switch e in msg {
+//	case tui.Key:
+//		if e.kind == .Rune && e.r == 'q' {tui.quit(p)}
+//	case tui.Resize:
+//		m.cols, m.rows = e.cols, e.rows
+//	}
 Msg :: union {
 	Key,
 	Mouse,
@@ -41,6 +57,10 @@ Msg :: union {
 
 // Your application: a model pointer plus up to three callbacks. `init` is
 // optional; `update` handles messages, `view` paints a complete frame.
+//
+// Example:
+//
+//	app := tui.App{data = m, update = update, view = view}
 App :: struct {
 	data:   rawptr,
 	init:   proc(p: ^Program),
@@ -68,6 +88,12 @@ Program :: struct {
 }
 
 // Ends the loop after the current tick, before the next frame is drawn.
+//
+// Example:
+//
+//	if k, ok := msg.(tui.Key); ok && k.kind == .Esc {
+//		tui.quit(p)
+//	}
 quit :: proc(p: ^Program) {
 	p.quit = true
 }
@@ -106,6 +132,13 @@ emit :: proc(p: ^Program, s: string) {
 // Runs `app` until it quits or the connection drops. Sets up the alternate
 // screen, hides the cursor, disables autowrap, and restores all of it on exit.
 // Blocks for the lifetime of the app.
+//
+// Example:
+//
+//	l: tui.Local
+//	p: tui.Program
+//	p.backend = tui.local_backend(&l)
+//	tui.run(&p, tui.App{data = m, update = update, view = view})
 run :: proc(p: ^Program, app: App) {
 	p.app = app
 	if p.fps <= 0 {p.fps = 30}

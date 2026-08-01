@@ -30,8 +30,8 @@ step "packages + default example" ./build.sh
 for ex in examples/*/; do
 	step "example $(basename "$ex")" ./build.sh "$ex"
 done
-rm -f tracker whoami members guestbook stopwatch
-rm -f tracker.exe whoami.exe members.exe guestbook.exe stopwatch.exe *.pdb
+rm -f tracker whoami members guestbook stopwatch notes
+rm -f tracker.exe whoami.exe members.exe guestbook.exe stopwatch.exe notes.exe *.pdb
 
 echo "tests"
 if out=$(./test.sh 2>&1); then
@@ -45,6 +45,7 @@ fi
 echo "docs"
 step "api reference is current" python3 docs/tools/gen_api.py --check
 step "site builds and validates" python3 docs/tools/build_site.py --check
+step "doc code samples are real" python3 docs/tools/check_examples.py --strict
 
 echo "bindings"
 # Compares libssh/libssh.odin against the libssh headers installed here. Skips

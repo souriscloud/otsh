@@ -45,6 +45,7 @@ forking the user's login shell into it. `ssh/server.odin:cb_pty_request`
 answers the same request by recording geometry and returning `ls.OK` —
 nothing is allocated:
 
+<!-- check:skip simplified sketch of cb_pty_request's effect (elides term/clamp); see ssh/server.odin for the literal implementation -->
 ```odin
 s.pty = Pty{cols = int(width), rows = int(height), px = ..., py = ..., present = true}
 return ls.OK

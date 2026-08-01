@@ -44,6 +44,7 @@ other bundled examples (`tracker` is 2222, `whoami` is 2223, `members` is 2226).
 
 Every otsh app is the same three procs wired together with `sshtui.serve`:
 
+<!-- check:file -->
 ```odin
 package main
 
@@ -143,6 +144,7 @@ back at your shell prompt exactly as it was before you connected.
 A guestbook is a list of messages. Give it a shape and some fake entries to
 look at before worrying about where real ones come from:
 
+<!-- check:decls tutorial-stage seed data, not the final examples/guestbook/main.odin -->
 ```odin
 Message :: struct {
 	author: string,
@@ -158,6 +160,7 @@ MESSAGES := []Message {
 
 and draw them inside a bordered box:
 
+<!-- check:skip references `MESSAGES` from the previous block; fragment, not standalone -->
 ```odin
 view :: proc(p: ^tui.Program, sc: ^tui.Screen) {
 	defer free_all(context.temp_allocator)
@@ -211,6 +214,7 @@ box containing three fake messages, each rendered as `author: text`.
 
 A list you can't move through isn't a list, it's a paragraph. Add a cursor:
 
+<!-- check:decls tutorial-stage Model, not the final examples/guestbook/main.odin -->
 ```odin
 Model :: struct {
 	cursor: int,
@@ -219,6 +223,7 @@ Model :: struct {
 
 and handle the keys that move it:
 
+<!-- check:skip references `Model` and `MESSAGES` from earlier blocks; fragment, not standalone -->
 ```odin
 update :: proc(p: ^tui.Program, msg: tui.Msg) {
 	m := (^Model)(p.app.data)
@@ -247,6 +252,7 @@ update :: proc(p: ^tui.Program, msg: tui.Msg) {
 
 and highlight the selected row in `view` by reversing it:
 
+<!-- check:skip statement fragment from view's row-drawing loop, not a file-scope declaration -->
 ```odin
 st := tui.Style{fg = tui.ansi(15)}
 if i == m.cursor {st.attrs = {.Reverse}}
@@ -283,6 +289,7 @@ Reading a guestbook is half the app. Writing to it is the other half, and it
 needs a second mode: one where keys move the cursor, and one where keys
 build up a line of text. Add both:
 
+<!-- check:skip `Message` is defined in step 2's block above, not here; fragment, not standalone -->
 ```odin
 Mode :: enum {
 	Browse,
@@ -304,6 +311,7 @@ for `examples/tracker`'s `View` enum — there it's three screens (`List`,
 `Detail`, `Compose`) dispatching draw calls, here it's two modes dispatching
 key handling:
 
+<!-- check:skip `Model`/`Mode`/`Message` are defined in the block above; fragment, not standalone -->
 ```odin
 update :: proc(p: ^tui.Program, msg: tui.Msg) {
 	m := (^Model)(p.app.data)
@@ -369,6 +377,7 @@ The key decoder hands you one `tui.Key` per keystroke, never a whole line, so
 building a text field means accumulating runes into a buffer yourself
 (`docs/cookbook.md` recipe 3 is this exact pattern):
 
+<!-- check:skip references `Model`/`Message` from earlier blocks; fragment, not standalone -->
 ```odin
 insert_rune :: proc(m: ^Model, r: rune) {
 	b, n := utf8.encode_rune(r)
@@ -414,6 +423,7 @@ the first one's text change.
 You also need a real, visible cursor, since none of the drawing primitives
 draw one for you:
 
+<!-- check:skip statement fragment from view, not a file-scope declaration -->
 ```odin
 if m.mode == .Compose {
 	text := string(m.buf[:m.buf_len])
@@ -439,6 +449,7 @@ coordinate system this whole package draws in.
 Finish by seeding each new connection's own list and freeing it on the way
 out:
 
+<!-- check:skip `Message`/`Model` are defined in earlier blocks; fragment, not standalone -->
 ```odin
 SEED := []Message {
 	{"ada", "first!"},
@@ -495,6 +506,7 @@ duration around each read or write.
 
 Move `messages` out of `Model` and up to package scope:
 
+<!-- check:decls -->
 ```odin
 import "core:sync"
 
@@ -560,6 +572,7 @@ field and its per-connection seed entirely — a fresh server now starts with
 an honest, empty guestbook rather than three fake rows duplicated into every
 new session:
 
+<!-- check:skip `Mode`/`message_count`/`message_at`/`add_message` are defined in earlier blocks; fragment, not standalone -->
 ```odin
 Model :: struct {
 	cursor:  int,
@@ -644,6 +657,7 @@ and only ever populated when the client actually proved possession of a key.
 
 Turn it on:
 
+<!-- check:skip `messages`/`Message`/`destroy` are defined in earlier blocks; fragment, not standalone -->
 ```odin
 main :: proc() {
 	messages = make([dynamic]Message, 0, 64)
@@ -678,6 +692,7 @@ through the rest of the agent.
 
 Now derive a display label from `info.id` and attach it to the model:
 
+<!-- check:skip `Mode` is defined in an earlier block; fragment, not standalone -->
 ```odin
 Model :: struct {
 	who:     string, // owned; short label derived from Info.id
@@ -712,6 +727,7 @@ destroy :: proc(app: tui.App) {
 
 and post with it instead of the placeholder:
 
+<!-- check:skip `Model`/`add_message` are defined in earlier blocks; fragment, not standalone -->
 ```odin
 commit_message :: proc(m: ^Model) {
 	text := strings.trim_space(string(m.buf[:m.buf_len]))
@@ -788,6 +804,7 @@ entries there is no way to see the older ones. Fix that with the
 offset-tracking viewport `docs/cookbook.md` recipe 1 describes, adapted onto
 `Model` directly instead of a separate `List` struct:
 
+<!-- check:skip `Mode` is defined in an earlier block; fragment, not standalone -->
 ```odin
 Model :: struct {
 	who:     string,
@@ -838,6 +855,7 @@ disagree about what's on screen. The cleanest way to guarantee they agree is
 to compute every layout number exactly once, in one proc, and call it from
 both places:
 
+<!-- check:verbatim examples/guestbook/main.odin -->
 ```odin
 MIN_W :: 44
 MIN_H :: 14
@@ -868,6 +886,7 @@ compute_layout :: proc(w, h: int) -> Layout {
 resizes it before dispatching anything else), and once from the `tui.Resize`
 message itself, using the new size it carries directly:
 
+<!-- check:skip `Model`/`Mode`/`compute_layout`/`clamp_scroll`/`message_count`/`move_cursor` are defined in earlier blocks; fragment, not standalone -->
 ```odin
 update :: proc(p: ^tui.Program, msg: tui.Msg) {
 	m := (^Model)(p.app.data)
@@ -926,6 +945,7 @@ The second problem — a terminal too small to lay anything out in, at all —
 gets a guard at the very top of `view`, before `compute_layout` is even
 called:
 
+<!-- check:skip `Model`/`MIN_W`/`MIN_H`/`compute_layout`/`message_count`/`clamp_scroll` are defined in earlier blocks; fragment, not standalone -->
 ```odin
 view :: proc(p: ^tui.Program, sc: ^tui.Screen) {
 	defer free_all(context.temp_allocator)
@@ -985,6 +1005,7 @@ paints over whatever was there before, and if the new string is shorter than
 the old one, whatever's left over from the old one stays on screen, stitched
 onto the end of the new text:
 
+<!-- check:skip `Mode`/`add_message` are defined in earlier blocks; fragment, not standalone -->
 ```odin
 Model :: struct {
 	who:         string,
@@ -1018,6 +1039,7 @@ Count both `confirm_ttl` and the blink accumulator down and up from
 `tui.Tick`, which carries `dt` — real elapsed seconds since the previous
 tick, not a frame counter:
 
+<!-- check:verbatim examples/guestbook/main.odin -->
 ```odin
 case tui.Tick:
 	m.blink += e.dt
@@ -1039,6 +1061,7 @@ how the frame loop is actually pacing itself.
 
 Use them in the footer:
 
+<!-- check:skip `Model`/`Layout` are defined in earlier blocks; fragment, not standalone -->
 ```odin
 draw_footer :: proc(sc: ^tui.Screen, m: ^Model, l: Layout) {
 	switch m.mode {
@@ -1076,6 +1099,7 @@ server as `SIGINT`). Check it once, at the top of `update`, above the
 mode dispatch, the same way `examples/tracker` checks it above its own
 `List`/`Detail`/`Compose` dispatch:
 
+<!-- check:skip `Model`/`Mode`/`browse_key`/`compose_key` are defined in earlier blocks; fragment, not standalone -->
 ```odin
 update :: proc(p: ^tui.Program, msg: tui.Msg) {
 	m := (^Model)(p.app.data)
@@ -1113,6 +1137,7 @@ either mode and the connection ends immediately, the same as `q`/`Esc`.
 This is exactly what's in `examples/guestbook/main.odin` after all eight
 steps:
 
+<!-- check:verbatim examples/guestbook/main.odin -->
 ```odin
 // guestbook — a shared guestbook served over SSH.
 //

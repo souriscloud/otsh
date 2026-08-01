@@ -23,6 +23,7 @@ which is called after every cursor move, after every resize, and after every
 tick — because the row count can change underneath you when another connection
 files or closes an issue:
 
+<!-- check:verbatim examples/tracker/main.odin -->
 ```odin
 // examples/tracker/main.odin
 viewport_rows :: proc(h: int) -> int {
@@ -45,6 +46,7 @@ clamp_view :: proc(m: ^Model, h: int) {
 
 Drawing then starts at the offset and stops when it runs out of rows or space:
 
+<!-- check:skip loop body fragment with a literal "..." elision; illustrates the drawing loop only -->
 ```odin
 for i in 0 ..< rows {
 	idx := m.offset + i
@@ -57,6 +59,7 @@ The single most common bug here is clamping only on keypress. Anything that
 changes the row count — a filter, a resize, another user's edit — has to
 re-clamp too, or the cursor silently points past the end.
 
+<!-- check:decls -->
 ```odin
 List :: struct {
 	items:  []string,
@@ -103,6 +106,7 @@ constants, and use the same value in both places.
 full-screen, and the compose form — behind one `View` enum and a field on the
 model:
 
+<!-- check:decls Model abridged with "// ..." to just the view field; full struct in examples/tracker/main.odin -->
 ```odin
 // examples/tracker/main.odin
 View :: enum {
@@ -121,6 +125,7 @@ Model :: struct {
 view — the same enum value picked twice, once for behavior and once for
 paint:
 
+<!-- check:verbatim examples/tracker/main.odin -->
 ```odin
 // update, examples/tracker/main.odin
 switch m.view {
@@ -133,6 +138,7 @@ case .Compose:
 }
 ```
 
+<!-- check:verbatim examples/tracker/main.odin -->
 ```odin
 // view, examples/tracker/main.odin
 switch m.view {
@@ -158,6 +164,7 @@ keystroke, with `kind == .Rune` carrying one decoded rune in `.r`. Building a
 text field means accumulating those into a buffer yourself and handling
 `.Backspace` by stepping back one *rune*, not one byte:
 
+<!-- check:decls -->
 ```odin
 import "core:unicode/utf8"
 
@@ -212,6 +219,7 @@ space bar to insert a literal space into the field, handle `.Space` here too.
 yourself against `Screen.w`/`Screen.h`. `examples/whoami/main.odin` and
 `examples/members/main.odin` both use the same formula:
 
+<!-- check:verbatim examples/whoami/main.odin -->
 ```odin
 // examples/whoami/main.odin
 w := min(sc.w - 4, 64)
@@ -229,6 +237,7 @@ just means the top of your box quietly doesn't get drawn.
 
 `draw_box` signature, for reference:
 
+<!-- check:skip signature fragment; `Screen`/`Style` are defined in tui/screen.odin, body there too -->
 ```odin
 draw_box :: proc(s: ^Screen, x, y, w, h: int, style: Style, b := BORDER_ROUND, title := "")
 ```
@@ -243,6 +252,7 @@ different glyph set is just another `Border{...}` literal.
 To paint a solid panel behind the box (useful with a translucent-looking
 background color), fill first, box second:
 
+<!-- check:skip usage sketch, not a file-scope declaration -->
 ```odin
 tui.fill_rect(sc, x, y, w, h, ' ', tui.Style{bg = tui.rgb(30, 28, 34)})
 tui.draw_box(sc, x, y, w, h, tui.Style{fg = tui.ansi(6)})
@@ -260,6 +270,7 @@ cover is state you keep *outside* the screen: a scroll offset was computed
 against the old height and is still that old number. So an app with a
 viewport has real work to do here. `examples/tracker/main.odin` re-clamps:
 
+<!-- check:verbatim examples/tracker/main.odin -->
 ```odin
 case tui.Resize:
 	clamp_view(m, e.rows)
@@ -272,6 +283,7 @@ from `e.cols`/`e.rows`; that is what the message is carrying.
 Layout numbers that depend on `sc.w`/`sc.h` are the part that genuinely needs
 no handler — the list/preview split in `draw_list`, say:
 
+<!-- check:verbatim examples/tracker/main.odin -->
 ```odin
 split := min(max(s.w * 3 / 5, 34), s.w - 22)
 ```
@@ -283,6 +295,7 @@ regardless of whether anything resized.
 show one clipped line and return. `examples/tracker/main.odin`'s guard — two
 file-scope constants, and the first thing `view` does:
 
+<!-- check:skip elides the enclosing `view` proc signature with "// ... in view:"; see examples/tracker/main.odin -->
 ```odin
 MIN_W :: 56
 MIN_H :: 16
@@ -318,12 +331,14 @@ word rather than the whole sentence).
 alongside `frame: u64`, a plain counter. Drive animation off `dt`, accumulated
 into your own state, never off `frame`:
 
+<!-- check:verbatim examples/tracker/main.odin -->
 ```odin
 // examples/tracker/main.odin
 case tui.Tick:
 	m.spinner += e.dt
 ```
 
+<!-- check:verbatim examples/tracker/main.odin -->
 ```odin
 // draw_header, examples/tracker/main.odin — m.spinner turned into motion
 dots := [4]string{"·  ", "·· ", "···", " ··"}
@@ -352,6 +367,7 @@ too fast. (An earlier version of the tracker did exactly this.) Shared state
 wants a wall-clock reading instead: stamp the change with `time.tick_now()`,
 compare with `time.tick_since` when drawing:
 
+<!-- check:skip stitched from three separate spots in examples/tracker/main.odin (edit_issue, just_changed, draw_list); not contiguous -->
 ```odin
 // examples/tracker/main.odin — edit_issue stamps, draw_list compares
 issue.touched = time.tick_now()
@@ -374,6 +390,7 @@ if just_changed(issue) {
 A toast needs a message, a countdown, and — the part that's easy to miss — a
 draw path that doesn't overprint whatever it's replacing.
 
+<!-- check:decls -->
 ```odin
 Toast :: struct {
 	buf: [96]u8,
@@ -409,6 +426,7 @@ The fix is not to overprint at all — pick *one* string for that line and draw
 only it, which is what `examples/tracker/main.odin`'s `draw_footer` actually
 does:
 
+<!-- check:skip reformatted (single-line Style literal) from examples/tracker/main.odin's draw_footer; not literally contiguous -->
 ```odin
 // draw_footer, examples/tracker/main.odin
 left := ""
@@ -442,6 +460,7 @@ roster, a leaderboard, a counter — has to live outside the per-connection
 it at the same time. That means a `sync.Mutex`, exactly as
 `examples/members/main.odin` does it:
 
+<!-- check:skip recognise abridged with "// ... enrol a new member"; see examples/members/main.odin for the complete proc -->
 ```odin
 // examples/members/main.odin
 roster: map[string]Member
@@ -486,6 +505,7 @@ but it is still wrong.
 Clone before you store. For a single field, `strings.clone` is enough, which is
 what `examples/members/main.odin` does:
 
+<!-- check:skip fields elided with "..."; see examples/members/main.odin's recognise for the complete literal -->
 ```odin
 m := Member{id = strings.clone(id), ...}
 roster[m.id] = m
@@ -494,6 +514,7 @@ roster[m.id] = m
 To keep a whole `Info` past the connection, use `sshtui.clone_info` and free it
 later with `sshtui.delete_info`:
 
+<!-- check:skip usage sketch with a "// ..." elision, referencing an `info` from surrounding context -->
 ```odin
 saved := sshtui.clone_info(info)
 // ...
@@ -509,6 +530,7 @@ that has to own its key.
 
 Three ways to make a `tui.Color`, all in `tui/screen.odin`:
 
+<!-- check:skip signature fragment; `Color` is defined in tui/screen.odin, bodies there too -->
 ```odin
 no_color :: proc "contextless" () -> Color            // Color{mode = .Default}
 ansi     :: proc "contextless" (idx: u8) -> Color      // 256-color palette index
@@ -517,6 +539,7 @@ rgb      :: proc "contextless" (r, g, b: u8) -> Color  // 24-bit true color
 
 `Style` is `{fg, bg: Color, attrs: Attrs}`, and `Attrs` is a `bit_set` over:
 
+<!-- check:decls condensed onto fewer lines than tui/screen.odin -->
 ```odin
 Attr :: enum u8 {
 	Bold, Dim, Italic, Underline, Reverse, Strike,
@@ -539,6 +562,7 @@ exactly as it does outside your app. Only set an explicit `bg` where you mean
 to override it on purpose — a selected row, say, the way
 `examples/tracker/main.odin` highlights the cursor:
 
+<!-- check:skip statement fragment with a "// ..." elision, not a file-scope declaration; see examples/tracker/main.odin's draw_list -->
 ```odin
 // draw_list, examples/tracker/main.odin
 if selected {
@@ -566,6 +590,7 @@ CJK, Hangul, and most emoji (see the range table in `tui/width_table.odin`).
 `WIDE_CONT` marker into the cell to the right of any 2-wide glyph so the
 diff renderer never lands a write in the middle of one:
 
+<!-- check:skip reformatted (one-line if) from tui/screen.odin's draw_text; not literally contiguous -->
 ```odin
 // draw_text, tui/screen.odin
 for r in text {
@@ -583,6 +608,7 @@ a wide CJK character or most emoji are multiple UTF-8 bytes but only 2
 misaligns. `examples/tracker/main.odin`'s header right-aligns a status string
 this way:
 
+<!-- check:verbatim examples/tracker/main.odin -->
 ```odin
 // draw_header, examples/tracker/main.odin
 right := fmt.tprintf("%d open · %d connected", open_count(), conns)
@@ -604,6 +630,7 @@ if you're driving the loop yourself); `sshtui` forwards it into the `Program`
 in both `on_session` and `run_local`. When set, `tui.run` sends the mouse
 tracking escape sequences on entry and turns them back off on exit:
 
+<!-- check:verbatim tui/tui.odin -->
 ```odin
 // tui/tui.odin
 if p.mouse {
@@ -613,6 +640,7 @@ if p.mouse {
 
 Events arrive as `tui.Mouse`, one of the cases in `tui.Msg`:
 
+<!-- check:decls condensed onto fewer lines than tui/key.odin -->
 ```odin
 // tui/key.odin
 Mouse_Kind :: enum u8 {
@@ -634,6 +662,7 @@ a click against a list is the same arithmetic as laying it out —
 `examples/tracker/main.odin` uses wheel events to move the menu cursor without
 even needing coordinates:
 
+<!-- check:verbatim examples/tracker/main.odin -->
 ```odin
 // update, examples/tracker/main.odin
 case tui.Mouse:
@@ -651,6 +680,7 @@ case tui.Mouse:
 To hit-test a `Press` against the scrollable list from §1, compare `m.y`
 against the same `y`/`h` you rendered with:
 
+<!-- check:skip illustrative combination of a Mouse case with the List type from recipe 1; not lifted from a single file -->
 ```odin
 case tui.Mouse:
 	if m.kind == .Press && m.y >= list_y && m.y < list_y + viewport_h {
@@ -669,6 +699,7 @@ hover tracking with no button pressed, this backend doesn't send it; treat
 
 `tui.quit(p)` just sets `Program.quit = true`:
 
+<!-- check:verbatim tui/tui.odin -->
 ```odin
 quit :: proc(p: ^Program) {
 	p.quit = true
@@ -693,9 +724,10 @@ control byte into `Key{kind = .Rune, r = rune('a' + b - 1), ctrl = true}`, so
 byte `0x03` becomes `Key{kind = .Rune, r = 'c', ctrl = true}`. Handle it like
 any other key, checked early, the way every bundled example does:
 
+<!-- check:verbatim examples/tracker/main.odin -->
 ```odin
 // update, examples/tracker/main.odin
-if m.ctrl && m.r == 'c' {
+if e.ctrl && e.r == 'c' {
 	tui.quit(p)
 	return
 }
@@ -710,6 +742,7 @@ alternate screen left (`tui/tui.odin`). One layer up, `sshtui.on_session`'s
 `create` allocated gets freed exactly once, on every exit path, without your
 app code having to distinguish "user quit" from "connection dropped":
 
+<!-- check:verbatim examples/whoami/main.odin -->
 ```odin
 destroy :: proc(app: tui.App) {
 	free(app.data)
@@ -719,3 +752,250 @@ destroy :: proc(app: tui.App) {
 If `create` allocated more than the one top-level struct — a `[dynamic]`,
 a `map`, a cloned string per §8 — free those inside `destroy` too; `free`
 only releases the block `new(Model)` returned, not whatever it points into.
+
+## 13. A modal confirm dialog
+
+A modal needs three things: something that visually separates it from
+whatever is behind it, a box on top, and a key handler that swallows input
+while it is open — press any key during a confirmation and it must never
+reach whatever `update` was doing before the modal opened, or the
+confirmation is bypassed by accident.
+
+There is no real transparency here. A terminal cell has no alpha channel, so
+"dimming" the backdrop means painting the whole screen with a plain, darker
+`Style{bg = ...}` before drawing the box on top — the same `fill_rect`-then-
+`draw_box` order recipe 4 uses for a solid panel, just covering the full
+screen instead of one box's footprint:
+
+<!-- check:decls -->
+```odin
+Confirm :: struct {
+	active:  bool,
+	message: string,
+}
+
+confirm_open :: proc(c: ^Confirm, message: string) {
+	c.active = true
+	c.message = message
+}
+
+// Reports whether the dialog consumed the key (so the caller's own key
+// handling should be skipped this tick) and, if it just closed, what the
+// user chose.
+confirm_key :: proc(c: ^Confirm, k: tui.Key) -> (consumed, closed, yes: bool) {
+	if !c.active {
+		return false, false, false
+	}
+	#partial switch k.kind {
+	case .Rune:
+		switch k.r {
+		case 'y', 'Y':
+			c.active = false
+			return true, true, true
+		case 'n', 'N':
+			c.active = false
+			return true, true, false
+		}
+	case .Esc:
+		c.active = false
+		return true, true, false
+	}
+	return true, false, false // swallow everything else while open
+}
+
+confirm_view :: proc(sc: ^tui.Screen, c: ^Confirm) {
+	if !c.active {return}
+
+	// No alpha channel in a terminal: "dimming" is a plain darker fill, not a
+	// blend with whatever fill_rect is painting over.
+	tui.fill_rect(sc, 0, 0, sc.w, sc.h, ' ', tui.Style{bg = tui.rgb(10, 10, 14)})
+
+	w := min(tui.text_width(c.message) + 8, max(sc.w - 4, 10))
+	h := 4
+	x := max((sc.w - w) / 2, 0)
+	y := max((sc.h - h) / 2, 0)
+	tui.draw_box(sc, x, y, w, h, tui.Style{fg = tui.ansi(3)}, tui.BORDER_ROUND, " confirm ")
+	tui.draw_text_clipped(sc, x + 2, y + 1, w - 4, c.message, tui.Style{fg = tui.ansi(15)})
+	tui.draw_text(sc, x + 2, y + 2, "y yes · n no · esc cancel", tui.Style{fg = tui.ansi(8)})
+}
+```
+
+Wire the key handler in above your normal dispatch — the same position
+§5's Ctrl+C check occupies, and for the same reason: a check that only fires
+conditionally has to sit above whatever it is meant to override, or a mode
+added later slips in front of it by accident. Draw the dialog last in
+`view`, so it paints over the frame instead of getting painted over by it:
+
+<!-- check:skip usage sketch spanning update and view; Confirm/confirm_key/confirm_view are defined above -->
+```odin
+// In update, above your normal dispatch:
+#partial switch e in msg {
+case tui.Key:
+	if consumed, closed, yes := confirm_key(&m.confirm, e); consumed {
+		if closed && yes {
+			// ... the confirmed action
+		}
+		return
+	}
+	// ... your normal key handling
+}
+
+// In view, drawn last:
+confirm_view(sc, &m.confirm)
+```
+
+`confirm_key` returning `true` on every key while `c.active` — not just `y`/
+`n`/`Esc` — is what makes the modal actually modal: an unrecognised keystroke
+while it's open still has to be swallowed, or it leaks through to the
+handling underneath and moves a cursor the user can no longer see.
+
+## 14. A progress bar / gauge
+
+A gauge is `fill_rect` called twice — once for the track, once for however
+much of it is filled — plus a percentage label that has to sit on whichever
+half it lands on, not on whatever background `draw_text` defaults to.
+
+That last part is the trap. `draw_text`/`set_cell` replace a cell's rune
+*and* style together; nothing about them blends with what was there before.
+A label drawn with an unset background paints the terminal's own default
+background under its own characters, not the gauge color beneath them — the
+same "a cell is fully replaced, not merged" fact recipe 13's backdrop relies
+on, just biting the other way here. The fix is to give each label rune the
+background of whichever side of the fill boundary its column falls on,
+walking columns the same `col += rune_width(r)` way `draw_text` itself does
+(recipe 10):
+
+<!-- check:decls -->
+```odin
+import "core:fmt"
+
+// frac is a plain 0..1 fraction the caller owns; tui has no notion of
+// progress of its own.
+gauge_draw :: proc(sc: ^tui.Screen, x, y, w: int, frac: f64, track, fill: tui.Style) {
+	f := clamp(frac, 0, 1)
+	filled := int(f64(w) * f + 0.5)
+
+	tui.fill_rect(sc, x, y, w, 1, ' ', track)
+	if filled > 0 {
+		tui.fill_rect(sc, x, y, filled, 1, ' ', fill)
+	}
+
+	label := fmt.tprintf("%d%%", int(f * 100 + 0.5))
+	lx := x + (w - tui.text_width(label)) / 2
+	cx := lx
+	for r in label {
+		bg := cx < x + filled ? fill.bg : track.bg
+		tui.set_cell(sc, cx, y, r, tui.Style{fg = tui.ansi(15), bg = bg, attrs = {.Bold}})
+		cx += tui.rune_width(r)
+	}
+}
+```
+
+Call it once per frame with whatever fraction your model is tracking — a
+download, a long-running import, time left on a countdown:
+
+<!-- check:skip usage sketch; sc/m are the caller's Screen/Model -->
+```odin
+gauge_draw(sc, 2, 5, 40, m.progress, tui.Style{bg = tui.rgb(40, 38, 48)}, tui.Style{bg = tui.rgb(80, 160, 90)})
+```
+
+Nothing here animates the fill on its own — `gauge_draw` reads `m.progress`
+fresh every frame, so driving the number up over time is ordinary `dt`-based
+state in `update`, the same shape recipe 6 uses for anything else that has to
+move at a rate independent of frame timing.
+
+## 15. A tab bar with Tab/Shift_Tab focus cycling
+
+`Key_Kind` carries dedicated `.Tab` and `.Shift_Tab` values, so cycling
+forward and backward through a set of tabs needs no invented key combination
+for "previous" — `.Shift_Tab` decodes from the standard CSI `Z` ("back-tab")
+escape sequence (`tui/key.odin`), the same way `.Tab` decodes from a bare
+`0x09` byte.
+
+<!-- check:decls -->
+```odin
+Tabs :: struct {
+	labels: []string,
+	active: int,
+}
+
+tabs_key :: proc(t: ^Tabs, k: tui.Key) -> bool {
+	n := len(t.labels)
+	if n == 0 {return false}
+	#partial switch k.kind {
+	case .Tab:
+		t.active = (t.active + 1) % n
+		return true
+	case .Shift_Tab:
+		t.active = (t.active - 1 + n) % n
+		return true
+	}
+	return false
+}
+
+tabs_view :: proc(sc: ^tui.Screen, t: ^Tabs, x, y: int) {
+	cx := x
+	for label, i in t.labels {
+		st := tui.Style{fg = tui.ansi(8)}
+		if i == t.active {
+			st = tui.Style{fg = tui.ansi(15), attrs = {.Bold, .Underline}}
+		}
+		cx += tui.draw_text(sc, cx, y, label, st)
+		cx += tui.draw_text(sc, cx, y, "  ", tui.Style{})
+	}
+}
+```
+
+`(t.active - 1 + n) % n` rather than `(t.active - 1) % n` is the part worth
+noticing: `t.active` is always in `[0, n)` going in, so adding `n` before the
+modulo keeps the intermediate value non-negative no matter what Odin's `%`
+does with a negative left-hand side, instead of relying on it.
+
+`tabs_key` returning `false` for anything that isn't `.Tab`/`.Shift_Tab` lets
+it slot into the same "try the widget first, fall through to normal
+handling" shape recipe 3's `field_key` uses — call it the same way, before
+whatever `.Tab` would otherwise do, which by default is nothing: `tui` gives
+the key no meaning of its own. If a tab's own content includes a text field
+from recipe 3, decide which of the two gets first look at `.Tab` yourself;
+nothing here arbitrates that for you.
+
+## 16. A debug HUD from Program's own counters
+
+`Program` already counts the things worth watching while an app misbehaves —
+`frame`, `elapsed`, `bytes_out`, `bytes_in` — without any help from your
+`Model`. A HUD is just those four numbers, drawn in a corner every frame,
+read from the same `^Program` your `view` proc is already handed:
+
+<!-- check:decls -->
+```odin
+import "core:fmt"
+
+hud_draw :: proc(sc: ^tui.Screen, p: ^tui.Program) {
+	// frame / elapsed is the average rate since the loop started, not the
+	// instantaneous one — good enough for a debug corner, misleading if
+	// you're hunting a momentary stall.
+	fps := p.elapsed > 0 ? f64(p.frame) / p.elapsed : 0
+	line := fmt.tprintf(
+		"frame %d  %.1ffps  out %db  in %db",
+		p.frame, fps, p.bytes_out, p.bytes_in,
+	)
+	x := sc.w - tui.text_width(line) - 1
+	if x < 0 {return}
+	tui.draw_text(sc, x, 0, line, tui.Style{fg = tui.ansi(8)})
+}
+```
+
+Call it last in `view`, after everything else — like recipe 7's toast, a
+later draw simply overwrites an earlier one cell by cell, so a HUD drawn
+first would vanish under your own UI instead of sitting on top of it:
+
+<!-- check:skip usage sketch; sc/p are the caller's Screen/Program -->
+```odin
+hud_draw(sc, p)
+```
+
+`bytes_out`'s own doc comment in `tui/tui.odin` says what it's for outright:
+"handy for showing off how little the diff renderer sends." Watch it while
+resizing a terminal (forces a full repaint, so `bytes_out` jumps) versus
+while idling (it should barely move) to see the diffing recipe 10 and the
+rest of this package lean on actually paying off.
