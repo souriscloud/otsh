@@ -103,6 +103,7 @@ the `ssh_callbacks_init` macro:
 There is no macro to call from Odin, so the field is set by hand at both
 construction sites in `ssh/server.odin`:
 
+<!-- check:skip fields elided with `// ...`; see ssh/server.odin for the full literal construction -->
 ```odin
 s.server_cb = ls.Server_Callbacks {
 	size     = size_of(ls.Server_Callbacks),
@@ -172,6 +173,7 @@ difference is a note.
 Every function pointer handed to libssh must be declared `proc "c"`, both in the
 signature type and at the definition:
 
+<!-- check:verbatim libssh/libssh.odin -->
 ```odin
 Auth_None_Proc :: #type proc "c" (session: Session, user: cstring, userdata: rawptr) -> c.int
 ```
@@ -189,6 +191,7 @@ concatenation, `strings.Builder`, anything taking an implicit allocator.
 Where a callback genuinely has to call ordinary Odin code, it establishes one
 explicitly:
 
+<!-- check:verbatim ssh/server.odin -->
 ```odin
 context = runtime.default_context()
 ```
@@ -226,6 +229,7 @@ Because "keep a pointer to any argument" is forbidden and "allocate" is
 forbidden, the only remaining way to keep a username past the end of
 `cb_auth_none` is to copy it into storage that already exists:
 
+<!-- check:skip fields paired per line for readability; ssh/server.odin's Session struct declares each buf/len on its own line -->
 ```odin
 user_buf: [64]u8,   user_len: int,
 term_buf: [32]u8,   term_len: int,
@@ -277,6 +281,7 @@ typedef int socket_t;
 A Windows `SOCKET` is a `UINT_PTR` — unsigned, and 64 bits wide on a 64-bit
 build. Binding `ssh_get_fd` as `c.int` would truncate its return there. Hence:
 
+<!-- check:verbatim libssh/libssh.odin -->
 ```odin
 Socket :: uintptr when ODIN_OS == .Windows else c.int
 INVALID_SOCKET :: ~Socket(0) when ODIN_OS == .Windows else Socket(-1)
@@ -297,6 +302,7 @@ does produce a type error.
 
 Odin's `core:c` declares:
 
+<!-- check:skip quoted from Odin's core:c package (core/c/c.odin), outside this repo, to show why c.char is unsigned everywhere -->
 ```odin
 char :: builtin.u8  // assuming -funsigned-char
 ```
@@ -316,6 +322,7 @@ with `SSH_PUBLICKEY_STATE_ERROR = -1`. The binding keeps the parameter as
 `c.char` — right width, right ABI slot — and declares the enum signed so the
 error value is representable:
 
+<!-- check:verbatim libssh/libssh.odin -->
 ```odin
 // c.char is unsigned on this platform, so the signed enum is spelled out.
 Pubkey_State :: enum i8 {
@@ -345,6 +352,7 @@ members must land on the same numbers. Two ways they can be wrong:
   binding takes only a few entries out of a long enum, give them explicit
   values, as `Session_Option` does:
 
+<!-- check:verbatim libssh/libssh.odin -->
 ```odin
 // Only the entries we use; the ordering matches libssh's enum ssh_options_e.
 Session_Option :: enum c.int {
@@ -373,6 +381,7 @@ patterns in use:
 Both freeing functions are bound and both are used, paired with their producers,
 in `capture_key_identity`:
 
+<!-- check:verbatim ssh/server.odin -->
 ```odin
 hash: [^]u8
 hlen: c.size_t
@@ -399,6 +408,7 @@ allocated memory, bind its matching deallocator in the same change.**
 
 ## Linking
 
+<!-- check:verbatim libssh/libssh.odin -->
 ```odin
 when ODIN_OS == .Darwin || ODIN_OS == .Linux || ODIN_OS == .FreeBSD {
 	foreign import lib "system:ssh"

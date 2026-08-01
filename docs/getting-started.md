@@ -365,6 +365,7 @@ mkdir -p ~/src/greeter
 
 `~/src/greeter/main.odin`:
 
+<!-- check:file -->
 ```odin
 package main
 
@@ -465,6 +466,7 @@ just run the binary in the terminal you already have open.
 
 `examples/tracker/main.odin` wires it behind a flag:
 
+<!-- check:verbatim examples/tracker/main.odin -->
 ```odin
 for arg in os.args[1:] {
 	if arg == "--local" || arg == "-l" {

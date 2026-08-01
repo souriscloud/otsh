@@ -20,6 +20,7 @@ anybody.
 **What to do:** delete any use of them. Nothing replaces them. `ssh.read` was
 always the supported way to get bytes out of a session and it is unchanged:
 
+<!-- check:skip fragment referencing a Session `s` from surrounding prose, not a standalone declaration -->
 ```odin
 buf: [256]u8
 n, ok := ssh.read(s, buf[:], 33)   // ok == false means the connection is finished

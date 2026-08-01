@@ -57,6 +57,13 @@ python3 docs/tools/build_site.py --check   # validate output, exit 1 on problems
 survived unconverted, and that the sidebar actually rendered. It is worth
 running after editing any page.
 
+The code samples get the same treatment: every fenced Odin block in these
+pages carries an annotation that `docs/tools/check_examples.py` enforces —
+compiled against this repo's sources, matched verbatim against the file it
+was lifted from, or explicitly marked illustrative with a written reason.
+`./check.sh` gates on it, so a sample that stops compiling, or a source file
+that drifts out from under a doc that quotes it, fails the build.
+
 Standard library only — no `pip install`, no network, no Node. Documentation
 you cannot build is documentation that rots, so the generator is about 650
 lines in `docs/tools/build_site.py` and has no dependencies to break.

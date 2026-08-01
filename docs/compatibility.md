@@ -116,6 +116,7 @@ verified before being relied on.
 
 The assert is guarded rather than absolute:
 
+<!-- check:skip message argument abbreviated to "..."; see libssh/libssh.odin for the literal #assert -->
 ```odin
 ODIN_VERSION_IS_DATED :: len(ODIN_VERSION) >= 11 && ODIN_VERSION[:4] == "dev-"
 #assert(!ODIN_VERSION_IS_DATED || ODIN_VERSION >= MIN_ODIN_VERSION, "...")

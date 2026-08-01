@@ -35,6 +35,7 @@ Three things to know before anything else:
 
 A complete minimal program:
 
+<!-- check:file -->
 ```odin
 package main
 
@@ -87,6 +88,7 @@ main :: proc() {
 
 ## `Config`
 
+<!-- check:verbatim sshtui/sshtui.odin -->
 ```odin
 Config :: struct {
 	host:          string, // default "0.0.0.0"
@@ -145,6 +147,7 @@ mechanism, the deadline, and how to stop a server from inside your own code
 
 What `create` (and the connect/disconnect hooks) are told about the client:
 
+<!-- check:verbatim sshtui/sshtui.odin -->
 ```odin
 Info :: struct {
 	user:        string, // username the client offered — unverified, they pick it
@@ -181,6 +184,7 @@ to store than `fingerprint` — is covered in full in
 
 ## `Create_Proc`, `Destroy_Proc`, and the connection lifecycle
 
+<!-- check:verbatim sshtui/sshtui.odin -->
 ```odin
 // Called once per connection, on that connection's own thread.
 Create_Proc :: #type proc(info: Info) -> tui.App
@@ -222,11 +226,13 @@ That covers almost everything an app does. To keep any of it for longer — a
 roster keyed by `id`, an audit record, a work item handed to another thread —
 take an owned copy:
 
+<!-- check:skip signature fragment; `Info` is defined above, bodies in sshtui/sshtui.odin -->
 ```odin
 clone_info  :: proc(info: Info, allocator := context.allocator) -> Info
 delete_info :: proc(info: Info, allocator := context.allocator)
 ```
 
+<!-- check:skip usage sketch with a "// ..." elision, referencing an `info` from surrounding context -->
 ```odin
 saved := sshtui.clone_info(info)   // survives the connection
 // ...
@@ -253,6 +259,7 @@ the pattern: a package-level `roster: map[string]Member` guarded by a
 
 ## `serve` and `run_local`
 
+<!-- check:skip signature fragment; `Config` is defined above, bodies in sshtui/sshtui.odin -->
 ```odin
 serve :: proc(cfg: Config) -> bool
 run_local :: proc(cfg: Config) -> bool
@@ -278,6 +285,7 @@ The usual reason to call it is a `--local` flag, so the same binary either
 serves or runs in-terminal depending on how it is invoked. That is the whole
 of it, from the end of `main` in `examples/tracker/main.odin`:
 
+<!-- check:verbatim examples/tracker/main.odin -->
 ```odin
 for arg in os.args[1:] {
 	if arg == "--local" || arg == "-l" {
@@ -298,6 +306,7 @@ The same `sshtui.Config` value is used for both calls — nothing about `create`
 
 ## Connection hooks
 
+<!-- check:verbatim sshtui/sshtui.odin -->
 ```odin
 on_connect:    proc(info: Info),
 on_disconnect: proc(info: Info),
@@ -308,6 +317,7 @@ addition to, not instead of, `create`/`destroy`, and per the lifecycle above,
 `on_connect` fires before `create` while `on_disconnect` fires after
 `destroy`. `examples/members/main.odin` uses `on_connect` for exactly this:
 
+<!-- check:verbatim examples/members/main.odin -->
 ```odin
 connected :: proc(info: sshtui.Info) {
 	// Log the pseudonymous id, never the fingerprint or the key.
@@ -332,6 +342,7 @@ A shorter version of the `examples/members` pattern: greet a returning client
 by a visit count keyed on their pseudonymous id, guarding the shared map with
 a mutex since `create` runs on a different thread per connection.
 
+<!-- check:file -->
 ```odin
 package main
 

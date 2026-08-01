@@ -55,6 +55,7 @@ settings), `tui.local_enter_raw` (which changes them), `tui.local_backend`
 `tui.Program` plus `tui.run` (the loop itself). Here is the entire skeleton,
 with a model that does nothing yet:
 
+<!-- check:file -->
 ```odin
 package main
 
@@ -166,6 +167,7 @@ something once up front.
 A stopwatch's entire job is turning "time passed" into "elapsed changed", so
 this is the step that actually matters. `tui.Tick` carries three fields:
 
+<!-- check:verbatim tui/tui.odin -->
 ```odin
 Tick :: struct {
 	dt:    f64, // seconds since the previous tick
@@ -176,6 +178,7 @@ Tick :: struct {
 
 Add running state and an accumulator to the model, and drive it off `dt`:
 
+<!-- check:decls smaller tutorial-stage Model, not the final one in examples/stopwatch/main.odin -->
 ```odin
 Model :: struct {
 	running: bool,
@@ -218,6 +221,7 @@ blocky digits several cells tall, built from a lookup table instead of
 The trick is a small bitmap per digit — which cells are "lit" — scaled up to
 whatever size you want at draw time:
 
+<!-- check:skip BIG_DIGITS abridged to 3 of 10 rows ("// ... 3 through 9, same shape"); full table in examples/stopwatch/main.odin -->
 ```odin
 DIGIT_W :: 3
 DIGIT_H :: 5
@@ -245,6 +249,7 @@ a lit cell, independent of what the table stores.
 Drawing one digit is a nested loop over the bitmap, using `tui.set_cell` for
 each lit cell, scaled up by `SCALE` in both directions:
 
+<!-- check:verbatim examples/stopwatch/main.odin -->
 ```odin
 draw_big_glyph :: proc(s: ^tui.Screen, x, y: int, bmp: [DIGIT_H]string, cols: int, style: tui.Style) {
 	for row in 0 ..< DIGIT_H {
@@ -272,6 +277,7 @@ error, not an off-by-one.
 
 A colon glyph is the same function with a 1-column bitmap:
 
+<!-- check:verbatim examples/stopwatch/main.odin -->
 ```odin
 BIG_COLON := [DIGIT_H]string{" ", "#", " ", "#", " "}
 ```
@@ -286,6 +292,7 @@ For the fine-grained reading (hundredths of a second) and for each lap in
 step 6, normal-sized text is the right tool — big digits for `MM:SS`, plain
 `draw_text` for everything with more precision than a glance needs:
 
+<!-- check:verbatim examples/stopwatch/main.odin -->
 ```odin
 format_time :: proc(t: f64) -> string {
 	cs := int(t * 100 + 0.5) // round to the nearest hundredth
@@ -302,6 +309,7 @@ Wire up the keys a stopwatch needs: space to start/stop, `r` to reset, `l` to
 lap, `q`/Esc to quit. This is where `tui.Key` and `tui.Key_Kind` earn their
 keep:
 
+<!-- check:verbatim tui/key.odin -->
 ```odin
 Key :: struct {
 	kind:  Key_Kind,
@@ -319,6 +327,7 @@ compare `r == ' '` and worry about it colliding with, say, Ctrl+Space (which
 key (arrows, function keys, Enter, and so on) arrives as `kind == .Rune` with
 the actual character in `r`:
 
+<!-- check:skip statement fragment from update's Key handling, not a file-scope declaration; see examples/stopwatch/main.odin -->
 ```odin
 #partial switch e.kind {
 case .Esc:
@@ -364,6 +373,7 @@ it travels down as the raw byte `0x03`, same as any other keystroke.
 `tui/key.odin` decodes every C0 control byte back to the letter that
 produces it:
 
+<!-- check:skip statement fragment; tui/key.odin's actual return also carries the two other return values (n, ok) -->
 ```odin
 case b < 0x20:
 	return Key{kind = .Rune, r = rune('a' + b - 1), ctrl = true}
@@ -376,6 +386,7 @@ explicitly, your app simply never quits on Ctrl+C, which is the one keyboard
 shortcut every user will try first out of habit. Check it before anything
 else in the `Key` case:
 
+<!-- check:verbatim examples/stopwatch/main.odin -->
 ```odin
 case tui.Key:
 	if e.ctrl && e.r == 'c' {
@@ -396,6 +407,7 @@ then does drawing stop).
 A lap is nothing more than "the current `elapsed` value, kept": a
 `[dynamic]f64`, appended to when the user presses `l`.
 
+<!-- check:verbatim examples/stopwatch/main.odin -->
 ```odin
 Model :: struct {
 	running:    bool,
@@ -405,6 +417,7 @@ Model :: struct {
 }
 ```
 
+<!-- check:verbatim examples/stopwatch/main.odin -->
 ```odin
 case 'l', 'L':
 	if m.running {
@@ -420,6 +433,7 @@ down one slot, an O(n) operation on every single keypress) — indexing
 backward is free, so do the reordering at draw time instead of at write
 time:
 
+<!-- check:skip loop body abridged with a comment in place of the actual draw calls; full loop in examples/stopwatch/main.odin's draw_laps -->
 ```odin
 for row in 0 ..< viewport_h {
 	idx_from_end := m.lap_offset + row
@@ -442,6 +456,7 @@ the cursor (or, here, "the newest lap") actually is. This is exactly
 the version here is simpler because there's no cursor to keep on screen, just
 "clamp the offset to the valid range":
 
+<!-- check:verbatim examples/stopwatch/main.odin -->
 ```odin
 laps_scroll :: proc(m: ^Model, delta, viewport_h: int) {
 	n := len(m.laps)
@@ -474,6 +489,7 @@ time your code sees it, `tui.run` has already resized `Screen` — `sc.w`/
 `sc.w`/`sc.h` and recomputes everything from scratch every call, rather than
 in the `Resize` case itself:
 
+<!-- check:verbatim examples/stopwatch/main.odin -->
 ```odin
 layout :: proc(sc_w, sc_h: int) -> (clock_x, clock_y, laps_y, viewport_h: int) {
 	clock_x = max((sc_w - CLOCK_BOX_W) / 2, 1)
@@ -499,6 +515,7 @@ and `viewport_h` is guaranteed to match between the two, because it's the
 same three lines of arithmetic run both times rather than two separate
 copies that could drift.
 
+<!-- check:verbatim examples/stopwatch/main.odin -->
 ```odin
 _, _, _, viewport_h := layout(p.screen.w, p.screen.h)
 ```
@@ -511,6 +528,7 @@ hand it to you as part of every message.
 **Giving up below a minimum.** Below some size, don't try to lay out the
 real UI at all:
 
+<!-- check:verbatim examples/stopwatch/main.odin -->
 ```odin
 if sc.w < MIN_W || sc.h < MIN_H {
 	msg := fmt.tprintf("terminal too small — need %dx%d, have %dx%d", MIN_W, MIN_H, sc.w, sc.h)
@@ -554,6 +572,7 @@ Nothing is corrupt — the offset is simply still describing a viewport that no
 longer exists. So re-clamp whenever the viewport changes, which is precisely
 what a `Resize` message announces:
 
+<!-- check:verbatim examples/stopwatch/main.odin -->
 ```odin
 case tui.Resize:
 	_, _, _, viewport_h := layout(e.cols, e.rows)
@@ -578,6 +597,7 @@ Three constructors build a `tui.Color`: `tui.no_color()` (terminal default),
 `tui.ansi(idx)` (256-color palette), `tui.rgb(r, g, b)` (24-bit true color).
 The stopwatch's palette uses both of the non-default ones:
 
+<!-- check:verbatim examples/stopwatch/main.odin -->
 ```odin
 C_TEXT   := tui.rgb(224, 224, 230)
 C_DIM    := tui.ansi(8)
@@ -602,6 +622,7 @@ a banner.** The big digits themselves switch from `C_TEXT` to `C_GREEN` while
 running, and a small status line below them adds the hundredths reading and
 a one-character glyph (`●` running, `○` stopped):
 
+<!-- check:verbatim examples/stopwatch/main.odin -->
 ```odin
 digit_style := tui.Style{fg = m.running ? C_GREEN : C_TEXT, attrs = {.Bold}}
 ```
@@ -613,6 +634,7 @@ the clock for attention — restraint here is the polish; a blinking
 **The box.** `tui.draw_box` frames the clock with a title baked into the top
 border:
 
+<!-- check:verbatim examples/stopwatch/main.odin -->
 ```odin
 tui.draw_box(sc, x, y, CLOCK_BOX_W, CLOCK_BOX_H, tui.Style{fg = C_BORDER}, tui.BORDER_ROUND, " stopwatch ")
 ```
@@ -641,6 +663,7 @@ Every piece above, assembled. This is exactly
 with `./build.sh examples/stopwatch` from the repo root and run `./stopwatch`
 directly, no SSH client, no listening port, no host key file.
 
+<!-- check:verbatim examples/stopwatch/main.odin -->
 ```odin
 // stopwatch — a local-only stopwatch/interval timer, built on otsh's `tui`
 // package alone. No `ssh`, no `sshtui`, no network of any kind: this process
@@ -1035,6 +1058,7 @@ array, which `free` on its own won't reach, since `free` only releases the
 one block `new` returned, not whatever that block points into — in a
 `Destroy_Proc`:
 
+<!-- check:skip illustrative SSH port of the stopwatch above; `Model`/`layout`/etc. are defined earlier in this tutorial, not a standalone file -->
 ```odin
 import "core:os"
 import "otsh:sshtui"

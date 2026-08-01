@@ -65,6 +65,7 @@ the commit messages implied.
 
 They live in `ssh/version.odin`, which is the only file to edit:
 
+<!-- check:decls illustrative snapshot of the constants' shape at the v0.1.0 cut; current values are in ssh/version.odin -->
 ```odin
 VERSION_MAJOR :: 0
 VERSION_MINOR :: 1
