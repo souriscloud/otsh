@@ -27,7 +27,7 @@ Auth :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:73*
+*libssh/libssh.odin:75*
 
 ### `Auth_None_Proc`
 
@@ -35,7 +35,7 @@ Auth :: enum c.int {
 Auth_None_Proc :: #type proc "c" (session: Session, user: cstring, userdata: rawptr) -> c.int
 ```
 
-*libssh/libssh.odin:153*
+*libssh/libssh.odin:155*
 
 ### `Auth_Password_Proc`
 
@@ -43,7 +43,7 @@ Auth_None_Proc :: #type proc "c" (session: Session, user: cstring, userdata: raw
 Auth_Password_Proc :: #type proc "c" (session: Session, user, password: cstring, userdata: rawptr) -> c.int
 ```
 
-*libssh/libssh.odin:154*
+*libssh/libssh.odin:156*
 
 ### `Auth_Pubkey_Proc`
 
@@ -51,7 +51,7 @@ Auth_Password_Proc :: #type proc "c" (session: Session, user, password: cstring,
 Auth_Pubkey_Proc :: #type proc "c" (session: Session, user: cstring, pubkey: Key, signature_state: c.char, userdata: rawptr) -> c.int
 ```
 
-*libssh/libssh.odin:155*
+*libssh/libssh.odin:157*
 
 ### `Bind`
 
@@ -65,7 +65,7 @@ Threads_Callbacks :: distinct rawptr
 // `SOCKET` (an unsigned UINT_PTR) there. The widths differ, so binding it as
 ```
 
-*libssh/libssh.odin:28*
+*libssh/libssh.odin:30*
 
 ### `Bind_Option`
 
@@ -99,7 +99,7 @@ Bind_Option :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:101*
+*libssh/libssh.odin:103*
 
 ### `Channel`
 
@@ -114,7 +114,7 @@ Threads_Callbacks :: distinct rawptr
 // `SOCKET` (an unsigned UINT_PTR) there. The widths differ, so binding it as
 ```
 
-*libssh/libssh.odin:27*
+*libssh/libssh.odin:29*
 
 ### `Channel_Callbacks`
 
@@ -142,7 +142,7 @@ Channel_Callbacks :: struct {
 }
 ```
 
-*libssh/libssh.odin:189*
+*libssh/libssh.odin:191*
 
 ### `Channel_Close_Proc`
 
@@ -150,7 +150,7 @@ Channel_Callbacks :: struct {
 Channel_Close_Proc :: #type proc "c" (session: Session, channel: Channel, userdata: rawptr)
 ```
 
-*libssh/libssh.odin:160*
+*libssh/libssh.odin:162*
 
 ### `Channel_Data_Proc`
 
@@ -158,7 +158,7 @@ Channel_Close_Proc :: #type proc "c" (session: Session, channel: Channel, userda
 Channel_Data_Proc :: #type proc "c" (session: Session, channel: Channel, data: rawptr, len: u32, is_stderr: c.int, userdata: rawptr) -> c.int
 ```
 
-*libssh/libssh.odin:158*
+*libssh/libssh.odin:160*
 
 ### `Channel_Env_Proc`
 
@@ -166,7 +166,7 @@ Channel_Data_Proc :: #type proc "c" (session: Session, channel: Channel, data: r
 Channel_Env_Proc :: #type proc "c" (session: Session, channel: Channel, name, value: cstring, userdata: rawptr) -> c.int
 ```
 
-*libssh/libssh.odin:164*
+*libssh/libssh.odin:166*
 
 ### `Channel_Eof_Proc`
 
@@ -174,7 +174,7 @@ Channel_Env_Proc :: #type proc "c" (session: Session, channel: Channel, name, va
 Channel_Eof_Proc :: #type proc "c" (session: Session, channel: Channel, userdata: rawptr)
 ```
 
-*libssh/libssh.odin:159*
+*libssh/libssh.odin:161*
 
 ### `Channel_Exec_Proc`
 
@@ -182,7 +182,7 @@ Channel_Eof_Proc :: #type proc "c" (session: Session, channel: Channel, userdata
 Channel_Exec_Proc :: #type proc "c" (session: Session, channel: Channel, command: cstring, userdata: rawptr) -> c.int
 ```
 
-*libssh/libssh.odin:165*
+*libssh/libssh.odin:167*
 
 ### `Channel_Open_Session_Proc`
 
@@ -190,7 +190,7 @@ Channel_Exec_Proc :: #type proc "c" (session: Session, channel: Channel, command
 Channel_Open_Session_Proc :: #type proc "c" (session: Session, userdata: rawptr) -> Channel
 ```
 
-*libssh/libssh.odin:156*
+*libssh/libssh.odin:158*
 
 ### `Channel_Pty_Proc`
 
@@ -198,7 +198,7 @@ Channel_Open_Session_Proc :: #type proc "c" (session: Session, userdata: rawptr)
 Channel_Pty_Proc :: #type proc "c" (session: Session, channel: Channel, term: cstring, width, height, pxwidth, pxheight: c.int, userdata: rawptr) -> c.int
 ```
 
-*libssh/libssh.odin:161*
+*libssh/libssh.odin:163*
 
 ### `Channel_Shell_Proc`
 
@@ -206,7 +206,7 @@ Channel_Pty_Proc :: #type proc "c" (session: Session, channel: Channel, term: cs
 Channel_Shell_Proc :: #type proc "c" (session: Session, channel: Channel, userdata: rawptr) -> c.int
 ```
 
-*libssh/libssh.odin:162*
+*libssh/libssh.odin:164*
 
 ### `Channel_Window_Change_Proc`
 
@@ -214,7 +214,7 @@ Channel_Shell_Proc :: #type proc "c" (session: Session, channel: Channel, userda
 Channel_Window_Change_Proc :: #type proc "c" (session: Session, channel: Channel, width, height, pxwidth, pxheight: c.int, userdata: rawptr) -> c.int
 ```
 
-*libssh/libssh.odin:163*
+*libssh/libssh.odin:165*
 
 ### `Event`
 
@@ -227,7 +227,7 @@ Threads_Callbacks :: distinct rawptr
 // `SOCKET` (an unsigned UINT_PTR) there. The widths differ, so binding it as
 ```
 
-*libssh/libssh.odin:29*
+*libssh/libssh.odin:31*
 
 ### `Key`
 
@@ -239,7 +239,7 @@ Threads_Callbacks :: distinct rawptr
 // `SOCKET` (an unsigned UINT_PTR) there. The widths differ, so binding it as
 ```
 
-*libssh/libssh.odin:30*
+*libssh/libssh.odin:32*
 
 ### `Keytype`
 
@@ -254,7 +254,7 @@ Keytype :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:142*
+*libssh/libssh.odin:144*
 
 ### `Pubkey_Hash_Type`
 
@@ -266,7 +266,7 @@ Pubkey_Hash_Type :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:129*
+*libssh/libssh.odin:131*
 
 ### `Pubkey_State`
 
@@ -281,7 +281,7 @@ Pubkey_State :: enum i8 {
 
 c.char is unsigned on this platform, so the signed enum is spelled out.
 
-*libssh/libssh.odin:83*
+*libssh/libssh.odin:85*
 
 ### `Server_Callbacks`
 
@@ -303,7 +303,7 @@ Server_Callbacks :: struct {
 }
 ```
 
-*libssh/libssh.odin:173*
+*libssh/libssh.odin:175*
 
 ### `Session`
 
@@ -319,7 +319,7 @@ Threads_Callbacks :: distinct rawptr
 // `SOCKET` (an unsigned UINT_PTR) there. The widths differ, so binding it as
 ```
 
-*libssh/libssh.odin:26*
+*libssh/libssh.odin:28*
 
 ### `Session_Option`
 
@@ -333,7 +333,7 @@ Session_Option :: enum c.int {
 
 Only the entries we use; the ordering matches libssh's enum ssh_options_e.
 
-*libssh/libssh.odin:136*
+*libssh/libssh.odin:138*
 
 ### `Threads_Callbacks`
 
@@ -344,7 +344,7 @@ Threads_Callbacks :: distinct rawptr
 // `SOCKET` (an unsigned UINT_PTR) there. The widths differ, so binding it as
 ```
 
-*libssh/libssh.odin:31*
+*libssh/libssh.odin:33*
 
 ## Constants
 
@@ -364,7 +364,7 @@ Auth :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:70*
+*libssh/libssh.odin:72*
 
 ### `AUTH_METHOD_HOSTBASED`
 
@@ -403,7 +403,7 @@ Bind_Option :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:96*
+*libssh/libssh.odin:98*
 
 ### `AUTH_METHOD_INTERACTIVE`
 
@@ -441,7 +441,7 @@ Bind_Option :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:97*
+*libssh/libssh.odin:99*
 
 ### `AUTH_METHOD_NONE`
 
@@ -483,7 +483,7 @@ Bind_Option :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:93*
+*libssh/libssh.odin:95*
 
 ### `AUTH_METHOD_PASSWORD`
 
@@ -524,7 +524,7 @@ Bind_Option :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:94*
+*libssh/libssh.odin:96*
 
 ### `AUTH_METHOD_PUBLICKEY`
 
@@ -564,7 +564,7 @@ Bind_Option :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:95*
+*libssh/libssh.odin:97*
 
 ### `AUTH_METHOD_UNKNOWN`
 
@@ -607,7 +607,7 @@ Bind_Option :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:92*
+*libssh/libssh.odin:94*
 
 ### `EOF`
 
@@ -624,7 +624,7 @@ Auth :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:71*
+*libssh/libssh.odin:73*
 
 ### `ERROR`
 
@@ -643,7 +643,7 @@ Auth :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:69*
+*libssh/libssh.odin:71*
 
 ### `INVALID_SOCKET`
 
@@ -653,7 +653,7 @@ INVALID_SOCKET :: ~Socket(0) when ODIN_OS == .Windows else Socket(-1)
 
 libssh's SSH_INVALID_SOCKET, i.e. `(socket_t)-1`.
 
-*libssh/libssh.odin:38*
+*libssh/libssh.odin:40*
 
 ### `MIN_MAJOR`
 
@@ -690,7 +690,7 @@ This is a floor, not an endorsement: libssh is a separate project with its own
 advisories, and being above this line does not mean you are patched. Track
 https://www.libssh.org/security/ and keep the system library current.
 
-*libssh/libssh.odin:62*
+*libssh/libssh.odin:64*
 
 ### `MIN_MICRO`
 
@@ -714,7 +714,7 @@ Auth :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:64*
+*libssh/libssh.odin:66*
 
 ### `MIN_MINOR`
 
@@ -739,7 +739,7 @@ Auth :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:63*
+*libssh/libssh.odin:65*
 
 ### `OK`
 
@@ -759,7 +759,7 @@ Auth :: enum c.int {
 }
 ```
 
-*libssh/libssh.odin:68*
+*libssh/libssh.odin:70*
 
 ### `Socket`
 
@@ -772,7 +772,7 @@ libssh's `socket_t`: a signed file descriptor on unix-likes, a Windows
 `SOCKET` (an unsigned UINT_PTR) there. The widths differ, so binding it as
 c.int everywhere would truncate the return of `get_fd` on 64-bit Windows.
 
-*libssh/libssh.odin:36*
+*libssh/libssh.odin:38*
 
 ## Procedures
 
@@ -782,7 +782,7 @@ c.int everywhere would truncate the return of `get_fd` on 64-bit Windows.
 proc(b: Bind, s: Session) -> c.int
 ```
 
-*libssh/libssh.odin:239* · C: `ssh_bind_accept`
+*libssh/libssh.odin:241* · C: `ssh_bind_accept`
 
 ### `bind_free`
 
@@ -790,7 +790,7 @@ proc(b: Bind, s: Session) -> c.int
 proc(b: Bind)
 ```
 
-*libssh/libssh.odin:233* · C: `ssh_bind_free`
+*libssh/libssh.odin:235* · C: `ssh_bind_free`
 
 ### `bind_get_fd`
 
@@ -798,7 +798,7 @@ proc(b: Bind)
 proc(b: Bind) -> Socket
 ```
 
-*libssh/libssh.odin:241* · C: `ssh_bind_get_fd`
+*libssh/libssh.odin:243* · C: `ssh_bind_get_fd`
 
 ### `bind_listen`
 
@@ -806,7 +806,7 @@ proc(b: Bind) -> Socket
 proc(b: Bind) -> c.int
 ```
 
-*libssh/libssh.odin:237* · C: `ssh_bind_listen`
+*libssh/libssh.odin:239* · C: `ssh_bind_listen`
 
 ### `bind_new`
 
@@ -816,7 +816,7 @@ proc() -> Bind
 
 bind (listening socket)
 
-*libssh/libssh.odin:231* · C: `ssh_bind_new`
+*libssh/libssh.odin:233* · C: `ssh_bind_new`
 
 ### `bind_options_set`
 
@@ -824,7 +824,7 @@ bind (listening socket)
 proc(b: Bind, opt: Bind_Option, value: rawptr) -> c.int
 ```
 
-*libssh/libssh.odin:235* · C: `ssh_bind_options_set`
+*libssh/libssh.odin:237* · C: `ssh_bind_options_set`
 
 ### `channel_close`
 
@@ -832,7 +832,7 @@ proc(b: Bind, opt: Bind_Option, value: rawptr) -> c.int
 proc(ch: Channel) -> c.int
 ```
 
-*libssh/libssh.odin:291* · C: `ssh_channel_close`
+*libssh/libssh.odin:293* · C: `ssh_channel_close`
 
 ### `channel_free`
 
@@ -840,7 +840,7 @@ proc(ch: Channel) -> c.int
 proc(ch: Channel)
 ```
 
-*libssh/libssh.odin:289* · C: `ssh_channel_free`
+*libssh/libssh.odin:291* · C: `ssh_channel_free`
 
 ### `channel_is_eof`
 
@@ -848,7 +848,7 @@ proc(ch: Channel)
 proc(ch: Channel) -> c.int
 ```
 
-*libssh/libssh.odin:297* · C: `ssh_channel_is_eof`
+*libssh/libssh.odin:299* · C: `ssh_channel_is_eof`
 
 ### `channel_is_open`
 
@@ -856,7 +856,7 @@ proc(ch: Channel) -> c.int
 proc(ch: Channel) -> c.int
 ```
 
-*libssh/libssh.odin:295* · C: `ssh_channel_is_open`
+*libssh/libssh.odin:297* · C: `ssh_channel_is_open`
 
 ### `channel_new`
 
@@ -866,7 +866,7 @@ proc(s: Session) -> Channel
 
 channel
 
-*libssh/libssh.odin:287* · C: `ssh_channel_new`
+*libssh/libssh.odin:289* · C: `ssh_channel_new`
 
 ### `channel_poll`
 
@@ -876,7 +876,7 @@ proc(ch: Channel, is_stderr: c.int) -> c.int
 
 Returns how many bytes are buffered inside libssh for this channel (its stdout_buffer), 0 when empty, EOF at end of stream, ERROR on error. Also pumps the session nonblockingly, like event_dopoll(e, 0).
 
-*libssh/libssh.odin:306* · C: `ssh_channel_poll`
+*libssh/libssh.odin:308* · C: `ssh_channel_poll`
 
 ### `channel_read_nonblocking`
 
@@ -886,7 +886,7 @@ proc(ch: Channel, dest: rawptr, count: u32, is_stderr: c.int) -> c.int
 
 Drains up to `count` bytes from the channel's internal buffer without blocking. Returns bytes read, 0/AGAIN when empty, EOF at end of stream, ERROR on error. Data a channel_data_function declined stays in that internal buffer, and this is the only call that can retrieve it after the peer goes quiet — see ssh.read.
 
-*libssh/libssh.odin:313* · C: `ssh_channel_read_nonblocking`
+*libssh/libssh.odin:315* · C: `ssh_channel_read_nonblocking`
 
 ### `channel_request_send_exit_status`
 
@@ -894,7 +894,7 @@ Drains up to `count` bytes from the channel's internal buffer without blocking. 
 proc(ch: Channel, status: c.int) -> c.int
 ```
 
-*libssh/libssh.odin:301* · C: `ssh_channel_request_send_exit_status`
+*libssh/libssh.odin:303* · C: `ssh_channel_request_send_exit_status`
 
 ### `channel_send_eof`
 
@@ -902,7 +902,7 @@ proc(ch: Channel, status: c.int) -> c.int
 proc(ch: Channel) -> c.int
 ```
 
-*libssh/libssh.odin:293* · C: `ssh_channel_send_eof`
+*libssh/libssh.odin:295* · C: `ssh_channel_send_eof`
 
 ### `channel_write`
 
@@ -910,7 +910,7 @@ proc(ch: Channel) -> c.int
 proc(ch: Channel, data: rawptr, len: u32) -> c.int
 ```
 
-*libssh/libssh.odin:299* · C: `ssh_channel_write`
+*libssh/libssh.odin:301* · C: `ssh_channel_write`
 
 ### `clean_pubkey_hash`
 
@@ -918,7 +918,7 @@ proc(ch: Channel, data: rawptr, len: u32) -> c.int
 proc(hash: ^[^]u8)
 ```
 
-*libssh/libssh.odin:337* · C: `ssh_clean_pubkey_hash`
+*libssh/libssh.odin:339* · C: `ssh_clean_pubkey_hash`
 
 ### `disconnect`
 
@@ -926,7 +926,7 @@ proc(hash: ^[^]u8)
 proc(s: Session)
 ```
 
-*libssh/libssh.odin:249* · C: `ssh_disconnect`
+*libssh/libssh.odin:251* · C: `ssh_disconnect`
 
 ### `event_add_session`
 
@@ -934,7 +934,7 @@ proc(s: Session)
 proc(e: Event, s: Session) -> c.int
 ```
 
-*libssh/libssh.odin:279* · C: `ssh_event_add_session`
+*libssh/libssh.odin:281* · C: `ssh_event_add_session`
 
 ### `event_dopoll`
 
@@ -942,7 +942,7 @@ proc(e: Event, s: Session) -> c.int
 proc(e: Event, timeout_ms: c.int) -> c.int
 ```
 
-*libssh/libssh.odin:283* · C: `ssh_event_dopoll`
+*libssh/libssh.odin:285* · C: `ssh_event_dopoll`
 
 ### `event_free`
 
@@ -950,7 +950,7 @@ proc(e: Event, timeout_ms: c.int) -> c.int
 proc(e: Event)
 ```
 
-*libssh/libssh.odin:277* · C: `ssh_event_free`
+*libssh/libssh.odin:279* · C: `ssh_event_free`
 
 ### `event_new`
 
@@ -960,7 +960,7 @@ proc() -> Event
 
 event loop
 
-*libssh/libssh.odin:275* · C: `ssh_event_new`
+*libssh/libssh.odin:277* · C: `ssh_event_new`
 
 ### `event_remove_session`
 
@@ -968,7 +968,7 @@ event loop
 proc(e: Event, s: Session) -> c.int
 ```
 
-*libssh/libssh.odin:281* · C: `ssh_event_remove_session`
+*libssh/libssh.odin:283* · C: `ssh_event_remove_session`
 
 ### `finalize`
 
@@ -976,7 +976,7 @@ proc(e: Event, s: Session) -> c.int
 proc() -> c.int
 ```
 
-*libssh/libssh.odin:216* · C: `ssh_finalize`
+*libssh/libssh.odin:218* · C: `ssh_finalize`
 
 ### `free_session`
 
@@ -984,7 +984,7 @@ proc() -> c.int
 proc(s: Session)
 ```
 
-*libssh/libssh.odin:247* · C: `ssh_free`
+*libssh/libssh.odin:249* · C: `ssh_free`
 
 ### `get_clientbanner`
 
@@ -992,7 +992,7 @@ proc(s: Session)
 proc(s: Session) -> cstring
 ```
 
-*libssh/libssh.odin:265* · C: `ssh_get_clientbanner`
+*libssh/libssh.odin:267* · C: `ssh_get_clientbanner`
 
 ### `get_error`
 
@@ -1000,7 +1000,7 @@ proc(s: Session) -> cstring
 proc(s: rawptr) -> cstring
 ```
 
-*libssh/libssh.odin:263* · C: `ssh_get_error`
+*libssh/libssh.odin:265* · C: `ssh_get_error`
 
 ### `get_fd`
 
@@ -1008,7 +1008,7 @@ proc(s: rawptr) -> cstring
 proc(s: Session) -> Socket
 ```
 
-*libssh/libssh.odin:271* · C: `ssh_get_fd`
+*libssh/libssh.odin:273* · C: `ssh_get_fd`
 
 ### `get_fingerprint_hash`
 
@@ -1016,7 +1016,7 @@ proc(s: Session) -> Socket
 proc(type: Pubkey_Hash_Type, hash: [^]u8, len: c.size_t) -> cstring
 ```
 
-*libssh/libssh.odin:335* · C: `ssh_get_fingerprint_hash`
+*libssh/libssh.odin:337* · C: `ssh_get_fingerprint_hash`
 
 ### `get_publickey_hash`
 
@@ -1026,7 +1026,7 @@ proc(k: Key, type: Pubkey_Hash_Type, hash: ^[^]u8, hlen: ^c.size_t) -> c.int
 
 fingerprints (public-key identity)
 
-*libssh/libssh.odin:333* · C: `ssh_get_publickey_hash`
+*libssh/libssh.odin:335* · C: `ssh_get_publickey_hash`
 
 ### `handle_key_exchange`
 
@@ -1034,7 +1034,7 @@ fingerprints (public-key identity)
 proc(s: Session) -> c.int
 ```
 
-*libssh/libssh.odin:251* · C: `ssh_handle_key_exchange`
+*libssh/libssh.odin:253* · C: `ssh_handle_key_exchange`
 
 ### `init`
 
@@ -1042,7 +1042,7 @@ proc(s: Session) -> c.int
 proc() -> c.int
 ```
 
-*libssh/libssh.odin:214* · C: `ssh_init`
+*libssh/libssh.odin:216* · C: `ssh_init`
 
 ### `is_connected`
 
@@ -1050,7 +1050,7 @@ proc() -> c.int
 proc(s: Session) -> c.int
 ```
 
-*libssh/libssh.odin:261* · C: `ssh_is_connected`
+*libssh/libssh.odin:263* · C: `ssh_is_connected`
 
 ### `key_free`
 
@@ -1058,7 +1058,7 @@ proc(s: Session) -> c.int
 proc(k: Key)
 ```
 
-*libssh/libssh.odin:325* · C: `ssh_key_free`
+*libssh/libssh.odin:327* · C: `ssh_key_free`
 
 ### `key_type`
 
@@ -1066,7 +1066,7 @@ proc(k: Key)
 proc(k: Key) -> Keytype
 ```
 
-*libssh/libssh.odin:327* · C: `ssh_key_type`
+*libssh/libssh.odin:329* · C: `ssh_key_type`
 
 ### `key_type_to_char`
 
@@ -1074,7 +1074,7 @@ proc(k: Key) -> Keytype
 proc(t: Keytype) -> cstring
 ```
 
-*libssh/libssh.odin:329* · C: `ssh_key_type_to_char`
+*libssh/libssh.odin:331* · C: `ssh_key_type_to_char`
 
 ### `new_session`
 
@@ -1084,7 +1084,7 @@ proc() -> Session
 
 session
 
-*libssh/libssh.odin:245* · C: `ssh_new`
+*libssh/libssh.odin:247* · C: `ssh_new`
 
 ### `options_set`
 
@@ -1092,7 +1092,7 @@ session
 proc(s: Session, opt: Session_Option, value: rawptr) -> c.int
 ```
 
-*libssh/libssh.odin:259* · C: `ssh_options_set`
+*libssh/libssh.odin:261* · C: `ssh_options_set`
 
 ### `pki_export_privkey_file`
 
@@ -1100,7 +1100,7 @@ proc(s: Session, opt: Session_Option, value: rawptr) -> c.int
 proc(privkey: Key, passphrase: cstring, auth_fn: rawptr, auth_data: rawptr, filename: cstring) -> c.int
 ```
 
-*libssh/libssh.odin:321* · C: `ssh_pki_export_privkey_file`
+*libssh/libssh.odin:323* · C: `ssh_pki_export_privkey_file`
 
 ### `pki_generate`
 
@@ -1110,7 +1110,7 @@ proc(type: Keytype, parameter: c.int, pkey: ^Key) -> c.int
 
 pki (host key generation)
 
-*libssh/libssh.odin:319* · C: `ssh_pki_generate`
+*libssh/libssh.odin:321* · C: `ssh_pki_generate`
 
 ### `pki_import_privkey_file`
 
@@ -1118,7 +1118,7 @@ pki (host key generation)
 proc(filename: cstring, passphrase: cstring, auth_fn: rawptr, auth_data: rawptr, pkey: ^Key) -> c.int
 ```
 
-*libssh/libssh.odin:323* · C: `ssh_pki_import_privkey_file`
+*libssh/libssh.odin:325* · C: `ssh_pki_import_privkey_file`
 
 ### `set_auth_methods`
 
@@ -1126,7 +1126,7 @@ proc(filename: cstring, passphrase: cstring, auth_fn: rawptr, auth_data: rawptr,
 proc(s: Session, methods: c.int)
 ```
 
-*libssh/libssh.odin:253* · C: `ssh_set_auth_methods`
+*libssh/libssh.odin:255* · C: `ssh_set_auth_methods`
 
 ### `set_blocking`
 
@@ -1134,7 +1134,7 @@ proc(s: Session, methods: c.int)
 proc(s: Session, blocking: c.int)
 ```
 
-*libssh/libssh.odin:257* · C: `ssh_set_blocking`
+*libssh/libssh.odin:259* · C: `ssh_set_blocking`
 
 ### `set_channel_callbacks`
 
@@ -1142,7 +1142,7 @@ proc(s: Session, blocking: c.int)
 proc(ch: Channel, cb: ^Channel_Callbacks) -> c.int
 ```
 
-*libssh/libssh.odin:315* · C: `ssh_set_channel_callbacks`
+*libssh/libssh.odin:317* · C: `ssh_set_channel_callbacks`
 
 ### `set_server_callbacks`
 
@@ -1150,7 +1150,7 @@ proc(ch: Channel, cb: ^Channel_Callbacks) -> c.int
 proc(s: Session, cb: ^Server_Callbacks) -> c.int
 ```
 
-*libssh/libssh.odin:255* · C: `ssh_set_server_callbacks`
+*libssh/libssh.odin:257* · C: `ssh_set_server_callbacks`
 
 ### `socket_valid`
 
@@ -1162,7 +1162,7 @@ True when `get_fd` handed back a real socket. Spelled as a helper because the
 obvious `fd < 0` is silently always false on Windows, where socket_t is
 unsigned.
 
-*libssh/libssh.odin:43*
+*libssh/libssh.odin:45*
 
 ### `string_free_char`
 
@@ -1170,7 +1170,7 @@ unsigned.
 proc(s: cstring)
 ```
 
-*libssh/libssh.odin:339* · C: `ssh_string_free_char`
+*libssh/libssh.odin:341* · C: `ssh_string_free_char`
 
 ### `threads_get_default`
 
@@ -1180,7 +1180,7 @@ proc() -> Threads_Callbacks
 
 The platform's own threading backend: pthreads on unix, and on Windows the winlocks one. Deliberately NOT ssh_threads_get_pthread — callbacks.h declares that on every platform, but a Windows libssh only *defines* ssh_threads_get_default and ssh_threads_get_noop, so binding the pthread spelling links everywhere except the one place it is checked: error LNK2019: unresolved external symbol ssh_threads_get_pthread On unix the two are the same function's result, so nothing changes there.
 
-*libssh/libssh.odin:227* · C: `ssh_threads_get_default`
+*libssh/libssh.odin:229* · C: `ssh_threads_get_default`
 
 ### `threads_set_callbacks`
 
@@ -1188,7 +1188,7 @@ The platform's own threading backend: pthreads on unix, and on Windows the winlo
 proc(cb: Threads_Callbacks) -> c.int
 ```
 
-*libssh/libssh.odin:218* · C: `ssh_threads_set_callbacks`
+*libssh/libssh.odin:220* · C: `ssh_threads_set_callbacks`
 
 ### `version`
 
@@ -1198,7 +1198,7 @@ proc(req_version: c.int) -> cstring
 
 Returns the runtime library version as text, or nil if the library is older than the (major<<16 | minor<<8 | micro) value passed in.
 
-*libssh/libssh.odin:269* · C: `ssh_version`
+*libssh/libssh.odin:271* · C: `ssh_version`
 
 ### `version_int`
 
@@ -1208,4 +1208,4 @@ version_int :: proc "contextless" (major, minor, micro: int) -> c.int
 
 Builds a libssh version integer the way its SSH_VERSION_INT macro does.
 
-*libssh/libssh.odin:48*
+*libssh/libssh.odin:50*

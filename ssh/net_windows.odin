@@ -6,8 +6,12 @@
 // ssh_init(), which `serve` calls before it can have a session to poll, so
 // there is nothing to initialise here.
 //
-// EXPERIMENTAL, like every Windows path in this repo: type-checked for
-// windows_amd64 and built by CI, never run against a real client.
+// Run against real clients on Windows 11 with vcpkg libssh 0.12.0 on
+// 2026-07-31: WSAPoll carried the accept loop, and getpeername plus the
+// inet_ntop below put a correct non-loopback address on every audit line of a
+// session opened across the network. What that run did not cover — concurrent
+// sessions, load, the hosted CI windows job, which has still never executed —
+// is listed in docs/getting-started.md.
 package ssh
 
 import win32 "core:sys/windows"

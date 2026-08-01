@@ -2,7 +2,7 @@
 # Runs the Odin test suite. Same libssh discovery as build.sh.
 #
 #   ./test.sh              run everything
-#   ./test.sh -define:ODIN_TEST_NAMES=otsh_tests.ring_wraps_around
+#   ./test.sh -define:ODIN_TEST_NAMES=otsh_tests.session_stays_small
 set -euo pipefail
 
 OTSH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,7 +24,9 @@ fi
 
 case "$(uname -s)" in
 MINGW*|MSYS*|CYGWIN*)
-	# See the same branch in build.sh: vcpkg, /LIBPATH:, no rpath. Experimental.
+	# See the same branch in build.sh: vcpkg, /LIBPATH:, no rpath. Ran by hand
+	# on Windows 11 on 2026-07-31 (67 tests pass; the four Linux-only ones are
+	# skipped there); the hosted CI windows job has still never run.
 	VCPKG="${VCPKG_ROOT:-${VCPKG_INSTALLATION_ROOT:-C:/vcpkg}}"
 	LIBDIR="${VCPKG}/installed/x64-windows/lib"
 	LDFLAGS="/LIBPATH:${LIBDIR}"

@@ -14,8 +14,10 @@ when ODIN_OS == .Darwin || ODIN_OS == .Linux || ODIN_OS == .FreeBSD {
 	// the import library as ssh.lib. The linker still needs its directory, e.g.
 	// -extra-linker-flags:"/LIBPATH:C:\\vcpkg\\installed\\x64-windows\\lib".
 	//
-	// Experimental: cross-type-checked and built in CI, never run by a human on
-	// real Windows. See docs/getting-started.md.
+	// Exercised for real once: on 2026-07-31 these bindings linked against
+	// vcpkg libssh 0.12.0 on Windows 11 and served live openssh sessions. The
+	// hosted CI windows job has still never executed, so "runs on Windows"
+	// rests on that one machine. See docs/getting-started.md.
 	foreign import lib "system:ssh.lib"
 } else {
 	#panic("libssh bindings support unix-likes and Windows")

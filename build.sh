@@ -44,8 +44,10 @@ fi
 # Windows it is not on any path at all.
 case "$(uname -s)" in
 MINGW*|MSYS*|CYGWIN*)
-	# EXPERIMENTAL, and the only reason this branch exists is so CI can run the
-	# same script: vcpkg is the expected libssh provider on Windows, and the
+	# This branch exists so CI and Git Bash on Windows can run the same script.
+	# It built every package and all five examples by hand on Windows 11 with
+	# vcpkg libssh 0.12.0 on 2026-07-31; the hosted CI windows job itself has
+	# still never run. vcpkg is the expected libssh provider on Windows, and the
 	# MSVC linker spells a library search path /LIBPATH:, not -L. There is no
 	# rpath equivalent — ssh.dll has to be on %PATH% at run time.
 	VCPKG="${VCPKG_ROOT:-${VCPKG_INSTALLATION_ROOT:-C:/vcpkg}}"
