@@ -46,6 +46,7 @@ NAV_TITLES = {
     "security.md": "Security model",
     "architecture.md": "Architecture",
     "bindings.md": "C bindings",
+    "compatibility.md": "Compatibility",
     "deploy.md": "Deployment",
     "CHANGELOG.md": "Changelog",
     "releasing.md": "Releasing",
@@ -58,7 +59,7 @@ NAV = [
     ("Guides", ["cookbook.md", "tui.md", "ssh.md", "sshtui.md"]),
     ("API reference", ["api-tui.md", "api-ssh.md", "api-sshtui.md", "api-libssh.md"]),
     ("Understanding", ["security.md", "architecture.md", "bindings.md"]),
-    ("Operations", ["deploy.md"]),
+    ("Operations", ["deploy.md", "compatibility.md"]),
     ("Releases", ["CHANGELOG.md", "releasing.md", "migrating.md"]),
 ]
 

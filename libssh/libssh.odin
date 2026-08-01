@@ -65,6 +65,67 @@ MIN_MAJOR :: 0
 MIN_MINOR :: 10
 MIN_MICRO :: 6
 
+// The newest libssh otsh has been built and run against, as a record rather
+// than a limit: nothing checks it and no version is refused for being above it.
+// It is here so that "tested up to" has a number attached instead of being a
+// vague claim in prose. See docs/compatibility.md for the measurements.
+//
+// 0.10.6, 0.11.2, 0.12.1 and 0.12.2 were each built, tested and made to serve a
+// real ssh session. The struct layouts below were re-derived from each of those
+// headers with offsetof: every field otsh names sits at an identical offset in
+// all four. The structs mirror the 0.12 shape, so on older libssh they are a
+// superset: 0.10 defines two fewer trailing fields in each struct and 0.11 two
+// fewer in the server struct. That is safe because libssh bound-checks every
+// callback against the `size` we declare and only ever reads fields it knows
+// about, so the extra trailing slots are never touched. Every change across
+// 0.10 -> 0.11 -> 0.12 was a pure append; nothing was reordered or inserted.
+// docs/compatibility.md has the full offset tables.
+TESTED_MAX_MAJOR :: 0
+TESTED_MAX_MINOR :: 12
+TESTED_MAX_MICRO :: 2
+
+// The oldest Odin that compiles this package.
+//
+// Measured, not guessed: dev-2026-02 fails and dev-2026-03 builds and passes
+// the suite, both against libssh 0.10.6 in a container. dev-2026-02 fails
+// because `os.read_entire_file_from_path`, `crypto.zero_explicit` and
+// `crypto.is_zero_constant_time` do not exist yet and because a compound
+// literal this package uses was not legal then — four separate breakages, so
+// this is a floor with real content rather than an off-by-one.
+//
+// Odin has no numeric version constant. `ODIN_VERSION` is a string, and the
+// releases are dated, so lexicographic comparison happens to order them
+// correctly ("dev-2026-03" < "dev-2026-07" < "dev-2027-01"). That trick is only
+// as good as the format, hence the guard below.
+MIN_ODIN_VERSION :: "dev-2026-03"
+
+// The check, and the reason it is written defensively.
+//
+// Not every official Odin build reports a usable ODIN_VERSION: the prebuilt
+// `dev-2026-05` release for linux-arm64 reports `ODIN_VERSION == "dev-"` and
+// `odin version` prints `dev--nightly:`, because the release was cut without
+// the version baked in. Measured on that tarball; dev-2026-01, dev-2025-12a and
+// dev-2026-07a all report properly. A bare `#assert(ODIN_VERSION >= ...)` would
+// therefore reject a working compiler outright, with no way for the user to
+// override it.
+//
+// So the assert only fires when ODIN_VERSION actually looks like a dated
+// release — `dev-` followed by a date, 11 characters at minimum. Anything else
+// is treated as "cannot tell" and allowed through, which fails open: a truly
+// ancient compiler with a mangled version string gets the raw core-library
+// errors instead of this message. That is the same experience as having no
+// check at all, so nothing is lost, and the common case gets one clear line
+// instead of a dozen confusing ones.
+@(private)
+ODIN_VERSION_IS_DATED :: len(ODIN_VERSION) >= 11 && ODIN_VERSION[:4] == "dev-"
+// The message is a plain literal because Odin requires one there: a
+// concatenation of constants, even all-constant, is rejected with "is not a
+// constant string". So MIN_ODIN_VERSION appears twice; keep them in step.
+#assert(
+	!ODIN_VERSION_IS_DATED || ODIN_VERSION >= MIN_ODIN_VERSION,
+	"otsh needs Odin dev-2026-03 or newer; see docs/compatibility.md",
+)
+
 // --- return codes -----------------------------------------------------------
 
 OK :: 0
