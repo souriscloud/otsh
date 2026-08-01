@@ -39,6 +39,7 @@ NAV_TITLES = {
     "api-libssh.md": "libssh",
     "security.md": "Security model",
     "architecture.md": "Architecture",
+    "compatibility.md": "Compatibility",
     "deploy.md": "Deployment",
 }
 
@@ -48,7 +49,7 @@ NAV = [
     ("Guides", ["cookbook.md", "tui.md", "ssh.md", "sshtui.md"]),
     ("API reference", ["api-tui.md", "api-ssh.md", "api-sshtui.md", "api-libssh.md"]),
     ("Understanding", ["security.md", "architecture.md"]),
-    ("Operations", ["deploy.md"]),
+    ("Operations", ["deploy.md", "compatibility.md"]),
 ]
 
 ODIN_KW = r"""package|import|proc|struct|enum|union|bit_set|distinct|map|matrix|using|

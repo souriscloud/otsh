@@ -22,11 +22,26 @@ on:
   workflow_dispatch:
 
 # Nothing here writes to the repository: the jobs check out, build, test and
-# validate the docs, and no step uses GITHUB_TOKEN for anything else. Stating
-# the scope explicitly means the job token stays read-only no matter what the
-# repository's or organisation's default workflow permissions are set to.
+# validate the docs. The one place GITHUB_TOKEN is used is setup-odin, which
+# needs it to read a release asset off the Odin repository — a read, and
+# `contents: read` already covers it. Stating the scope explicitly means the
+# job token stays read-only no matter what the repository's or organisation's
+# default workflow permissions are set to.
 permissions:
   contents: read
+
+# The pinned Odin. Every blocking job builds against this exact tagged release
+# and nothing else, so a breaking change upstream cannot turn CI red on its own
+# schedule. dev-2026-07a is the compiler behind every claim in
+# docs/compatibility.md: the Linux container runs, the Windows 11 hardware run
+# on 2026-07-31, and the machine this package is developed on all report
+# `dev-2026-07-nightly:819fdc7`, which is what that release contains.
+#
+# Moving this pin is a deliberate act with a checklist — see the "upgrading a
+# dependency" section of docs/compatibility.md. The `odin-master` job below
+# exists so that moving it is never a surprise.
+env:
+  ODIN_RELEASE: dev-2026-07a
 
 jobs:
   # Linux carries every push: it is the 1x platform, it runs the full test
@@ -55,13 +70,19 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install libssh pkg-config
 
-      # otsh uses core:sys/posix, which tracks Odin's nightly rather than a
-      # tagged release.
+      # Pinned, not `branch: master`. Odin's tagged releases are snapshots of
+      # the same nightly line otsh needs for core:sys/posix, so pinning costs
+      # nothing in coverage and buys a build that does not change under us.
+      #
+      # `token` is not optional here: setup-odin downloads release assets
+      # through the GitHub API, and its README is explicit that a token must be
+      # set to use releases at all. Omitting it makes every pinned job fail to
+      # install a compiler.
       - name: Install Odin
         uses: laytan/setup-odin@v2
         with:
-          release: false
-          branch: master
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release: ${{ env.ODIN_RELEASE }}
 
       - name: Build packages and every example
         run: |
@@ -99,6 +120,67 @@ jobs:
             odin check "$ex" -collection:otsh=. -target:freebsd_amd64
           done
 
+  # The canary. Everything above builds against a pin, which is what keeps CI
+  # honest — but a pin also means upstream could break otsh months before
+  # anyone noticed, and the first person to find out would be a user upgrading
+  # their compiler. So one job tracks Odin's master, and it is allowed to fail.
+  #
+  # Read it as a notification, not a gate: a red X here means "the next Odin
+  # release will need work", and the work is to fix otsh and then move
+  # ODIN_RELEASE. It never blocks a merge and it never runs on a push, so it
+  # costs one 1x runner a week and nobody's time until it has something to say.
+  #
+  # `branch: master` with `release: false` is what the pinned jobs used to do;
+  # it compiles Odin from source, which is why this is the one job that wants
+  # its own LLVM and takes minutes rather than seconds.
+  odin-master:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install libssh (Linux)
+        run: sudo apt-get update && sudo apt-get install -y libssh-dev pkg-config clang
+
+      - name: Install Odin (master, unpinned — this is the point)
+        uses: laytan/setup-odin@v2
+        with:
+          release: false
+          branch: master
+
+      - name: Which compiler are we actually testing
+        run: odin version
+
+      - name: Build packages and every example
+        run: |
+          ./build.sh
+          for ex in examples/*/; do ./build.sh "$ex"; done
+
+      - name: Run tests
+        run: ./test.sh
+
+      # The cross-checks are part of the canary too: a core:sys/windows or
+      # core:sys/freebsd change upstream shows up here first, and those are
+      # platforms no runner in this file actually executes.
+      - name: Cross-type-check every package and example for Windows
+        run: |
+          for pkg in libssh ssh tui sshtui; do
+            odin check "$pkg" -collection:otsh=. -target:windows_amd64 -no-entry-point
+          done
+          for ex in examples/*/; do
+            odin check "$ex" -collection:otsh=. -target:windows_amd64
+          done
+
+      - name: Cross-type-check every package and example for FreeBSD
+        run: |
+          for pkg in libssh ssh tui sshtui; do
+            odin check "$pkg" -collection:otsh=. -target:freebsd_amd64 -no-entry-point
+          done
+          for ex in examples/*/; do
+            odin check "$ex" -collection:otsh=. -target:freebsd_amd64
+          done
+
   # macOS at 10x is the most expensive minute GitHub sells, and it is also the
   # platform this package is developed on, so a break here shows up on the
   # author's machine long before CI would tell them. Weekly, on demand, and for
@@ -116,8 +198,8 @@ jobs:
       - name: Install Odin
         uses: laytan/setup-odin@v2
         with:
-          release: false
-          branch: master
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release: ${{ env.ODIN_RELEASE }}
 
       - name: Build packages and every example
         run: |
@@ -179,8 +261,8 @@ jobs:
       - name: Install Odin
         uses: laytan/setup-odin@v2
         with:
-          release: false
-          branch: master
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release: ${{ env.ODIN_RELEASE }}
 
       # The linker finds ssh.lib through /LIBPATH:. There is no rpath on
       # Windows, so ssh.dll has to be on PATH for anything built here to start.

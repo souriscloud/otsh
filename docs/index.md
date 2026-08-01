@@ -99,6 +99,7 @@ Running one for real, and the parts of that job the library cannot do for you.
 | Page | What it covers |
 | --- | --- |
 | [Deployment and abuse mitigation](deploy.md) | The layers that go in front of the process: a hardened systemd unit, fail2ban on the audit log, nftables/pf rate limiting — plus what none of them stop. Ships working configs in `deploy/` |
+| [Compatibility](compatibility.md) | The dependency contract: which Odin version is pinned and why, the libssh floor and the tested matrix, the measured struct layouts across 0.10/0.11/0.12, and what to check when you upgrade either one |
 
 ## The shape of an app
 
