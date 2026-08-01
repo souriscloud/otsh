@@ -45,6 +45,7 @@ NAV_TITLES = {
     "api-libssh.md": "libssh",
     "security.md": "Security model",
     "architecture.md": "Architecture",
+    "bindings.md": "C bindings",
     "deploy.md": "Deployment",
     "CHANGELOG.md": "Changelog",
     "releasing.md": "Releasing",
@@ -56,7 +57,7 @@ NAV = [
     ("Tutorials", ["tutorial-tui.md", "tutorial-guestbook.md"]),
     ("Guides", ["cookbook.md", "tui.md", "ssh.md", "sshtui.md"]),
     ("API reference", ["api-tui.md", "api-ssh.md", "api-sshtui.md", "api-libssh.md"]),
-    ("Understanding", ["security.md", "architecture.md"]),
+    ("Understanding", ["security.md", "architecture.md", "bindings.md"]),
     ("Operations", ["deploy.md"]),
     ("Releases", ["CHANGELOG.md", "releasing.md", "migrating.md"]),
 ]
