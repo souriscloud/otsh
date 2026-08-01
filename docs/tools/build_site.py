@@ -19,7 +19,13 @@ OUT = os.path.join(DOCS, "site")
 
 # Order of the sidebar. Anything not listed is appended alphabetically.
 # Sources outside docs/ that are pulled into the site, mapped to output names.
-EXTERNAL = {os.path.join(os.path.dirname(DOCS), "README.md"): "readme.html"}
+EXTERNAL = {
+    os.path.join(os.path.dirname(DOCS), "README.md"): "readme.html",
+    # The changelog lives at the repository root, where a release process and
+    # GitHub both look for it. The output name keeps its case so that a
+    # `../CHANGELOG.md` link from docs/ rewrites onto exactly this file.
+    os.path.join(os.path.dirname(DOCS), "CHANGELOG.md"): "CHANGELOG.html",
+}
 
 # Sidebar labels. Page titles are full sentences, which wrap badly in a narrow
 # column, so the nav gets its own short names.
@@ -40,6 +46,9 @@ NAV_TITLES = {
     "security.md": "Security model",
     "architecture.md": "Architecture",
     "deploy.md": "Deployment",
+    "CHANGELOG.md": "Changelog",
+    "releasing.md": "Releasing",
+    "migrating.md": "Migrating",
 }
 
 NAV = [
@@ -49,6 +58,7 @@ NAV = [
     ("API reference", ["api-tui.md", "api-ssh.md", "api-sshtui.md", "api-libssh.md"]),
     ("Understanding", ["security.md", "architecture.md"]),
     ("Operations", ["deploy.md"]),
+    ("Releases", ["CHANGELOG.md", "releasing.md", "migrating.md"]),
 ]
 
 ODIN_KW = r"""package|import|proc|struct|enum|union|bit_set|distinct|map|matrix|using|
