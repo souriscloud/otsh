@@ -50,9 +50,11 @@ s.pty = Pty{cols = int(width), rows = int(height), px = ..., py = ..., present =
 return ls.OK
 ```
 
-From that point the channel itself is the terminal. Bytes the client sends
-arrive in `cb_channel_data` — those are keystrokes. Bytes written with
-`ssh.write` go out as ANSI escape sequences — those are the display.
+From that point the channel itself is the terminal. Bytes the client sends are
+parsed by libssh into the channel's own buffer and drained from there by
+`ssh.read`/`take_input` with `ssh_channel_read_nonblocking` (see the input-path
+comment at the top of `ssh/server.odin`) — those are keystrokes. Bytes written
+with `ssh.write` go out as ANSI escape sequences — those are the display.
 `cb_window_change` sets `s.resized = true` — that message is this protocol's
 `SIGWINCH`.
 
@@ -70,7 +72,7 @@ nothing under `ssh/` or `sshtui/` — by design, not by omission.
 `ssh.serve` (`ssh/server.odin`) does the one-time setup, then loops on
 accept:
 
-1. `ls.threads_set_callbacks(ls.threads_get_pthread())` followed by `ls.init()`
+1. `ls.threads_set_callbacks(ls.threads_get_default())` followed by `ls.init()`
    — in that order, because libssh needs its thread-safety hooks in place
    before any threaded use, and connections start their own threads
    immediately after accept.
@@ -78,62 +80,91 @@ accept:
 3. `ls.bind_new` / `ls.bind_options_set` / `ls.bind_listen` build the
    listening socket; `set_algorithms` applies the hardened KEX/cipher/MAC
    allow-lists (or `cfg`'s overrides).
-4. The accept loop calls `ls.bind_accept`, which blocks until a TCP connection
-   arrives. Each accepted connection gets a fresh heap-allocated `Session`
-   (`new(Session)`) and its own OS thread:
+4. The accept loop waits in `wait_readable(listen_fd, ACCEPT_POLL_MS)` — a
+   200 ms `poll(2)` on the listening socket — rather than in
+   `ssh_bind_accept`, which has no timeout of its own and would leave a stop
+   request unnoticed until the next client happened to connect. Only once the
+   socket is readable does it call `ls.bind_accept`, which cannot block: a
+   connection is already pending.
+5. Still on the accept loop, before any thread is committed: `peer_address`
+   resolves the numeric remote IP into `s.addr_buf`, an `.Accept` audit event
+   is emitted, and `limiter_acquire` reserves a slot. A connection over a
+   limit is audited as `.Reject`, disconnected and freed right there — no
+   thread and no handshake are ever spent on it.
+6. An accepted connection gets its own OS thread:
    `thread.create_and_start_with_poly_data(s, session_thread, self_cleanup = true)`.
    The accept loop does not wait for that thread — it goes straight back to
-   `ls.bind_accept`.
+   `wait_readable`. (If thread creation fails, the loop releases the slot and
+   drops the connection itself.)
 
-Everything from here happens on `session_thread`, one call per connection:
+Everything from here happens on `session_thread`, one call per connection.
+The `Session` and its limiter slot already exist; this thread owns releasing
+them.
 
-1. `peer_address` resolves the numeric remote IP; `limiter_acquire` reserves a
-   slot or the function returns immediately (dropped before any handshake
-   cost is paid).
-2. If `handshake_seconds > 0`, `ls.options_set(s.sess, .Timeout, &t)` sets
+1. If `handshake_seconds > 0`, `ls.options_set(s.sess, .Timeout, &t)` sets
    libssh's own socket timeout, so a client that opens a socket and says
    nothing cannot pin this thread forever.
-3. `ls.handle_key_exchange(s.sess)` negotiates ciphers and proves the server
-   owns the host key.
-4. `s.server_cb` (an `ls.Server_Callbacks`) is built and registered with
+2. `s.server_cb` (an `ls.Server_Callbacks`) is built and registered with
    `ls.set_server_callbacks`; `ls.set_auth_methods` advertises whichever
    methods `Server.methods` allows.
-5. `s.event = ls.event_new()`; `ls.event_add_session(s.event, s.sess)`.
-6. A pump loop drives authentication and channel setup:
+3. `ls.handle_key_exchange(s.sess)` negotiates ciphers and proves the server
+   owns the host key. It comes *after* step 2, not before — that ordering is
+   the fix for a one-in-three handshake hang, described at length under Known
+   rough edges below.
+4. `s.event = ls.event_new()`; `ls.event_add_session(s.event, s.sess)`.
+5. A pump loop drives authentication and channel setup:
    `for i := 0; i < 200 && !(s.authenticated && s.chan != nil && s.shell); i += 1 { ls.event_dopoll(s.event, 100) }`.
    Every libssh callback for this connection — `cb_auth_none`,
    `cb_auth_password`, `cb_auth_pubkey`, `cb_channel_open`, `cb_pty_request`,
    `cb_shell_request`, and so on — fires from inside these `event_dopoll`
    calls, on this thread.
-7. Once authenticated with an open channel and a shell request, `Handler` (the
+6. Once authenticated with an open channel and a shell request, `Handler` (the
    caller-supplied `s.server.handler`) runs and owns the session until it
    returns.
-8. `ls.channel_request_send_exit_status(s.chan, 0)`, then the `defer` block
-   from step 1 runs: send channel EOF, close and free the channel, remove and
-   free the event, disconnect the session, zero `fp_buf`/`id_buf`, free the
-   libssh session, `free(s)`, and release the limiter slot.
+7. `ls.channel_request_send_exit_status(s.chan, 0)`, then the deferred
+   `.Session_End` audit event (declared last, so it runs first, while
+   `addr_buf` and `id_buf` still hold anything), then the thread's `defer`
+   block in the order it is written: release the limiter slot, send channel
+   EOF, close and free the channel, remove and free the event, disconnect the
+   session, zero `fp_buf`/`id_buf`, free the libssh session, `free(s)`. The
+   slot goes back first, which means capacity is restored before the teardown
+   work rather than after it.
 
 Because every callback for a given connection fires inside that connection's
 own `event_dopoll` call, on that connection's own thread, nothing in the
-session path (`Session` fields, the ring buffer, the pty geometry) needs a
-lock. The only cross-thread shared state in the whole package is `Limiter`
-(see Concurrency, below).
+session path (`Session` fields, the pty geometry) needs a lock. The only
+cross-thread shared state in the whole package is `Limiter` (see Concurrency,
+below).
+
+**Shutdown runs that same path backwards.** `serve`'s signal handlers do the
+one thing a `proc "c"` handler may safely do — an atomic store into
+`signal_requested` — and the polling accept loop notices it within
+`ACCEPT_POLL_MS`, so nothing needs to be interrupted. The loop then breaks,
+`serve` sets `Server.draining`, and every session's next `ssh.read` reports the
+connection as finished; each app's own loop unwinds on that, restores the
+client's terminal on the way out, and returns through its `Handler`, which
+frees the session and releases its slot. `drain_sessions` polls the limiter's
+`total` until it reaches zero, bounded by `Config.shutdown_seconds`
+(`DEFAULT_SHUTDOWN_SECONDS`, 5). Measured: `SIGTERM` with 3 live `tracker`
+sessions completed in 0.55 s with all 3 terminals restored. The header comment
+in `ssh/shutdown.odin` and the Shutdown section of `./ssh.md` have the full
+story.
 
 ## The C callback boundary
 
 Every libssh callback is declared `proc "c"` — no implicit Odin context. Two
 of them cross back into ordinary Odin deliberately: `allow` (which calls the
-user's `Authenticator`) and `derive_id` (which calls `pseudonym`, using
-`context.temp_allocator` for hex encoding) both do
-`context = runtime.default_context()` before doing anything that needs an
-allocator, and `derive_id` immediately `defer free_all(context.temp_allocator)`
-to avoid growing that arena forever on a long-lived thread. No other callback
-touches an allocator, which is why `Session` carries fixed-size buffers
-instead of strings: `user_buf: [64]u8`, `term_buf: [32]u8`, `fp_buf: [96]u8`,
-`kt_buf: [32]u8`, `id_buf: [ID_SIZE]u8` (32 bytes), `addr_buf: [64]u8`. Procs
-like `copy_cstr`, `set_user`, and the accessors (`user`, `term`,
-`fingerprint`, `key_type`, `id`, `remote_addr`) are all `proc "contextless"` —
-they cannot allocate even if they wanted to.
+user's `Authenticator` and the audit sink) and `derive_id` (which calls
+`pseudonym`), and both do `context = runtime.default_context()` first.
+`derive_id` needs one only because the crypto calls underneath it are ordinary
+Odin procs: `pseudonym` writes its hex straight into the session's fixed
+`id_buf` and returns a string viewing it, allocating nothing, so there is no
+arena to free afterwards. No other callback touches an allocator, which is why
+`Session` carries fixed-size buffers instead of strings: `user_buf: [64]u8`,
+`term_buf: [32]u8`, `fp_buf: [96]u8`, `kt_buf: [64]u8`, `id_buf: [ID_SIZE]u8`
+(32 bytes), `addr_buf: [64]u8`. Procs like `copy_cstr`, `set_user`, and the
+accessors (`user`, `term`, `fingerprint`, `key_type`, `id`, `remote_addr`) are
+all `proc "contextless"` — they cannot allocate even if they wanted to.
 
 `ls.Server_Callbacks` and `ls.Channel_Callbacks` (`libssh/libssh.odin`) are
 laid out to match `libssh/callbacks.h` field-for-field, in order — libssh
@@ -209,11 +240,13 @@ This is the least obvious thing in the codebase, and worth documenting
 carefully.
 
 `ssh_event_dopoll`'s `timeout_ms` argument looks like it should block for up
-to that long when there is nothing to do. It does not. Measured directly:
-100% of calls returned in under 5 ms regardless of the timeout passed, and a
-naive loop that called `event_dopoll` on a fixed interval and nothing else spun at
-roughly 22,600 frames per second (67,939 frames measured over 3 seconds) —
-burning a full core per connection for a session that is sitting idle.
+to that long when there is nothing to do. On an established session with an
+open channel — which is where every measurement below was taken, and where the
+frame loop lives — it does not. Measured directly: 100% of calls returned in
+under 5 ms regardless of the timeout passed, and a naive loop that called
+`event_dopoll` on a fixed interval and nothing else spun at roughly 22,600
+frames per second (67,939 frames measured over 3 seconds) — burning a full
+core per connection for a session that is sitting idle.
 
 The fix has two parts:
 
@@ -221,10 +254,12 @@ The fix has two parts:
 first drains anything libssh already holds for the channel (`take_input`,
 which never blocks), pumping the protocol once with `event_dopoll(s.event, 0)`
 if the first drain comes up empty. Only if there is still nothing does it get
-the raw file descriptor with `ls.get_fd(s.sess)` and call `posix.poll` on it
-directly, for up to `timeout_ms`. `poll(2)` genuinely blocks the OS thread
-until the socket is readable or the timeout elapses. Once `poll` says data is
-ready, `event_dopoll(s.event, 0)` is called once more — purely to let libssh
+the raw file descriptor with `ls.get_fd(s.sess)` and wait on it directly with
+`wait_readable(fd, timeout_ms)` — `posix.poll` in `ssh/net_posix.odin`,
+`WSAPoll` in `ssh/net_windows.odin`, the package's one platform split. That
+call genuinely blocks the OS thread until the socket is readable or the
+timeout elapses. Once it says data is ready, `event_dopoll(s.event, 0)` is
+called once more — purely to let libssh
 parse the bytes it can now read — and `take_input` drains the result.
 libssh's event loop does the protocol parsing; this code does the actual
 waiting. Draining *before* waiting is what keeps the tail of a large paste
@@ -364,7 +399,10 @@ The only shared mutable state anywhere in the `ssh` package is `Limiter`
 (`ssh/limits.odin`), and it is the only place with a mutex: `mu: sync.Mutex`
 guards `total` (the process-wide session count) and `per_ip` (a
 `map[string]int`). `limiter_acquire`/`limiter_release` lock around every read
-and write of both. The map keys are cloned on insert
+and write of both, and they genuinely do run on different threads: a slot is
+taken by the accept loop and released by that connection's own thread, and
+`drain_sessions` reads `total` under the same lock from `serve`'s thread while
+shutting down. The map keys are cloned on insert
 (`strings_clone(addr)`) because the `addr` string handed in points into a
 `Session`'s own `addr_buf`, which is freed when that session tears down — a
 borrowed key would dangle. On release, an IP's count that drops to zero is
@@ -394,8 +432,6 @@ were not. What remains is the catch-up latency itself: an app consumes one
 keystrokes — including `ctrl+c`, which is just a byte in the same queue — get
 acted on. Killing the ssh client is always available and tears the session
 down through the normal path.
-
-
 
 **Server callbacks must be installed before key exchange — this was a real
 one-in-three hang.** `session_thread` sets `ssh_set_server_callbacks` and
@@ -448,31 +484,48 @@ same symptom and misattributes it to buffer draining.
 itself answers "not supported" without this code being involved at all.
 
 **The auth/channel-setup pump loop is bounded by iteration count, not
-time**, and given the blocking-problem finding above, that distinction
-matters. `session_thread`'s loop —
+time.** `session_thread`'s loop —
 `for i := 0; i < 200 && !(...); i += 1 { ls.event_dopoll(s.event, 100) }` —
-calls `event_dopoll` with a 100 ms timeout that, as established, does not
-actually wait 100 ms. So this loop is not "up to 20 seconds of polling"; it
-can run all 200 iterations in a handful of milliseconds if the client is slow
-to respond, then give up. The actual backstop against a client that opens a
-connection and never authenticates is the `handshake_seconds` /
-`SSH_OPTIONS_TIMEOUT` socket timeout set earlier in `session_thread`, not this
-loop's iteration count. If a connection appears to hang or spin briefly
-before the shell starts, this is the loop to look at — it predates the
-`poll(2)`-based fix in `ssh.read` and does not use it.
+gives up after 200 iterations, whatever wall-clock time those took. What that
+budget is worth in seconds depends on whether `event_dopoll` waits, and the
+answer differs by phase: the "returns immediately" finding above was measured
+on an *established* session with an open channel, and does not carry over to
+the pre-shell pump. Measured against a password-only server
+(`methods = {.Password}`) with a real OpenSSH client, timing from when the
+prompt appeared: a password typed at 0.5 s, at 8 s and at 15 s got a session
+every time. Only at 30 s did the server drop the client — with
+`Received disconnect ... 11: Bye Bye`, i.e. the `handshake_seconds` socket
+timeout (default 20) firing, not this loop running out of iterations. So during
+authentication `event_dopoll(s.event, 100)` does in fact wait, and 200
+iterations is ample.
+
+What remains true is where the real backstop lives: a client that opens a
+connection and never authenticates is cut off by the `handshake_seconds` /
+`SSH_OPTIONS_TIMEOUT` socket timeout set at the top of `session_thread`, not
+by this loop's iteration count. The iteration bound is a belt-and-braces cap,
+not the thing keeping a thread from being held forever. If a connection
+appears to hang before the shell starts, this is still the loop to look at —
+it predates the `poll(2)`-based fix in `ssh.read` and does not use it.
 
 **libssh's threading callbacks are set before `ssh_init`.**
-`ls.threads_set_callbacks(ls.threads_get_pthread())` runs before `ls.init()`
+`ls.threads_set_callbacks(ls.threads_get_default())` runs before `ls.init()`
 in `ssh.serve` — deliberately, since connection threads start immediately
 after `serve`'s accept loop begins, and libssh needs its thread-safety hooks
 already installed before any concurrent use touches its internal state.
 Reordering this would not fail loudly; it would show up as sporadic
-corruption once real concurrent connections arrive.
+corruption once real concurrent connections arrive. The binding is
+`ssh_threads_get_default` and not `ssh_threads_get_pthread` for a separate
+reason: `callbacks.h` declares the pthread spelling on every platform, but a
+Windows libssh only defines the default and noop ones, so binding the pthread
+name links everywhere except Windows (see the comment on the binding in
+`libssh/libssh.odin`).
 
 **`Session` is under 1 KB.** Six fixed identity/address buffers, the two
-libssh callback structs, `Pty`, assorted ints and bools. It used to be 17 KB,
-then 4.8 KB, when it carried an inline input ring; input buffering now lives
-in libssh's own per-channel buffer (see "Input flow and backpressure"), which
-costs nothing for an idle connection and is window-bounded at ~2 MiB for one
-being flooded. `tests/ssh_test.odin:session_stays_small` holds the struct's
-size down so a large buffer cannot quietly move back inline.
+libssh callback structs, `Pty`, assorted ints and bools — 792 bytes measured
+with `size_of(ssh.Session)` on darwin/arm64. It used to be 17 KB, then 4.8 KB,
+when it carried an inline input ring; input buffering now lives in libssh's
+own per-channel buffer (see "Input flow and backpressure"), which costs
+nothing for an idle connection and is window-bounded at ~2 MiB for one being
+flooded. `tests/ssh_test.odin:session_stays_small` holds the struct's size
+down — a 2 KiB ceiling rather than an exact figure, since padding is the
+compiler's business — so a large buffer cannot quietly move back inline.
