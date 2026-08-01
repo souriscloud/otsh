@@ -66,6 +66,15 @@ ALL_AUTH :: Auth_Methods{.None, .Password, .Publickey}
 
 // What an `Authenticator` is told. For `.Publickey`, the key's signature has
 // already been verified — unverified probes never reach application code.
+//
+// Example:
+//
+//	authenticate :: proc(req: ssh.Auth_Request) -> bool {
+//		if req.method == .Publickey {
+//			return req.fingerprint == allowed_fingerprint
+//		}
+//		return false
+//	}
 Auth_Request :: struct {
 	user:        string,
 	method:      Auth_Method,
@@ -90,6 +99,12 @@ Auth_Request :: struct {
 // `id` from Info, and show non-members a "you are not on the list" screen
 // inside the app. They are equally excluded and you learn exactly one key.
 // See examples/members.
+//
+// Example:
+//
+//	authenticate :: proc(req: ssh.Auth_Request) -> bool {
+//		return true // accept everyone; authorize inside the app instead
+//	}
 Authenticator :: #type proc(req: Auth_Request) -> bool
 
 // Server-wide state, shared by every connection. Internal; reach it through
@@ -190,17 +205,35 @@ Session :: struct {
 
 // The username the client offered. Client-chosen and unverified — never use it
 // as identity; use `id` instead.
+//
+// Example:
+//
+//	handler :: proc(s: ^ssh.Session) {
+//		name := ssh.user(s) // client-chosen; do not treat it as verified identity
+//	}
 user :: proc "contextless" (s: ^Session) -> string {
 	return string(s.user_buf[:s.user_len])
 }
 
 // The client's `$TERM`, e.g. "xterm-256color". Empty if no pty was requested.
+//
+// Example:
+//
+//	handler :: proc(s: ^ssh.Session) {
+//		t := ssh.term(s) // "xterm-256color", "", ...
+//	}
 term :: proc "contextless" (s: ^Session) -> string {
 	return string(s.term_buf[:s.term_len])
 }
 
 // SHA256 fingerprint of the key the client authenticated with, or "" if they
 // did not use one. Stable across connections — use it as an account id.
+//
+// Example:
+//
+//	handler :: proc(s: ^ssh.Session) {
+//		fp := ssh.fingerprint(s) // "" unless the client used a key
+//	}
 fingerprint :: proc "contextless" (s: ^Session) -> string {
 	return string(s.fp_buf[:s.fp_len])
 }
@@ -214,6 +247,12 @@ key_type :: proc "contextless" (s: ^Session) -> string {
 // Pseudonymous account id: HMAC(server secret, fingerprint). Empty unless an
 // identity secret is configured and the client used a key. Store this, not the
 // fingerprint. See identity.odin.
+//
+// Example:
+//
+//	handler :: proc(s: ^ssh.Session) {
+//		account := ssh.id(s) // "" unless Config.identity_secret is set
+//	}
 id :: proc "contextless" (s: ^Session) -> string {
 	return string(s.id_buf[:s.id_len])
 }
@@ -241,6 +280,14 @@ size :: proc "contextless" (s: ^Session) -> (cols, rows: int) {
 // actually block for us — it returns immediately every time, which would spin
 // a core per session. So libssh gets to do the parsing while we do the waiting,
 // on the session socket directly.
+//
+// Example:
+//
+//	buf: [4096]u8
+//	n, ok := ssh.read(s, buf[:], 100) // waits up to 100ms
+//	if !ok {
+//		return // connection is gone
+//	}
 read :: proc(s: ^Session, buf: []u8, timeout_ms: int) -> (n: int, ok: bool) {
 	// A draining server reports every session as finished. An app's loop is
 	// built to exit when its input dies, so this is what turns "stop the
@@ -344,6 +391,11 @@ take_input :: proc(s: ^Session, buf: []u8) -> int {
 // cope with a short write: `tui.run` repaints in full on the next frame, since
 // a partially sent frame leaves its diff baseline describing a screen the
 // terminal is not showing.
+//
+// Example:
+//
+//	msg := "hello\r\n"
+//	n := ssh.write(s, transmute([]u8)msg)
 write :: proc(s: ^Session, data: []u8) -> int {
 	if len(data) == 0 || s.chan == nil || s.eof {
 		return 0
@@ -402,6 +454,14 @@ take_resize :: proc "contextless" (s: ^Session) -> bool {
 
 // How to run the server. Every field has a documented default, so the zero value
 // is a working — if wide open — public server on port 2222.
+//
+// Example:
+//
+//	ssh.serve(ssh.Config{
+//		host_key_path = "hostkey",
+//		handler       = handler,
+//		authenticate  = authenticate,
+//	})
 Config :: struct {
 	host:              string,
 	port:              int,
@@ -683,11 +743,10 @@ DEFAULT_PORT :: 2222
 // Host key path used when `Config.host_key_path` is empty.
 DEFAULT_HOST_KEY :: "hostkey"
 
-// Binds, listens, and accepts connections until the process exits, spawning one
-// thread per connection. Returns false if setup fails; otherwise blocks.
-// Refuses to continue on a libssh too old to have the Terrapin fix. The check
-// is at runtime, not compile time, because the shared library that gets loaded
-// is not necessarily the one the bindings were compiled against.
+// Guards `serve` against a libssh too old to have the Terrapin fix (see
+// `serve`'s own doc comment). The check is at runtime, not compile time,
+// because the shared library that gets loaded is not necessarily the one the
+// bindings were compiled against.
 @(private)
 check_libssh_version :: proc() -> bool {
 	required := ls.version_int(ls.MIN_MAJOR, ls.MIN_MINOR, ls.MIN_MICRO)
@@ -706,6 +765,19 @@ check_libssh_version :: proc() -> bool {
 	return false
 }
 
+// Binds, listens, and accepts connections until the process exits, spawning one
+// thread per connection. Returns false if setup fails; otherwise blocks.
+// Refuses to continue on a libssh too old to have the Terrapin fix.
+//
+// Most apps want `sshtui.serve`, which adapts a `tui.App` for you. Use this
+// directly only when working with the byte stream yourself:
+//
+// Example:
+//
+//	handler :: proc(s: ^ssh.Session) {
+//		ssh.write_string(s, fmt.tprintf("hello, %s\r\n", ssh.user(s)))
+//	}
+//	ssh.serve(ssh.Config{handler = handler})
 serve :: proc(cfg: Config) -> bool {
 	if !check_libssh_version() {
 		return false

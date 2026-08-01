@@ -13,6 +13,11 @@ import "core:sync"
 // Per field: 0 means "use the default below", negative means "no limit".
 // That way the zero value of the whole struct is the safe default rather than
 // an accidental free-for-all, and you can still opt out of any single limit.
+//
+// Example:
+//
+//	limits := ssh.Limits{max_sessions = 64, max_per_ip = 4} // tighter than DEFAULT_LIMITS
+//	ssh.serve(ssh.Config{limits = limits, handler = handler})
 Limits :: struct {
 	// Total concurrent sessions.
 	max_sessions:      int,

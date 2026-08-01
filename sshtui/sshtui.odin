@@ -20,6 +20,14 @@ import "../ssh"
 import "../tui"
 
 // What an app is told about the client it is serving.
+//
+// Example:
+//
+//	create :: proc(info: sshtui.Info) -> tui.App {
+//		m := new(Model)
+//		m.who = info.user
+//		return tui.App{data = m, update = update, view = view}
+//	}
 Info :: struct {
 	user:        string, // username the client offered — unverified, they pick it
 	term:        string, // $TERM, e.g. "xterm-256color"
@@ -43,7 +51,9 @@ Info :: struct {
 // `destroy` and `on_disconnect` — and are freed with the connection.
 //
 // To keep any of them for longer (a roster keyed by `id`, an audit record, a
-// queue consumed by another thread), take an owned copy:
+// queue consumed by another thread), take an owned copy.
+//
+// Example:
 //
 //	saved := sshtui.clone_info(info)
 //	// ... later, when you are done with it:
@@ -76,6 +86,13 @@ delete_info :: proc(info: Info, allocator := context.allocator) {
 }
 
 // Called once per connection, on that connection's own thread.
+//
+// Example:
+//
+//	create :: proc(info: sshtui.Info) -> tui.App {
+//		return tui.App{data = new(Model), update = update, view = view}
+//	}
+//	destroy :: proc(app: tui.App) {free(app.data)}
 Create_Proc :: #type proc(info: Info) -> tui.App
 // Called after the app's loop ends. Free whatever `create` allocated.
 Destroy_Proc :: #type proc(app: tui.App)
@@ -85,6 +102,15 @@ DEFAULT_FPS :: 30
 
 // How to serve your app. The zero value works: it serves on 0.0.0.0:2222 with a
 // generated host key at ./hostkey, at 30fps, accepting every client.
+//
+// Example:
+//
+//	sshtui.serve(sshtui.Config{
+//		port          = 2222,
+//		host_key_path = "hostkey",
+//		create        = create,
+//		destroy       = destroy,
+//	})
 Config :: struct {
 	host:          string, // default ssh.DEFAULT_HOST ("0.0.0.0")
 	port:          int, // default ssh.DEFAULT_PORT (2222)
@@ -122,6 +148,10 @@ Config :: struct {
 }
 
 // Blocks, serving connections until the process exits.
+//
+// Example:
+//
+//	sshtui.serve(sshtui.Config{create = create, destroy = destroy})
 serve :: proc(cfg: Config) -> bool {
 	// Heap-allocated so every session thread can reach it through user_data,
 	// rather than through a package global.
@@ -198,6 +228,15 @@ on_session :: proc(s: ^ssh.Session) {
 
 // Runs the same App against the local terminal. Handy during development:
 // one flag switches between `--local` and serving.
+//
+// Example:
+//
+//	cfg := sshtui.Config{create = create, destroy = destroy}
+//	if local {
+//		sshtui.run_local(cfg)
+//	} else {
+//		sshtui.serve(cfg)
+//	}
 run_local :: proc(cfg: Config) -> bool {
 	l: tui.Local
 	if !tui.local_enter_raw(&l) {

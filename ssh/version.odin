@@ -35,6 +35,12 @@
 //	#assert(sshtui.VERSION_MAJOR == 0 && sshtui.VERSION_MINOR >= 1)
 package ssh
 
+// The first of the three numbers described above. Assert against it at
+// compile time if your app needs a particular API:
+//
+// Example:
+//
+//	#assert(ssh.VERSION_MAJOR == 0 && ssh.VERSION_MINOR >= 1)
 VERSION_MAJOR :: 0
 VERSION_MINOR :: 2
 VERSION_PATCH :: 0

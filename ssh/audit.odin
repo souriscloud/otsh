@@ -171,6 +171,10 @@ AUDIT_LINE_MAX :: 320
 // because events fire from the accept loop and from every session thread at
 // once: two partial writes would interleave into a line no filter can parse.
 // Nothing here allocates, so it is safe on the connection's critical path.
+//
+// Example:
+//
+//	ssh.serve(ssh.Config{audit = ssh.audit_stderr, handler = handler})
 audit_stderr :: proc(e: Audit_Event) {
 	buf: [AUDIT_LINE_MAX]u8
 	// One byte held back so the newline always fits, even in the (unreachable)

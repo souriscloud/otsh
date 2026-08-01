@@ -36,6 +36,13 @@ Identity_Secret :: struct {
 // exactly like the host key: back it up, keep it 0600, never commit it.
 // Losing it does not leak anything — it just re-pseudonymises everybody, which
 // means every user looks like a new user.
+//
+// Most apps just set Config.identity_secret and never call this directly.
+// It exists for tooling that needs the secret without starting a server:
+//
+// Example:
+//
+//	secret, ok := ssh.load_or_create_secret("identity-secret")
 load_or_create_secret :: proc(path: string) -> (secret: Identity_Secret, ok: bool) {
 	if data, read_err := os.read_entire_file_from_path(path, context.allocator); read_err == nil {
 		// Zero it before freeing: this is the long-lived key every pseudonym

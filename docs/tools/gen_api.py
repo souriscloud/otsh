@@ -48,6 +48,20 @@ def classify(name, rhs):
     return "Constants"
 
 
+def doc_line(raw):
+    """Text of one `//`-prefixed doc-comment line, keeping its indentation.
+
+    Strips only the leading `//` and at most one following space — never a
+    tab. That lets a doc comment carry a tab-indented block (render() turns a
+    run of those into a fenced code block) without losing the indentation
+    that marks it as one.
+    """
+    text = raw[2:]
+    if text[:1] == " ":
+        text = text[1:]
+    return text.rstrip()
+
+
 def signature(lines, i):
     """The declaration text, trimmed at the body brace but keeping the params."""
     buf, depth, started = [], 0, False
@@ -108,7 +122,7 @@ def parse(pkg):
                     elif lm:
                         link = lm.group(1)
                     elif stripped.startswith("//"):
-                        doc.insert(0, stripped[2:].strip())
+                        doc.insert(0, doc_line(stripped))
                     j -= 1
                 if priv or fm.group(1) in seen:
                     continue
@@ -130,7 +144,7 @@ def parse(pkg):
                 if lines[j].startswith("@(private"):
                     priv = True
                 elif lines[j].startswith("//"):
-                    doc.insert(0, lines[j][2:].strip())
+                    doc.insert(0, doc_line(lines[j]))
                 j -= 1
             if priv or name in seen:
                 continue
@@ -141,6 +155,51 @@ def parse(pkg):
                 "sig": signature(lines, i), "doc": "\n".join(doc).strip(),
                 "src": f"{rel}:{i+1}", "c": None,
             })
+    return out
+
+
+def render_doc(doc):
+    """A doc string as Markdown lines, fencing tab-indented runs as code.
+
+    A doc comment can carry a tab-indented block (see doc_line). Left alone,
+    the site renderer has no indented-code rule and would glue it into the
+    surrounding paragraph as flat prose — so each run of lines starting with
+    a tab becomes a fenced block instead, with exactly one leading tab
+    stripped from every line in it (preserving any deeper indentation inside
+    the block).
+
+    The convention this project uses: a block introduced by a line that reads
+    exactly "Example:" is Odin and is fenced ```odin. Anything else — a
+    table, a line-format grammar, the audit event list — is not code and
+    stays plain ``` so a plain-Markdown viewer never syntax-highlights
+    something that is not actually Odin.
+    """
+    lines = doc.split("\n")
+    out = []
+    example = False
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        if ln.startswith("\t"):
+            block = []
+            while i < len(lines) and lines[i].startswith("\t"):
+                block.append(lines[i][1:])
+                i += 1
+            if out and out[-1] != "":
+                out.append("")
+            out.append("```odin" if example else "```")
+            out += block
+            out.append("```")
+            if i < len(lines) and lines[i] != "":
+                out.append("")
+            example = False
+            continue
+        if ln.strip() == "Example:":
+            example = True
+        elif ln.strip():
+            example = False
+        out.append(ln)
+        i += 1
     return out
 
 
@@ -174,7 +233,7 @@ def render(pkg, import_path, blurb, syms):
             L += [f"### `{s['name']}`", ""]
             L += ["```odin", s["sig"], "```", ""]
             if s["doc"]:
-                L += [s["doc"], ""]
+                L += render_doc(s["doc"]) + [""]
             else:
                 undocumented += 1
             # Plain Markdown only — the site renderer escapes raw HTML, and

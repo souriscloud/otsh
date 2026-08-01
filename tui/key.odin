@@ -44,6 +44,12 @@ Key_Kind :: enum u8 {
 
 // A keypress. Note that Ctrl+C arrives here rather than as a signal, because the
 // client's terminal is in raw mode.
+//
+// Example:
+//
+//	if k, ok := msg.(tui.Key); ok && k.kind == .Enter {
+//		// submit
+//	}
 Key :: struct {
 	kind:  Key_Kind,
 	r:     rune, // valid when kind == .Rune
@@ -82,6 +88,19 @@ Input :: union {
 //
 //	ok == false  -> incomplete sequence, wait for more bytes
 //	n            -> bytes consumed
+//
+// `run` already drives this for you; call it directly only if you are
+// building your own dispatch loop over a `Backend`.
+//
+// Example:
+//
+//	ev, n, ok := tui.parse_input(buf)
+//	if ok {
+//		switch e in ev {
+//		case tui.Key:   // e.kind, e.r
+//		case tui.Mouse: // e.x, e.y
+//		}
+//	}
 parse_input :: proc(buf: []u8) -> (ev: Input, n: int, ok: bool) {
 	if len(buf) == 0 {
 		return nil, 0, false
@@ -364,6 +383,11 @@ parse_sgr_mouse :: proc(buf: []u8) -> (ev: Input, n: int, ok: bool) {
 }
 
 // Human-readable name, handy for help bars and debugging.
+//
+// Example:
+//
+//	buf: [16]u8
+//	label := tui.key_name(tui.Key{kind = .Enter}, buf[:]) // "enter"
 key_name :: proc(k: Key, buf: []u8) -> string {
 	n := 0
 	put :: proc(buf: []u8, n: ^int, s: string) {

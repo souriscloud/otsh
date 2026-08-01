@@ -57,6 +57,14 @@ shutting_down :: proc "contextless" () -> bool {
 // Asks `srv` to stop: the accept loop exits, connected sessions are told their
 // input has finished, and `serve` returns once they are gone or the deadline
 // passes. Safe to call from any thread, including from inside a Handler.
+//
+// Example:
+//
+//	handler :: proc(s: ^ssh.Session) {
+//		if ssh.user(s) == "admin-stop" {
+//			ssh.shutdown(s.server) // ask the whole server to stop
+//		}
+//	}
 shutdown :: proc(srv: ^Server) {
 	if srv == nil {
 		return

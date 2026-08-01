@@ -1348,7 +1348,7 @@ proc(s: cstring)
 proc() -> Threads_Callbacks
 ```
 
-The platform's own threading backend: pthreads on unix, and on Windows the winlocks one. Deliberately NOT ssh_threads_get_pthread — callbacks.h declares that on every platform, but a Windows libssh only *defines* ssh_threads_get_default and ssh_threads_get_noop, so binding the pthread spelling links everywhere except the one place it is checked: error LNK2019: unresolved external symbol ssh_threads_get_pthread On unix the two are the same function's result, so nothing changes there.
+The platform's own threading backend: pthreads on unix, and on Windows the winlocks one. Deliberately NOT ssh_threads_get_pthread — callbacks.h declares that on every platform, but a Windows libssh only *defines* ssh_threads_get_default and ssh_threads_get_noop, so binding the pthread spelling links everywhere except the one place it is checked:   error LNK2019: unresolved external symbol ssh_threads_get_pthread On unix the two are the same function's result, so nothing changes there.
 
 *libssh/libssh.odin:298* · C: `ssh_threads_get_default`
 
