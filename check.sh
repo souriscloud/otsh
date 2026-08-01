@@ -30,8 +30,8 @@ step "packages + default example" ./build.sh
 for ex in examples/*/; do
 	step "example $(basename "$ex")" ./build.sh "$ex"
 done
-rm -f tracker whoami members guestbook stopwatch
-rm -f tracker.exe whoami.exe members.exe guestbook.exe stopwatch.exe *.pdb
+rm -f tracker whoami members guestbook stopwatch notes
+rm -f tracker.exe whoami.exe members.exe guestbook.exe stopwatch.exe notes.exe *.pdb
 
 echo "tests"
 if out=$(./test.sh 2>&1); then

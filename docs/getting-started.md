@@ -548,6 +548,15 @@ warning catching a misconfigured deploy for you.
 
 ## Where to go next
 
+- [`./concepts.md`](./concepts.md) — if any of the above felt like magic:
+  what a terminal actually is, what ANSI escapes are, and why answering
+  `pty-req` without allocating a pty works. No otsh knowledge assumed.
+- The tutorials, in rising order of scope:
+  [a first app in ten minutes](./tutorial-first-app.md),
+  [a stopwatch with no SSH involved](./tutorial-tui.md),
+  [a shared guestbook](./tutorial-guestbook.md),
+  [a multi-view notes app](./tutorial-notes.md). Each builds a complete
+  program that ships in `examples/`.
 - [`./tui.md`](./tui.md) — drawing and input: `Screen`, `Style`, `Msg`, the
   key/mouse event model.
 - [`./ssh.md`](./ssh.md) — the server API underneath sshtui: `ssh.Config`,
