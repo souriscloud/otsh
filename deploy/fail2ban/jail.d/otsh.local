@@ -63,15 +63,28 @@ bantime  = 1h
 
 # --- ban action --------------------------------------------------------------
 #
-# Leave commented to inherit the distribution default from jail.conf (usually
-# iptables-multiport, or nftables-multiport on a modern nftables-only system).
-# Set it explicitly if the default does not match your firewall:
+# Set explicitly, not inherited, because the inherited default fails OPEN.
+# fail2ban 1.1.0's jail.conf defaults to banaction = iptables-multiport, and
+# Debian does not override it — so on an nftables-only system with no iptables
+# binary (a minimal Debian 13, measured 2026-08-01) the sixth failure produces
+# a ban that exists only on paper: `fail2ban-client status otsh` lists the
+# address as banned while every actionban invocation dies with
+# "/bin/sh: 1: iptables: not found" in fail2ban.log, and the "banned" client
+# connects and authenticates as if nothing happened. Nothing but that log line
+# tells you — status keeps reporting the ban as real.
 #
-#banaction = nftables-multiport
+# nftables is the right dependency to require: layer 1 of this stack
+# (deploy/nftables-ratelimit.conf) already needs it. If your firewall really
+# is legacy iptables, set iptables-multiport here instead — and whichever you
+# pick, prove it once by banning yourself from a non-ignored address and
+# watching the connection actually die. A ban you have not watched block a
+# packet is a report, not a ban.
+banaction = nftables-multiport
 #
 # fail2ban's nftables action manages its own table (`inet f2b-table`) and its
 # own sets. It does not touch, and is not touched by, the standing rate limits
-# in deploy/nftables-ratelimit.conf — the two layers coexist by design. Keep
+# in deploy/nftables-ratelimit.conf — the two layers coexist by design
+# (verified live: both tables loaded, each dropping its own traffic). Keep
 # them in separate tables so `nft flush table` on one never takes out the
 # other.
 
