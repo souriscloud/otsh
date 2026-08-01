@@ -30,7 +30,8 @@ Three things to know before anything else:
 - `create` is called once per connection and returns the `tui.App` for it.
 - `destroy` is called once, after that connection's app loop ends, to free
   whatever `create` allocated.
-- `serve` blocks — it accepts connections until the process exits.
+- `serve` blocks — it accepts connections until the server is asked to stop
+  (`Ctrl+C`, `SIGTERM`, or `ssh.shutdown`).
 
 A complete minimal program:
 
@@ -97,6 +98,8 @@ Config :: struct {
 	mouse:         bool, // request mouse reporting
 	identity_secret: string,
 	limits:        ssh.Limits,
+	shutdown_seconds: int, // default ssh.DEFAULT_SHUTDOWN_SECONDS (5)
+	no_signal_handlers: bool, // set if the program handles signals itself
 	authenticate:  ssh.Authenticator, // nil accepts everyone
 	methods:       ssh.Auth_Methods, // zero means all
 	audit:         ssh.Audit_Sink, // nil records nothing
@@ -120,11 +123,23 @@ about `Config{create = create}` alone is an error, it just serves on
 | `mouse` | mouse reporting off | Passed straight through to `tui.Program.mouse`. |
 | `identity_secret` | `Info.id` is always `""` | Path to a per-server secret file, created `0600` on first run if missing. Enables `Info.id`. See [./security.md](./security.md). |
 | `limits` | `ssh.DEFAULT_LIMITS` | `ssh.Limits`: max concurrent sessions, max per source IP, handshake timeout, max failed auth attempts. Per field, `0` takes the default and a negative value disables that one limit. |
+| `shutdown_seconds` | `ssh.DEFAULT_SHUTDOWN_SECONDS` (5) | How long `serve` waits for connected apps to finish once the server is stopping, so each one restores its client's terminal instead of having it cut off. Negative returns immediately. |
+| `no_signal_handlers` | `serve` stops cleanly on `SIGINT`/`SIGTERM` | Set it when the surrounding program owns signal handling; then stop the server with `ssh.shutdown`. |
 | `authenticate` | everyone is accepted | `ssh.Authenticator`. Read its doc comment before setting one — rejecting a public key here makes the client offer its next one, which lets a rejecting server enumerate every key in the client's agent. Prefer authorizing inside your app with `Info.id`, as in `examples/members/main.odin`. See [./security.md](./security.md). |
 | `methods` | all of `ssh.ALL_AUTH` (`.None`, `.Password`, `.Publickey`) are offered | If you depend on `Info.id`, set this to `{.Publickey}` — every OpenSSH client tries `.None` first, and if the server accepts it the client never offers a key at all, so `Info.id` stays empty. |
 | `audit` | nothing is recorded | `ssh.Audit_Sink`, passed straight through to `ssh.Config.audit`. `ssh.audit_stderr` writes one machine-parseable line per listen, accept, limiter rejection, key-exchange failure, auth attempt and session. Opt-in because every line carries the client's numeric address. Unlike the hooks below it also sees connections that never became sessions. Format: [./ssh.md](./ssh.md#audit). |
 | `on_connect` | no hook runs | See "Connection hooks" below. |
 | `on_disconnect` | no hook runs | |
+
+`shutdown_seconds` and `no_signal_handlers` are the two knobs on graceful
+shutdown, which you get without asking for it: `Ctrl+C` on the server stops
+the accept loop and closes each session's *input*, so every app takes its
+ordinary teardown path — the same one a user pressing `q` takes — and restores
+its client's terminal instead of stranding it in the alternate screen. `serve`
+returns once they are all gone, or once `shutdown_seconds` runs out. The
+mechanism, the deadline, and how to stop a server from inside your own code
+(`ssh.shutdown`, from `otsh:ssh`) are covered in
+[./ssh.md](./ssh.md#shutdown).
 
 ## `Info`
 
@@ -244,9 +259,11 @@ run_local :: proc(cfg: Config) -> bool
 ```
 
 `serve` opens the listening socket, ensures the host key exists, and blocks,
-handing off one thread per connection, until the process exits. It returns
-`false` if setup failed (for instance, the host key could not be generated or
-the port could not be bound) and does not otherwise return.
+handing off one thread per connection. It returns `false` if setup failed —
+the host key could not be generated or validated, or the port could not be
+bound. Otherwise it returns `true` after a `SIGINT`/`SIGTERM` or an
+`ssh.shutdown` has stopped the accept loop and the connected sessions have
+drained (see [./ssh.md](./ssh.md#shutdown)).
 
 `run_local` runs the identical `App` — same `create`, same `update`, same
 `view` — against the developer's own terminal instead of a network
@@ -258,26 +275,18 @@ running anything — when standard input is not a terminal (so it fails cleanly
 if piped or run from a non-interactive context), or if `cfg.create` is `nil`.
 
 The usual reason to call it is a `--local` flag, so the same binary either
-serves or runs in-terminal depending on how it is invoked. From
-`examples/tracker/main.odin`:
+serves or runs in-terminal depending on how it is invoked. That is the whole
+of it, from the end of `main` in `examples/tracker/main.odin`:
 
 ```odin
-local := false
-// ...
-for i := 0; i < len(args); i += 1 {
-	switch args[i] {
-	case "--local", "-l":
-		local = true
-	// ...
+for arg in os.args[1:] {
+	if arg == "--local" || arg == "-l" {
+		if !sshtui.run_local(cfg) {
+			fmt.eprintln("tracker: stdin is not a terminal")
+			os.exit(1)
+		}
+		return
 	}
-}
-
-if local {
-	if !sshtui.run_local(cfg) {
-		fmt.eprintln("tracker: stdin is not a terminal")
-		os.exit(1)
-	}
-	return
 }
 if !sshtui.serve(cfg) {
 	os.exit(1)
