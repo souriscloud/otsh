@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="872" height="566" viewBox="0 0 872.0 566.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.0">
+<rect width="872.0" height="566.0" rx="8" fill="#1c1b22"/>
+<rect width="872.0" height="28" rx="8" fill="#26252e"/>
+<rect y="20" width="872.0" height="8" fill="#26252e"/>
+<circle cx="18" cy="14.0" r="5" fill="#e05561"/>
+<circle cx="34" cy="14.0" r="5" fill="#e9a658"/>
+<circle cx="50" cy="14.0" r="5" fill="#7ec490"/>
+<text x="436.0" y="18.0" fill="#8b8797" font-size="11.5" text-anchor="middle">ssh -p 2224 localhost — help</text>
+<text x="142.0" y="70.5" fill="#96c88c" xml:space="preserve">╭─ 82c09527 — 2 note(s) ─────────────────────────────────────────────╮</text>
+<text x="142.0" y="87.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="87.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="104.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="104.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="121.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="158.8" y="121.5" fill="#ffffff" xml:space="preserve">↑↓ / j k    move</text>
+<text x="721.6" y="121.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="138.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="158.8" y="138.5" fill="#ffffff" xml:space="preserve">n           new note</text>
+<text x="721.6" y="138.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="155.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="158.8" y="155.5" fill="#ffffff" xml:space="preserve">enter       save note</text>
+<text x="721.6" y="155.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="172.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="158.8" y="172.5" fill="#ffffff" xml:space="preserve">esc         cancel / close help</text>
+<text x="721.6" y="172.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="189.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="158.8" y="189.5" fill="#ffffff" xml:space="preserve">d           delete selected note</text>
+<text x="721.6" y="189.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="206.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="158.8" y="206.5" fill="#ffffff" xml:space="preserve">?           toggle this help</text>
+<text x="721.6" y="206.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="223.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="158.8" y="223.5" fill="#ffffff" xml:space="preserve">q, ctrl+c   quit</text>
+<text x="721.6" y="223.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="240.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="240.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="257.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="257.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="274.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="274.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="291.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="291.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="308.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="308.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="325.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="325.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="342.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="342.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="359.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="359.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="376.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="376.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="393.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="393.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="410.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="410.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="427.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="427.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="444.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="444.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="461.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="461.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="478.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="478.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="495.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="721.6" y="495.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="512.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="158.8" y="512.5" fill="#7f7f7f" xml:space="preserve">esc/? back to the list</text>
+<text x="721.6" y="512.5" fill="#96c88c" xml:space="preserve">│</text>
+<text x="142.0" y="529.5" fill="#96c88c" xml:space="preserve">╰────────────────────────────────────────────────────────────────────╯</text>
+</svg>

@@ -153,6 +153,10 @@ main :: proc() {
 <td width="50%"><img src="docs/assets/guestbook.svg" alt="The shared guestbook example"><br><sub><code>guestbook</code> — shared state across sessions</sub></td>
 <td width="50%"><img src="docs/assets/stopwatch.svg" alt="The local-only stopwatch example"><br><sub><code>stopwatch</code> — local-only, no SSH involved</sub></td>
 </tr>
+<tr>
+<td width="50%"><img src="docs/assets/notes-list.svg" alt="The notes example: per-key private notes"><br><sub><code>notes</code> — multi-view, per-key private state</sub></td>
+<td width="50%"><img src="docs/assets/members.svg" alt="The members example recognising a key"><br><sub><code>members</code> — recognised by key, no password, no signup</sub></td>
+</tr>
 </table>
 
 Every screenshot here and in `docs/` is a real capture: a script drives a real
@@ -161,11 +165,15 @@ None of these are mockups.
 
 ## Documentation
 
-Full docs are in [docs/](docs/index.md), including two build-it-yourself
-tutorials, and render as a local website with `python3 docs/tools/build_site.py --serve`.
+Full docs are in [docs/](docs/index.md), including four build-it-yourself
+tutorials and a from-zero [concepts page](docs/concepts.md) for anyone who has
+never written a TUI. They render as a local website with
+`python3 docs/tools/build_site.py --serve`.
 
-Tutorials: [a stopwatch, no SSH](docs/tutorial-tui.md) ·
-[a shared guestbook](docs/tutorial-guestbook.md)
+Tutorials: [a first app in ten minutes](docs/tutorial-first-app.md) ·
+[a stopwatch, no SSH](docs/tutorial-tui.md) ·
+[a shared guestbook](docs/tutorial-guestbook.md) ·
+[a multi-view notes app](docs/tutorial-notes.md)
 
 Reference: [getting started](docs/getting-started.md) ·
 [cookbook](docs/cookbook.md) ·
