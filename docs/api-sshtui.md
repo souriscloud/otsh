@@ -161,7 +161,7 @@ Frame rate used when `Config.fps` is zero.
 VERSION :: ssh.VERSION
 ```
 
-The version as a string, for banners and log lines: "0.1.0".
+The version as a string, for banners and log lines.
 
 *sshtui/version.odin:15*
 
@@ -171,7 +171,7 @@ The version as a string, for banners and log lines: "0.1.0".
 VERSION_MAJOR :: ssh.VERSION_MAJOR
 VERSION_MINOR :: ssh.VERSION_MINOR
 VERSION_PATCH :: ssh.VERSION_PATCH
-// The version as a string, for banners and log lines: "0.1.0".
+// The version as a string, for banners and log lines.
 VERSION :: ssh.VERSION
 ```
 
@@ -182,7 +182,7 @@ VERSION :: ssh.VERSION
 ```odin
 VERSION_MINOR :: ssh.VERSION_MINOR
 VERSION_PATCH :: ssh.VERSION_PATCH
-// The version as a string, for banners and log lines: "0.1.0".
+// The version as a string, for banners and log lines.
 VERSION :: ssh.VERSION
 ```
 
@@ -192,7 +192,7 @@ VERSION :: ssh.VERSION
 
 ```odin
 VERSION_PATCH :: ssh.VERSION_PATCH
-// The version as a string, for banners and log lines: "0.1.0".
+// The version as a string, for banners and log lines.
 VERSION :: ssh.VERSION
 ```
 

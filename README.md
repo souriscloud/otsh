@@ -131,11 +131,12 @@ main :: proc() {
   throughput ~530 B/s, one keypress ~230 B. Four concurrent animated sessions
   cost ~3.7% of one core. The diff renderer is why — it emits only the escape
   sequences needed to reconcile a frame, not a repaint.
-- **71 tests, no network needed** (`./test.sh`) — text metrics, input
+- **80 tests, no network needed** (`./test.sh`) — text metrics, input
   decoding, the diff renderer checked against a model terminal, audit-line
   formatting, resource limits, shutdown defaults, fuzzed parser and renderer
-  input, and identity properties (same key → same id, different secrets →
-  unlinkable ids).
+  input, identity properties (same key → same id, different secrets →
+  unlinkable ids) pinned against an independent HMAC implementation, and the
+  crypto algorithm lists validated name by name against libssh.
 
 ## Screenshots
 
@@ -187,7 +188,12 @@ on first draw, and a cross-thread allocator mismatch that could `SIGABRT` it
 from a single unauthenticated connection. All ten are fixed, and all ten are
 documented in [§11](docs/security.md#11-independent-audit-findings) with what
 was broken and how it was found, because the class of mistake is more useful
-than the patch.
+than the patch. A fourth adversarial pass before 0.2.0 found three more — an
+algorithm-list typo that silently downgraded the negotiated crypto, a client
+that stopped reading pinning its session thread indefinitely, and leaks on
+`serve`'s startup-failure paths — fixed and documented in
+[§13](docs/security.md), which is equally explicit about what a review like
+that is not.
 
 That is diligence, not a certificate. **This has not been professionally
 audited, and nobody should claim "secure" about network-facing code without
@@ -217,7 +223,7 @@ MIT. See [LICENSE](LICENSE).
 ## Contributing
 
 Issues and pull requests are welcome. Run `./test.sh` before submitting; CI
-builds every package and example on Linux for every push, runs the 71 tests
+builds every package and example on Linux for every push, runs the 80 tests
 there along with the Windows and FreeBSD cross-type-checks, and runs the
 macOS and Windows jobs on pull requests, weekly, and on release tags. This is a
 security-sensitive library — a careful read of `ssh/` or `libssh/` looking
