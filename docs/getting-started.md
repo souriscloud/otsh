@@ -129,10 +129,39 @@ four tests wrote to a hardcoded `/tmp`, which on Windows is a `C:\tmp` that
 does not exist; and the startup banner's `→` was mojibake in any console whose
 output code page is not UTF-8.
 
-Still unverified on Windows, and stated so rather than assumed: concurrent
-sessions under load, window-resize reflow, large pastes, the connection
-limiter, and `examples/` other than `tracker` and `whoami`, which were built
-but not run.
+A second hardware session on 2026-08-01 (same machine, same toolchain,
+re-provisioned from scratch) went after the console-control paths in
+`ssh/signal_windows.odin` specifically:
+
+- **Closing the server's console window is verified.** The server ran in its
+  own real console; posting `WM_CLOSE` to that console's window — what
+  clicking its X does, and something `GenerateConsoleCtrlEvent` cannot
+  produce — delivered a genuine `CTRL_CLOSE_EVENT`. A connected macOS OpenSSH
+  client received the full restore sequence (mouse reporting off, autowrap
+  back, cursor shown, alternate screen left) *before* the connection closed,
+  and the ssh client exited cleanly instead of hanging. The server printed
+  `otsh: stopped; all sessions closed cleanly` and exited 132–255 ms after
+  the close across runs. The ~5 s grace the blocking handler bets on was
+  measured on the same machine with a probe whose handler never returns: the
+  OS killed it 4980–5018 ms after the event, so `CLOSE_WAIT_MS = 4500` keeps
+  real margin.
+- **A fifth bug surfaced there and is fixed.** A server whose ancestor was
+  created with `CREATE_NEW_PROCESS_GROUP` — which is how PowerShell's
+  `Start-Process`, cmd's `start`, and most service wrappers launch things —
+  inherits an "ignore Ctrl+C" flag that gates `CTRL_C_EVENT` delivery before
+  any installed handler is consulted. Such a server ignored Ctrl+C entirely:
+  no drain, no exit, an unstoppable process, observed for 20 s before being
+  force-killed. `set_stop_handler` now clears the flag
+  (`SetConsoleCtrlHandler(NULL, FALSE)`) when it installs the console
+  handler; the same launch then drained and restored the connected client's
+  terminal in 164 ms.
+
+Still unverified on Windows, and stated so rather than assumed: the
+`CTRL_LOGOFF_EVENT` and `CTRL_SHUTDOWN_EVENT` arms of the console handler,
+which cannot be tested without logging out or rebooting the machine —
+`ssh/signal_windows.odin` says exactly this; concurrent sessions under load;
+window-resize reflow; large pastes; the connection limiter; and `examples/`
+other than `tracker` and `whoami`, which were built but not run.
 
 To build on Windows you need libssh from vcpkg (`vcpkg install
 libssh:x64-windows`, which produces `ssh.lib`) and `ssh.dll` on your `%PATH%`
