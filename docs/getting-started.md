@@ -303,7 +303,7 @@ The smallest useful otsh app — one box showing who connected and how. It
 requires public-key auth (`methods = {.Publickey}`), so `info.fingerprint`
 and `info.key_type` are always populated, and it wires an `authenticate` hook
 (`gate`) that logs every attempt and accepts it. Read this one first; it's the
-whole surface area in about 90 lines.
+whole surface area in about 100 lines.
 
 ### members — key-driven identity
 

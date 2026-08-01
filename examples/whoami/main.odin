@@ -11,6 +11,7 @@
 package main
 
 import "core:fmt"
+import "core:os"
 import "otsh:ssh"
 import "otsh:sshtui"
 import "otsh:tui"
@@ -84,15 +85,19 @@ gate :: proc(req: ssh.Auth_Request) -> bool {
 }
 
 main :: proc() {
-	sshtui.serve(
-		sshtui.Config {
-			port          = 2223,
-			host_key_path = "whoami_hostkey",
-			create        = create,
-			destroy       = destroy,
-			authenticate  = gate,
-			methods       = {.Publickey}, // no anonymous access
-			audit         = ssh.audit_stderr, // one parseable line per event
-		},
-	)
+	cfg := sshtui.Config {
+		port          = 2223,
+		host_key_path = "whoami_hostkey",
+		create        = create,
+		destroy       = destroy,
+		authenticate  = gate,
+		methods       = {.Publickey}, // no anonymous access
+		audit         = ssh.audit_stderr, // one parseable line per event
+	}
+
+	// serve returns false when the server never came up — port in use, bad
+	// host key, libssh too old — after printing why. Exiting 0 would hide it.
+	if !sshtui.serve(cfg) {
+		os.exit(1)
+	}
 }

@@ -102,7 +102,7 @@ main :: proc() {
 }
 ```
 
-`examples/whoami/main.odin` is the whole thing, start to finish, in 90 lines.
+`examples/whoami/main.odin` is the whole thing, start to finish, in about 100 lines.
 
 ## Why it's built this way
 
