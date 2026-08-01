@@ -97,7 +97,7 @@ seed_board :: proc() {
 	seed(.Closed, "rejecting a key enumerates the client's agent",
 	     "An SSH client offers its next key after each rejection, so a gating server learns every public key a user holds. The probe is now accepted unconditionally; authorisation belongs in the app.", 7)
 	seed(.Closed, "host key written world-readable",
-	     "libssh writes it under the process umask, usually 0644. A host key any local user can read is one they can impersonate the server with. Now chmod 0600 immediately after generation.", 2)
+	     "libssh writes it under the process umask, usually 0644. A host key any local user can read is one they can impersonate the server with. The file is now created first — empty, O_EXCL, 0600 — before libssh opens it. Chmod after the fact would not do: a process that already won the open() keeps its descriptor across the mode change.", 2)
 	seed(.Closed, "toast overprints the help line",
 	     "view paints a full frame with no erase step, so drawing a short toast over a longer help string left the tail of the help text on screen. The footer now picks one string and draws only that.", 1)
 	seed(.Closed, "lone ESC is ambiguous",
@@ -107,7 +107,7 @@ seed_board :: proc() {
 	seed(.Closed, "a ~1 MiB paste permanently deafened a session",
 	     "Two consumers shared one buffer: a channel_data_function copied into a fixed ring and declined the rest, believing libssh would re-offer it. It does not — the callback fires only when the next packet arrives, so a paste's tail was stranded and the session went deaf while still repainting. Instrumented: 1 MiB pasted, ~550 KB stuck, quit key unseen after 60s. Now one buffer, one consumer: no callback, read() drains libssh directly. 1 MiB went from never to 4.8s, 4 MiB works, and SSH's own window is the backpressure.", 6)
 	seed(.Open, "no Windows local backend",
-	     "A console-API backend and a Windows build path now exist, cross-type-check for windows_amd64, and have a CI job. Still open because none of it has executed on real Windows; closes when that CI job has been green in practice.", 2)
+	     "A console-API backend and a Windows build path now exist, cross-type-check for windows_amd64, and have a CI job. All of it was run by hand on real Windows 11 on 2026-07-31 — vcpkg libssh 0.12.0, every example built, 67 tests green, openssh sessions served against tracker.exe — and it turned up four genuine bugs, since fixed. Still open because the hosted CI job itself has never run; closes once it has been green there.", 2)
 	seed(.Closed, "no audit log",
 	     "Config.audit takes a sink; audit_stderr emits one machine-parseable line per event — accept, auth, limiter reject, kex failure, session lifecycle — with client text scrubbed so a username cannot forge fields. Opt-in, because every line carries a peer address.", 2)
 	seed(.Closed, "distributed floods are not mitigated",
