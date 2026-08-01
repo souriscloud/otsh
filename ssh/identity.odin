@@ -92,6 +92,15 @@ pseudonym :: proc(secret: ^Identity_Secret, fingerprint: string, dst: []u8) -> s
 	return string(dst[:ID_SIZE])
 }
 
+// Scrubs a loaded secret. Used on `serve`'s startup-failure paths, where the
+// Server is handed back to the allocator and the HMAC key must not travel with
+// it into freed memory.
+@(private)
+wipe_secret :: proc(s: ^Identity_Secret) {
+	crypto.zero_explicit(raw_data(s.bytes[:]), SECRET_SIZE)
+	s.loaded = false
+}
+
 // Compares two ids without leaking where they differ via timing. Use this
 // rather than `==` when checking an id against a stored one.
 ids_equal :: proc "contextless" (a, b: string) -> bool {

@@ -29,15 +29,38 @@ Limits :: struct {
 	// one address against a rejecting Authenticator. If you accept passwords,
 	// rate-limit them yourself — this is not that control.
 	max_auth_attempts: int,
+	// Seconds a client may leave its flow-control window shut — i.e. simply stop
+	// reading — before its session is torn down.
+	//
+	// `handshake_seconds` does not cover this: it is a socket timeout, and the
+	// wait inside libssh's ssh_channel_write does not honour it. Measured before
+	// this limit existed: three clients that authenticated, asked for a shell and
+	// then never read held all three session slots for a full 60 seconds, past a
+	// 20-second handshake timeout, while a fourth client was refused with
+	// `limit=sessions`. Nothing about it is malformed — a slow reader is entitled
+	// to stop reading — so it costs the attacker one idle socket per pinned
+	// thread and is invisible to a protocol-level filter.
+	//
+	// The window closing is normal and harmless; only staying shut this long is
+	// not. Raise it for clients on genuinely slow links.
+	//
+	// Negative disables the *disconnect*, not the protection: `write` never
+	// blocks regardless of this setting. A stalled client then keeps its slot
+	// for as long as it likes, but on a thread that is still responsive and
+	// still notices shutdown, rather than one wedged inside libssh.
+	write_stall_seconds: int,
 }
 
 // Applied to any `Limits` field left at zero. Deliberately conservative — raise
 // them deliberately rather than discovering you had none.
 DEFAULT_LIMITS :: Limits {
-	max_sessions      = 256,
-	max_per_ip        = 8,
-	handshake_seconds = 20,
-	max_auth_attempts = 6,
+	max_sessions        = 256,
+	max_per_ip          = 8,
+	handshake_seconds   = 20,
+	max_auth_attempts   = 6,
+	// Generous: a real client on a bad link recovers in well under this, and an
+	// app that draws at 30fps notices the window shut within one frame.
+	write_stall_seconds = 30,
 }
 
 // Resolves 0 -> default, negative -> unlimited (stored as 0, which every
@@ -58,6 +81,7 @@ resolve_limits :: proc "contextless" (l: Limits) -> Limits {
 		max_per_ip = pick(l.max_per_ip, DEFAULT_LIMITS.max_per_ip),
 		handshake_seconds = pick(l.handshake_seconds, DEFAULT_LIMITS.handshake_seconds),
 		max_auth_attempts = pick(l.max_auth_attempts, DEFAULT_LIMITS.max_auth_attempts),
+		write_stall_seconds = pick(l.write_stall_seconds, DEFAULT_LIMITS.write_stall_seconds),
 	}
 }
 
@@ -116,6 +140,22 @@ limiter_acquire :: proc(l: ^Limiter, addr: string) -> (ok: bool, tripped: Audit_
 		}
 	}
 	return true, .None
+}
+
+// Releases the map and every key cloned into it. Only for the startup-failure
+// path in `serve`, where no session thread exists yet — there is no locking
+// here because there is nobody to lock against.
+@(private)
+limiter_destroy :: proc(l: ^Limiter) {
+	if !l.inited {
+		return
+	}
+	for key in l.per_ip {
+		delete(key, l.allocator)
+	}
+	delete(l.per_ip)
+	l.per_ip = nil
+	l.inited = false
 }
 
 @(private)

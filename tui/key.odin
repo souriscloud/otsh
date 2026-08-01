@@ -326,9 +326,15 @@ parse_sgr_mouse :: proc(buf: []u8) -> (ev: Input, n: int, ok: bool) {
 		case c == 'M' || c == 'm':
 			btn := vals[0]
 			// The wire values are attacker-controlled and accumulate without a
-			// digit cap, so they can arrive absurd or wrapped. tui itself clips,
-			// but apps index arrays with these — clamp to the last valid cell of
-			// the largest screen this package will ever allocate.
+			// digit cap, so they can arrive absurd or wrapped. Clamp to the
+			// largest screen this package will ever allocate — all that can be
+			// done here, since `parse_input` is not told the screen size.
+			//
+			// That bound is the package maximum, NOT the caller's geometry: these
+			// numbers come off the wire rather than from the client's real
+			// terminal, so this still admits (998, 298) on an 80x24 session.
+			// `run` narrows them to the live screen before any app sees them; a
+			// caller driving `parse_input` itself must do the same.
 			m := Mouse {
 				x     = clamp(vals[1] - 1, 0, MAX_COLS - 1),
 				y     = clamp(vals[2] - 1, 0, MAX_ROWS - 1),

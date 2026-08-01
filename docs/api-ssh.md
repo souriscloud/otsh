@@ -216,7 +216,7 @@ Config :: struct {
 How to run the server. Every field has a documented default, so the zero value
 is a working — if wide open — public server on port 2222.
 
-*ssh/server.odin:352*
+*ssh/server.odin:405*
 
 ### `Handler`
 
@@ -262,6 +262,26 @@ Limits :: struct {
 	// one address against a rejecting Authenticator. If you accept passwords,
 	// rate-limit them yourself — this is not that control.
 	max_auth_attempts: int,
+	// Seconds a client may leave its flow-control window shut — i.e. simply stop
+	// reading — before its session is torn down.
+	//
+	// `handshake_seconds` does not cover this: it is a socket timeout, and the
+	// wait inside libssh's ssh_channel_write does not honour it. Measured before
+	// this limit existed: three clients that authenticated, asked for a shell and
+	// then never read held all three session slots for a full 60 seconds, past a
+	// 20-second handshake timeout, while a fourth client was refused with
+	// `limit=sessions`. Nothing about it is malformed — a slow reader is entitled
+	// to stop reading — so it costs the attacker one idle socket per pinned
+	// thread and is invisible to a protocol-level filter.
+	//
+	// The window closing is normal and harmless; only staying shut this long is
+	// not. Raise it for clients on genuinely slow links.
+	//
+	// Negative disables the *disconnect*, not the protection: `write` never
+	// blocks regardless of this setting. A stalled client then keeps its slot
+	// for as long as it likes, but on a thread that is still responsive and
+	// still notices shutdown, rather than one wedged inside libssh.
+	write_stall_seconds: int,
 }
 ```
 
@@ -351,6 +371,10 @@ Session :: struct {
 	// by this connection's own session thread just before it calls the handler,
 	// and read only by that same thread — it never crosses a thread boundary.
 	started:       time.Time,
+	// Flow-control stall tracking for `write`. Same single-thread ownership as
+	// `started`: only this connection's own thread touches them.
+	write_stalled: bool,
+	stall_since:   time.Time,
 
 	// fixed storage so libssh callbacks never touch an allocator
 	user_buf:      [64]u8,
@@ -462,7 +486,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 
 AEAD ciphers only: no CBC, no stream ciphers with separate MACs.
 
-*ssh/server.odin:402*
+*ssh/server.odin:455*
 
 ### `DEFAULT_HOST`
 
@@ -484,7 +508,7 @@ DEFAULT_HOST_KEY :: "hostkey"
 Defaults applied to a zero-valued Config field. sshtui fills these in too;
 they live here as well so calling ssh.serve directly cannot bind port 0.
 
-*ssh/server.odin:518*
+*ssh/server.odin:680*
 
 ### `DEFAULT_HOST_KEY`
 
@@ -501,7 +525,7 @@ DEFAULT_HOST_KEY :: "hostkey"
 
 Host key path used when `Config.host_key_path` is empty.
 
-*ssh/server.odin:522*
+*ssh/server.odin:684*
 
 ### `DEFAULT_HOSTKEYS`
 
@@ -549,7 +573,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 
 Ed25519 only — matches the key `ensure_host_key` generates.
 
-*ssh/server.odin:406*
+*ssh/server.odin:459*
 
 ### `DEFAULT_KEX`
 
@@ -599,23 +623,26 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 Modern-only. Every one of these is an AEAD or an ETM MAC with a
 curve25519 exchange; nothing here depends on SHA-1, CBC, or NIST curves.
 
-*ssh/server.odin:400*
+*ssh/server.odin:453*
 
 ### `DEFAULT_LIMITS`
 
 ```odin
 DEFAULT_LIMITS :: Limits {
-	max_sessions      = 256,
-	max_per_ip        = 8,
-	handshake_seconds = 20,
-	max_auth_attempts = 6,
+	max_sessions        = 256,
+	max_per_ip          = 8,
+	handshake_seconds   = 20,
+	max_auth_attempts   = 6,
+	// Generous: a real client on a bad link recovers in well under this, and an
+	// app that draws at 30fps notices the window shut within one frame.
+	write_stall_seconds = 30,
 }
 ```
 
 Applied to any `Limits` field left at zero. Deliberately conservative — raise
 them deliberately rather than discovering you had none.
 
-*ssh/limits.odin:36*
+*ssh/limits.odin:56*
 
 ### `DEFAULT_MACS`
 
@@ -664,7 +691,7 @@ ensure_host_key :: proc(path: string, advertised := DEFAULT_HOSTKEYS) -> bool {
 
 Encrypt-then-MAC only, SHA-2 only.
 
-*ssh/server.odin:404*
+*ssh/server.odin:457*
 
 ### `DEFAULT_PORT`
 
@@ -683,7 +710,7 @@ DEFAULT_HOST_KEY :: "hostkey"
 
 Port used when `Config.port` is zero.
 
-*ssh/server.odin:520*
+*ssh/server.odin:682*
 
 ### `DEFAULT_SHUTDOWN_SECONDS`
 
@@ -918,7 +945,7 @@ Creates the host key if it does not exist yet — the SSH equivalent of a TLS
 certificate. Clients pin it in ~/.ssh/known_hosts, so it must be stable
 across restarts.
 
-*ssh/server.odin:411*
+*ssh/server.odin:464*
 
 ### `fingerprint`
 
@@ -929,7 +956,7 @@ fingerprint :: proc "contextless" (s: ^Session) -> string
 SHA256 fingerprint of the key the client authenticated with, or "" if they
 did not use one. Stable across connections — use it as an account id.
 
-*ssh/server.odin:200*
+*ssh/server.odin:204*
 
 ### `id`
 
@@ -941,7 +968,7 @@ Pseudonymous account id: HMAC(server secret, fingerprint). Empty unless an
 identity secret is configured and the client used a key. Store this, not the
 fingerprint. See identity.odin.
 
-*ssh/server.odin:213*
+*ssh/server.odin:217*
 
 ### `ids_equal`
 
@@ -952,7 +979,7 @@ ids_equal :: proc "contextless" (a, b: string) -> bool
 Compares two ids without leaking where they differ via timing. Use this
 rather than `==` when checking an id against a stored one.
 
-*ssh/identity.odin:97*
+*ssh/identity.odin:106*
 
 ### `key_type`
 
@@ -963,7 +990,7 @@ key_type :: proc "contextless" (s: ^Session) -> string
 The verified key's algorithm, e.g. "ssh-ed25519". Empty unless public-key
 auth was used.
 
-*ssh/server.odin:206*
+*ssh/server.odin:210*
 
 ### `load_or_create_secret`
 
@@ -1004,7 +1031,7 @@ actually block for us — it returns immediately every time, which would spin
 a core per session. So libssh gets to do the parsing while we do the waiting,
 on the session socket directly.
 
-*ssh/server.odin:240*
+*ssh/server.odin:244*
 
 ### `remote_addr`
 
@@ -1014,7 +1041,7 @@ remote_addr :: proc "contextless" (s: ^Session) -> string
 
 Numeric peer address, no reverse DNS.
 
-*ssh/server.odin:218*
+*ssh/server.odin:222*
 
 ### `serve`
 
@@ -1022,7 +1049,7 @@ Numeric peer address, no reverse DNS.
 serve :: proc(cfg: Config) -> bool
 ```
 
-*ssh/server.odin:547*
+*ssh/server.odin:709*
 
 ### `shutdown`
 
@@ -1056,7 +1083,7 @@ size :: proc "contextless" (s: ^Session) -> (cols, rows: int)
 Current terminal geometry in cells, falling back to 80x24 if the client never
 said.
 
-*ssh/server.odin:224*
+*ssh/server.odin:228*
 
 ### `take_resize`
 
@@ -1066,7 +1093,7 @@ take_resize :: proc "contextless" (s: ^Session) -> bool
 
 True exactly once after each window resize.
 
-*ssh/server.odin:342*
+*ssh/server.odin:395*
 
 ### `term`
 
@@ -1076,7 +1103,7 @@ term :: proc "contextless" (s: ^Session) -> string
 
 The client's `$TERM`, e.g. "xterm-256color". Empty if no pty was requested.
 
-*ssh/server.odin:194*
+*ssh/server.odin:198*
 
 ### `user`
 
@@ -1087,7 +1114,7 @@ user :: proc "contextless" (s: ^Session) -> string
 The username the client offered. Client-chosen and unverified — never use it
 as identity; use `id` instead.
 
-*ssh/server.odin:189*
+*ssh/server.odin:193*
 
 ### `warn_if_world_readable`
 
@@ -1106,10 +1133,25 @@ secret. Say so loudly rather than failing silently.
 write :: proc(s: ^Session, data: []u8) -> int
 ```
 
-Sends bytes to the client. Returns how many were written, 0 once the
-connection is gone.
+Sends bytes to the client. Returns how many were written — which may be
+fewer than asked for, or 0 — and 0 once the connection is gone.
 
-*ssh/server.odin:324*
+Never blocks waiting for the client to read. That is a deliberate departure
+from `ssh_channel_write`, which does: once the peer's flow-control window is
+exhausted it waits inside ssh_handle_packets for a WINDOW_ADJUST, and that
+wait does not honour SSH_OPTIONS_TIMEOUT. Measured: three clients that
+authenticated, requested a shell and then simply stopped reading held all
+three session slots for a full 60 s with `handshake_seconds` at 20, while a
+fourth was refused with `limit=sessions`. Nothing in that exchange is
+malformed, so it costs the client one idle socket per pinned server thread.
+
+So only what the peer has credit for is handed to libssh, and a window that
+stays shut past `Limits.write_stall_seconds` ends the session. Callers must
+cope with a short write: `tui.run` repaints in full on the next frame, since
+a partially sent frame leaves its diff baseline describing a screen the
+terminal is not showing.
+
+*ssh/server.odin:347*
 
 ### `write_string`
 
@@ -1119,4 +1161,4 @@ write_string :: proc(s: ^Session, str: string) -> int
 
 `write` for a string.
 
-*ssh/server.odin:337*
+*ssh/server.odin:390*

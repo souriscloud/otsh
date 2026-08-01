@@ -222,17 +222,19 @@ neither algorithm is in the lists above.
 
 ```odin
 Limits :: struct {
-	max_sessions:      int,
-	max_per_ip:        int,
-	handshake_seconds: int,
-	max_auth_attempts: int,
+	max_sessions:        int,
+	max_per_ip:          int,
+	handshake_seconds:   int,
+	max_auth_attempts:   int,
+	write_stall_seconds: int,
 }
 
 DEFAULT_LIMITS :: Limits {
-	max_sessions      = 256,
-	max_per_ip        = 8,
-	handshake_seconds = 20,
-	max_auth_attempts = 6,
+	max_sessions        = 256,
+	max_per_ip          = 8,
+	handshake_seconds   = 20,
+	max_auth_attempts   = 6,
+	write_stall_seconds = 30,
 }
 ```
 
@@ -247,10 +249,20 @@ individually.
 | `max_per_ip` | Concurrent sessions from one source address. Without it, a single host can hold every session slot open by itself. Verified: with `max_per_ip = 3` and 12 simultaneous connection attempts from one address, exactly 3 were admitted. |
 | `handshake_seconds` | Time allowed to complete key exchange and authentication, enforced as a timeout on the session socket. Without it, a client that opens a TCP connection and then sends nothing pins a thread forever. |
 | `max_auth_attempts` | Failed `Authenticator` verdicts on one connection before that connection stops being asked. Note what it does not do — it does **not** drop the connection, and it does **not** bound guessing across connections, because the counter lives on the `Session` and a client that reconnects gets a fresh budget (measured: ~37 guesses/second from one address). If you accept passwords, rate-limit them yourself; this is not that control. |
+| `write_stall_seconds` | A client that authenticates, asks for a shell and then simply stops reading. `handshake_seconds` does not cover it — the wait inside libssh's `ssh_channel_write` does not honour the session timeout, so such a client pinned its session thread indefinitely (measured: three of them held all three slots past a 20s handshake timeout until they left at 70s, with a fourth client refused throughout). `ssh.write` now sends only what the peer has flow-control credit for, and a window that stays shut this long ends the session. Unlike the others, a **negative value disables only the disconnect** — `write` never blocks whatever this is set to, so a stalled client keeps its slot but not a wedged thread. |
 
-Limit enforcement happens per source address in `remote_addr`'s numeric
-form; a connection that is over a limit is dropped before the handshake
-even starts, so it never reaches your `Authenticator` or `Handler`.
+Limit enforcement for `max_sessions` and `max_per_ip` happens per source
+address in `remote_addr`'s numeric form; a connection that is over one of those
+is dropped before the handshake even starts, so it never reaches your
+`Authenticator` or `Handler`. `handshake_seconds`, `max_auth_attempts` and
+`write_stall_seconds` apply to a connection already accepted.
+
+One consequence of `write_stall_seconds` reaches the `Backend` contract:
+[`write`](#write) may now return a **short count**, having sent fewer bytes
+than it was given, where previously it blocked until all of them were away.
+`tui.run` handles this by repainting the whole screen on the next frame. A
+custom `Handler` that calls `ssh.write` directly must not assume the whole
+slice was sent.
 
 ## Shutdown
 

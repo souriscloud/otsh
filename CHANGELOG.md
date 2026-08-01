@@ -32,7 +32,56 @@ describes how one is made.
 
 ## Unreleased
 
-Nothing yet.
+### Added
+
+- `Limits.write_stall_seconds` (default 30): how long a client may leave its
+  flow-control window shut — i.e. simply stop reading — before its session is
+  torn down. `0` takes the default. Unlike every other field, a negative value
+  disables only the *disconnect*: `ssh.write` never blocks whatever this is set
+  to, so a stalled client keeps its slot but not a wedged thread.
+
+### Fixed
+
+- **An algorithm list with one misspelled name silently downgraded the
+  connection.** libssh only rejects a list when *every* name in it is unknown,
+  so `ciphers = "chacha20-poly1305@openssh.comTYPO,aes128-ctr"` started a
+  server that negotiated `aes128-ctr` — a non-AEAD cipher — with no diagnostic
+  anywhere. The same shape produced `hmac-sha1`, and an all-SHA-1 key-exchange
+  offer. `set_algorithms` now validates every name individually and refuses to
+  start, naming the offender. A name missing from otsh's own defaults is a
+  warning rather than a fatal error, since those lists are strong by
+  construction and some libssh builds legitimately lack an entry.
+- **A client that stopped reading pinned its session thread indefinitely.**
+  `handshake_seconds` did not cover it: the wait inside `ssh_channel_write`
+  does not honour `SSH_OPTIONS_TIMEOUT`. Three such clients held every session
+  slot until they chose to leave, refusing service to everyone else, at a cost
+  to them of one idle socket each. Bounded by `write_stall_seconds` above.
+- **`serve` leaked on every startup-failure path**, including handing the
+  loaded 32-byte identity secret back to the allocator without zeroing it.
+- `Pty.term` was documented as borrowing `Session.term_buf` but never
+  assigned, so the public field was always `""`. `ssh.term()` was unaffected.
+- Mouse coordinates reaching an app are now clamped to the live screen, not
+  just to `MAX_COLS`/`MAX_ROWS`. The wire values are independent of the
+  client's real geometry, so `ESC [ < 0 ; 999 ; 299 M` reached an app as
+  (998, 298) on an 80x24 session — out of bounds for any app indexing a grid
+  sized to its own screen.
+- Defensive: `copy_cstr` guards a nil `cstring`, `take_input` clamps libssh's
+  returned byte count to the destination, and a nil `ssh_event_new` result is
+  handled rather than passed on.
+- `tui.run` no longer lets a partly-sent frame corrupt its diff baseline, and
+  retries the alternate-screen enter/exit sequences rather than writing them
+  once.
+
+### Changed
+
+- **`ssh.write` may now return a short count** instead of blocking until the
+  whole slice is sent. `tui` handles this; a `Handler` calling `ssh.write`
+  directly must not assume everything was written.
+- `tui.Style` is now `#align(4)`, making it 12 bytes rather than 11. `Cell` is
+  16 bytes either way, so the cell grid is unaffected. This works around an
+  Odin codegen issue — an 11-byte struct passed by value gets a 12-byte store
+  into its stack slot — that made AddressSanitizer abort on the first frame of
+  every session and so masked everything behind it. See docs/security.md §13.
 
 ## 0.1.0 — 2026-08-01
 
