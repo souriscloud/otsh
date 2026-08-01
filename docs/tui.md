@@ -225,9 +225,11 @@ Msg :: union {
 | `cols` | `int` | new terminal width in cells |
 | `rows` | `int` | new terminal height in cells |
 
-`run` already resizes `p.screen` before sending this — an app typically has
-nothing to do beyond noting it happened (see `examples/tracker/main.odin`,
-which handles `tui.Resize` with a comment and no code).
+`run` already resizes `p.screen` before sending this, so anything `view`
+recomputes from the screen is current without a handler. State held outside
+the screen is not: `examples/tracker/main.odin` re-clamps its scroll window
+(`case tui.Resize: clamp_view(m, e.rows)`), and `examples/guestbook/main.odin`
+recomputes its layout from `e.cols`/`e.rows` and clamps against that.
 
 **`Tick`**
 
@@ -351,8 +353,8 @@ set_cursor        :: proc(s: ^Screen, x, y: int)
 - `draw_text_clipped` is `draw_text` with a hard column budget: if `text`
   would exceed `max_w` columns, it draws as much as fits minus one column
   and appends `…`. Returns columns consumed either way. This is what powers
-  every truncated label in `examples/tracker/main.odin` (item names, cart
-  lines, the toast).
+  every truncated label in `examples/tracker/main.odin` (issue titles in the
+  list, the detail pane's wrapped body, and the footer line — hint or toast).
 - `fill_rect` paints a `w x h` block of the given rune and style — draw a
   background panel with `r = ' '` before drawing text over it.
 - `draw_box` draws a rectangular border and, if `title` is non-empty and the
@@ -529,8 +531,8 @@ Cell :: struct {
 ```
 
 `w`/`h` are the current geometry in cells — read these in `view` to lay out
-content responsively, as `examples/tracker/main.odin` does (`sc.w < 54 || sc.h
-< 18` gates a "too small" screen). `cur` is the buffer `view` draws into via
+content responsively, as `examples/tracker/main.odin` does (`s.w < MIN_W ||
+s.h < MIN_H`, its 56x16 floor, gates a "too small" screen). `cur` is the buffer `view` draws into via
 the primitives in the Drawing section; `prev` is what was last actually sent, used by `flush`
 to compute the diff.
 

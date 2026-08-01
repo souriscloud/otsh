@@ -55,7 +55,7 @@ is.
 | --- | --- | --- | --- | --- |
 | [nftables / pf](#layer-1-kernel-rate-limiting) | Kernel, before `accept()` | Packet headers, connection tracking | Connection floods from few sources; caps the aggregate arrival rate | A few instructions. No thread, no socket, no `Session` |
 | [fail2ban](#layer-2-fail2ban-on-the-audit-log) | Userspace, after the fact | This process's audit log | Repeat offenders, across connections and over time | Nothing at rejection time — the ban is a firewall rule |
-| [`ssh.Limits`](#layer-3-the-built-in-limits) | Inside the process, before key exchange | This process's live connections | Thread exhaustion, silent clients, one host hogging slots | One thread and one `Session` (~4.8 KB), briefly |
+| [`ssh.Limits`](#layer-3-the-built-in-limits) | Inside the process, before key exchange | This process's live connections | Thread exhaustion, silent clients, one host hogging slots | One thread and one `Session` (~800 B), briefly |
 | [Your app](#layer-4-the-application) | Inside your handler | Everything about an authenticated user | Protocol-legal abuse: spam, scraping, a user filling shared state | A full session |
 
 Read top to bottom: each layer catches what the one above it let through, at a
@@ -261,10 +261,17 @@ assuming your v6 listener is covered.
 Covered in full in [`./security.md`](./security.md) §7. For deployment, three
 things matter:
 
-- **Size them rather than inheriting them.** `max_sessions = 256` costs about
-  1.2 MB of `Session` structs at full occupancy plus one OS thread each; the
-  `MemoryMax`/`TasksMax` in the unit below are derived from it. Raising one
-  without the others gets you an OOM kill instead of a refused connection.
+- **Size them rather than inheriting them.** The structs themselves are noise:
+  `max_sessions = 256` is about 200 KB of `Session` at full occupancy (~800 B
+  each). What the number really buys is one OS thread per connection, and the
+  memory that follows a thread around — its resident stack, libssh's
+  per-connection state, and your app's `Model`. Only the libssh side has a
+  worst case worth naming: a connection being flooded parks up to the ~2 MiB
+  transport window in libssh's channel buffer (see
+  [`./architecture.md`](./architecture.md), "Input flow and backpressure"), and
+  an idle one costs nothing there. The `MemoryMax`/`TasksMax` in the unit below
+  are sized against `max_sessions`. Raising one without the others gets you an
+  OOM kill instead of a refused connection.
 - **`0` means default, negative means unlimited.** `Limits{}` is the hardened
   default, not an accidental free-for-all — but a stray `-1` is a real
   free-for-all.

@@ -254,39 +254,57 @@ Two separate problems: reacting to a resize, and degrading when the terminal
 is simply too small to show anything useful.
 
 **Resize.** `tui.run` already resizes `Screen` for you before your code sees
-the next frame — by the time `view` runs, `sc.w`/`sc.h` are current, and the
-`tui.Resize` message is mostly a hook for anything you can't recompute for
-free (e.g. resetting a scroll offset). `examples/tracker/main.odin`'s handler is
-empty for exactly that reason:
+the next frame — by the time `view` runs, `sc.w`/`sc.h` are current. That
+covers everything you recompute from the screen each frame. What it does not
+cover is state you keep *outside* the screen: a scroll offset was computed
+against the old height and is still that old number. So an app with a
+viewport has real work to do here. `examples/tracker/main.odin` re-clamps:
 
 ```odin
 case tui.Resize:
-// the renderer already resized the buffer; nothing to do
+	clamp_view(m, e.rows)
 ```
 
-Layout numbers that depend on `sc.w`/`sc.h` (like the menu/detail split in
-`draw_list`: `split := min(max(sc.w / 2, 30), sc.w - 26)`) are recomputed
-every `view()` call anyway, since `view` runs once per tick regardless of
-whether anything resized.
+`examples/guestbook/main.odin` does the same thing — `compute_layout(e.cols,
+e.rows)`, then `clamp_scroll` against the new list height. Take the geometry
+from `e.cols`/`e.rows`; that is what the message is carrying.
 
-**Too small.** Below some minimum, don't try to lay out the real UI at all —
-show one clipped line and return. `examples/tracker/main.odin`'s guard, run
-first thing in `view`:
+Layout numbers that depend on `sc.w`/`sc.h` are the part that genuinely needs
+no handler — the list/preview split in `draw_list`, say:
 
 ```odin
-if sc.w < 54 || sc.h < 18 {
-	msg := fmt.tprintf("terminal too small — need 54x18, have %dx%d", sc.w, sc.h)
+split := min(max(s.w * 3 / 5, 34), s.w - 22)
+```
+
+That is recomputed every `view()` call anyway, since `view` runs once per tick
+regardless of whether anything resized.
+
+**Too small.** Below some minimum, don't try to lay out the real UI at all —
+show one clipped line and return. `examples/tracker/main.odin`'s guard — two
+file-scope constants, and the first thing `view` does:
+
+```odin
+MIN_W :: 56
+MIN_H :: 16
+
+// ... in view:
+if s.w < MIN_W || s.h < MIN_H {
+	msg := fmt.tprintf("terminal too small — need %dx%d, have %dx%d", MIN_W, MIN_H, s.w, s.h)
 	tui.draw_text_clipped(
-		sc,
-		max((sc.w - tui.text_width(msg)) / 2, 0),
-		sc.h / 2,
-		sc.w,
+		s,
+		max((s.w - tui.text_width(msg)) / 2, 0),
+		s.h / 2,
+		s.w,
 		msg,
-		{fg = C_ACCENT},
+		tui.Style{fg = C_ACCENT},
 	)
 	return
 }
 ```
+
+The minimum is two named constants, and the message formats the same two —
+so the number the user is told to hit is by construction the number the guard
+tests.
 
 Even that fallback line uses `draw_text_clipped`, not `draw_text` — on a
 terminal narrow enough to trigger this guard, the message itself might not
@@ -530,9 +548,9 @@ if selected {
 }
 ```
 
-`C_SEL_BG` there is `tui.Color{mode = .True, r = 58, g = 44, b = 30}` — a fixed
-color, chosen on purpose, that overrides whatever background the user's
-terminal theme would otherwise show for that row.
+`C_SEL_BG` there is `tui.rgb(40, 38, 48)` — a fixed color, chosen on purpose,
+that overrides whatever background the user's terminal theme would otherwise
+show for that row.
 
 If you want a themable "selected" look instead of a fixed color, `.Reverse`
 (swap fg/bg) tracks the user's own palette instead of fighting it —
@@ -543,7 +561,7 @@ If you want a themable "selected" look instead of a fixed color, `.Reverse`
 
 Never assume one rune is one column. `tui.rune_width(r)` returns 0 for
 combining marks and zero-width joiners, 1 for ordinary ASCII/Latin, and 2 for
-CJK, Hangul, and most emoji (see the range table in `tui/screen.odin`).
+CJK, Hangul, and most emoji (see the range table in `tui/width_table.odin`).
 `draw_text` and `set_cell` already use it — `set_cell` writes a
 `WIDE_CONT` marker into the cell to the right of any 2-wide glyph so the
 diff renderer never lands a write in the middle of one:
@@ -567,15 +585,17 @@ this way:
 
 ```odin
 // draw_header, examples/tracker/main.odin
-right := fmt.tprintf("%s@%s %dx%d", who(s), s.via, sc.w, sc.h)
-x := sc.w - tui.text_width(right) - 2
+right := fmt.tprintf("%d open · %d connected", open_count(), conns)
+x := s.w - tui.text_width(right) - 2
 ```
 
-Swap that for `len(right)` and the moment `who(s)` or any other piece of that
-string contains something wide, the right edge drifts — off by however many
-extra bytes the wide runes cost, in the wrong direction to boot, and it will
-only show up for users with non-ASCII names, which is exactly the kind of bug
-that survives testing with `"guest"`.
+Swap that for `len(right)` and this one drifts immediately: the `·` separator
+is one column but two UTF-8 bytes, so the whole string starts one column
+left of where it should, on every frame. Put anything genuinely wide in such
+a string — a CJK label, a user-supplied name — and the error grows by however
+many extra bytes those runes cost, in a way that only shows up for the users
+who have them, which is exactly the kind of bug that survives testing in
+ASCII.
 
 ## 11. Mouse support
 

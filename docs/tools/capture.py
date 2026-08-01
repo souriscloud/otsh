@@ -8,8 +8,8 @@ The screenshots in these docs are therefore actual output, not mockups.
 Authoring-time tool only. Reading the docs needs nothing; the generated SVGs
 are committed. Requires `pyte` (pip install pyte).
 
-    python3 docs/tools/capture.py --port 2222 --keys "jj\\r" \\
-        --title "shop" --out docs/assets/shop-menu.svg
+    python3 docs/tools/capture.py --port 2222 --keys "jj" \\
+        --title "ssh -p 2222 localhost" --out docs/assets/tracker-list.svg
 
     python3 docs/tools/capture.py --local ./stopwatch --keys " " \\
         --title "stopwatch" --out docs/assets/stopwatch.svg
