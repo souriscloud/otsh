@@ -92,6 +92,14 @@ jobs:
       - name: Run tests
         run: ./test.sh
 
+      # Compares libssh/libssh.odin against the installed headers: callback
+      # struct order, enum values, and every @(link_name) against the library's
+      # exported symbols. Skips with exit 0 where the headers are absent. It
+      # lives in this job rather than `docs` because only this one installs
+      # libssh; in `docs` it would do nothing but skip.
+      - name: Bindings match the installed libssh
+        run: python3 docs/tools/check_bindings.py --check
+
       # The Windows job below is allowed to fail, so this is the only Windows
       # guarantee that actually gates a merge: the platform-split files still
       # type-check for windows_amd64. Type-checking needs no libssh and no
@@ -216,14 +224,19 @@ jobs:
   # serving real openssh sessions. It found four genuine bugs on the way, which
   # is what this job is for.
   #
-  # It still does not block, because that run and this job are not the same
-  # thing. A hosted windows-latest runner is a different machine: vcpkg is
-  # preinstalled at C:\vcpkg rather than cloned, the Visual Studio edition
-  # differs, and the whole workflow file has never executed on GitHub at all.
-  # Blocking on a job that has never once run is how a repo starts its life
-  # with a red X nobody can explain. Flip this to blocking after it has been
-  # green on real CI a few times — the substance is verified; the plumbing is
-  # not. docs/getting-started.md records exactly what was and was not covered.
+  # This job has since run on a hosted windows-latest runner — the first push
+  # to GitHub, 2026-08-01, all four jobs green, this one in 17 minutes. So the
+  # plumbing works too, on a machine that differs from that desktop in the ways
+  # that matter: vcpkg preinstalled at C:\vcpkg rather than cloned, a different
+  # Visual Studio edition.
+  #
+  # It still does not block, and the reason is now about evidence rather than
+  # ignorance: one green run is not a track record. Windows is also the only
+  # platform here whose failures would most likely be about the runner image —
+  # a vcpkg or VS bump — rather than about otsh, and being unable to merge
+  # because Microsoft changed an image is a bad trade for a package whose
+  # Windows code is already cross-type-checked on every push by the Linux job.
+  # Flip it to blocking after a few more green weekly runs.
   #
   # It is also the single most expensive job here — 17 minutes wall, almost all
   # of it vcpkg compiling libssh and OpenSSL from source, doubled to 34 billed

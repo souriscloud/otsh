@@ -172,9 +172,12 @@ Caveats specific to the Windows build, all of them accepted deliberately:
 ### Validating CI locally
 
 Everything above is evidence about otsh. `.github/workflows/ci.yml` is a
-separate claim — a workflow file that has never run is a prediction — so it
-gets checked before it is pushed. Both tools run in containers; neither is
-installed on the host.
+separate claim, and an unrun workflow file is a prediction rather than a
+result — so it was validated locally before it was ever pushed. It has since
+run for real (first push, 2026-08-01: all four jobs green, Windows included),
+but the local check is still the cheaper place to catch a mistake, and it is
+the only way to exercise the file without spending runner minutes. Both tools
+run in containers; neither is installed on the host.
 
 **Lint it.** `actionlint` parses the YAML, type-checks every `${{ }}`
 expression, validates the `runs-on` labels and `if:` conditions, and runs

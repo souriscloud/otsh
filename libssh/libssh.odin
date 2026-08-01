@@ -230,8 +230,16 @@ Channel_Exec_Proc :: #type proc "c" (session: Session, channel: Channel, command
 // C struct layouts. Field order must match libssh/callbacks.h exactly; slots we
 // do not use are typed as rawptr so they stay nil.
 //
-// `size` replaces the ssh_callbacks_init() macro: libssh uses it for forward
-// compatibility and rejects the struct if it is zero.
+// `size` replaces the ssh_callbacks_init() macro. It is how libssh decides
+// which fields the caller's struct actually has, and getting it wrong fails
+// quietly rather than loudly: `ssh_callbacks_exists(p, c)` in callbacks.h is
+//
+//   (p != NULL) && ((char *)&((p)->c) < (char *)(p) + (p)->size) && ((p)->c != NULL)
+//
+// so with `size` left at zero that bound check is false for every field, and
+// libssh accepts the struct and then invokes nothing. The symptom is a
+// connection that hangs at the first callback it needed, not an error at
+// registration — which is why every callback struct here sets it explicitly.
 
 Server_Callbacks :: struct {
 	size:                                       c.size_t,

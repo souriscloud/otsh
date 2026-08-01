@@ -236,11 +236,14 @@ Mark it a pre-release for as long as `VERSION_MAJOR` is 0.
 
 ## A note on what CI has and has not done
 
-The header comment in `.github/workflows/ci.yml` records measured billed times
-for all four jobs from "the first real run", so the workflow has executed on
-GitHub. Several comments elsewhere in the repository — inside the `windows` job
-in that same file, and in `docs/getting-started.md` — still say the hosted
-Windows job has never run. They were written on a branch cut before that run
-landed and are stale, not a second opinion. The newer statement is the cost
-comment. Nobody has yet watched a `v*` tag drive the matrix, which is the gap
-this page cannot close on its own.
+CI has run on GitHub: the first push on 2026-08-01 was green across all four
+jobs, Windows included, and the billed-minute figures in
+`.github/workflows/ci.yml`'s header come from it. Comments elsewhere claiming
+the hosted Windows job had never run were written on a branch cut before that
+push and have been corrected.
+
+What nobody has watched yet is a `v*` tag driving the full matrix. Pushes to
+`main` only run the Linux and docs jobs; the macOS and Windows jobs are gated
+to tags, the weekly schedule and manual dispatch. So the first release tag is
+also the first time the tag trigger itself is exercised — if the matrix does
+not start, check the `on.push.tags` filter before assuming the jobs failed.

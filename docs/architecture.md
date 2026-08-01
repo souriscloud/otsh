@@ -175,9 +175,25 @@ the wrong function to the wrong event. Slots this codebase does not use
 at their Odin zero value, which is a nil function pointer libssh treats as
 "not implemented." The leading `size: c.size_t` field on both structs is
 libssh's forward-compatibility guard — the C library normally sets it via the
-`ssh_callbacks_init()` macro and rejects the struct if it is zero; here it is
-set explicitly (`size = size_of(ls.Server_Callbacks)` / `size_of(ls.Channel_Callbacks)`)
-in `ssh/server.odin:session_thread` and `cb_channel_open`.
+`ssh_callbacks_init()` macro; here it is set explicitly
+(`size = size_of(ls.Server_Callbacks)` / `size_of(ls.Channel_Callbacks)`) in
+`ssh/server.odin:session_thread` and `cb_channel_open`.
+
+Leaving it zero does **not** get the struct rejected, which is what this page
+used to claim. `callbacks.h` decides whether a field exists with
+
+```c
+#define ssh_callbacks_exists(p,c) (\
+  (p != NULL) && ( (char *)&((p)-> c) < (char *)(p) + (p)->size ) && \
+  ((p)-> c != NULL) \
+  )
+```
+
+With `size == 0` that comparison is false for every field, so libssh accepts
+the struct and then calls nothing in it. The failure is a connection that
+hangs at the first callback it needed — no error, no log line, nothing at
+registration time to point at. `docs/tools/check_bindings.py` cannot catch
+this one either; it is a value set at runtime, not a layout.
 
 ## Input flow and backpressure
 
