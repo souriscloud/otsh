@@ -1,0 +1,76 @@
+name: pages
+
+# Publishes docs/site to GitHub Pages.
+#
+# The site is generated, not committed — docs/site/ is gitignored — so it is
+# built here and handed straight to Pages rather than pushed to a branch.
+#
+# Cost: this runs one ubuntu (1x) job of a few seconds. On a public repository
+# both Actions minutes and Pages are free; on a private one Pages needs a paid
+# plan, so if this repo is private and the deploy step fails with a Pages error,
+# that is why — nothing here is misconfigured.
+#
+# Before the first run, set Settings → Pages → Build and deployment → Source to
+# "GitHub Actions". Without that the deploy step has nothing to deploy to.
+
+on:
+  push:
+    branches: [main]
+    # Only when something that can change the site changes. The docs tooling
+    # reads the Odin sources for the API pages and the symbol index, so those
+    # count too.
+    paths:
+      - 'docs/**'
+      - 'README.md'
+      - 'examples/**'
+      - 'ssh/**'
+      - 'tui/**'
+      - 'sshtui/**'
+      - 'libssh/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; a newer commit supersedes an in-flight one rather than
+# racing it. Not cancel-in-progress: a half-finished deploy is worse than a
+# slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # The generator is stdlib-only by design, so there is nothing to install
+      # and no lockfile to drift. It also validates as it builds: --check fails
+      # on a dead internal link, a missing image, an unresolved symbol anchor or
+      # a broken sidebar, so a bad site is never published.
+      - name: Build and validate the site
+        run: python3 docs/tools/build_site.py --check
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

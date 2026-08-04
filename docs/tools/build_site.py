@@ -1674,6 +1674,12 @@ def main():
     a = ap.parse_args()
 
     n = build()
+    # GitHub Pages runs Jekyll over whatever it is given unless this file is
+    # present, and Jekyll silently drops paths beginning with an underscore and
+    # tries to template `{{ }}` it finds in content. Neither is wanted here: the
+    # site is already complete HTML. Written unconditionally so a local build
+    # and a published one are the same tree.
+    open(os.path.join(OUT, ".nojekyll"), "w").close()
     print(f"built {n} pages -> {OUT}")
 
     problems = check()
