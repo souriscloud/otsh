@@ -34,7 +34,7 @@ Example:
 app := tui.App{data = m, update = update, view = view}
 ```
 
-*tui/tui.odin:64*
+*[tui/tui.odin:64](../tui/tui.odin#L64)*
 
 ### `Attr`
 
@@ -52,7 +52,7 @@ Attr :: enum u8 {
 Text attributes. Terminal support varies: Bold and Reverse are universal,
 Italic and Strike are not.
 
-*tui/screen.odin:58*
+*[tui/screen.odin:58](../tui/screen.odin#L58)*
 
 ### `Attrs`
 
@@ -62,7 +62,7 @@ Attrs :: distinct bit_set[Attr;u8]
 
 A set of `Attr`, e.g. `{.Bold, .Underline}`.
 
-*tui/screen.odin:67*
+*[tui/screen.odin:67](../tui/screen.odin#L67)*
 
 ### `Backend`
 
@@ -89,7 +89,7 @@ Example:
 p.backend = tui.Backend{data = conn, write = my_write, poll = my_poll, size = my_size}
 ```
 
-*tui/tui.odin:15*
+*[tui/tui.odin:15](../tui/tui.odin#L15)*
 
 ### `Border`
 
@@ -101,7 +101,7 @@ Border :: struct {
 
 The six runes `draw_box` uses: four corners, then horizontal and vertical.
 
-*tui/screen.odin:337*
+*[tui/screen.odin:337](../tui/screen.odin#L337)*
 
 ### `Cell`
 
@@ -114,7 +114,7 @@ Cell :: struct {
 
 One character cell: a rune plus how to paint it.
 
-*tui/screen.odin:122*
+*[tui/screen.odin:122](../tui/screen.odin#L122)*
 
 ### `Color`
 
@@ -129,7 +129,7 @@ Color :: struct {
 A foreground or background colour. Build one with `no_color`, `ansi` or `rgb`
 rather than filling the fields by hand.
 
-*tui/screen.odin:26*
+*[tui/screen.odin:26](../tui/screen.odin#L26)*
 
 ### `Color_Mode`
 
@@ -144,7 +144,7 @@ Color_Mode :: enum u8 {
 How a Color is encoded on the wire. Default emits SGR 39/49 so the user's own
 terminal theme decides; the others pin an exact colour.
 
-*tui/screen.odin:18*
+*[tui/screen.odin:18](../tui/screen.odin#L18)*
 
 ### `Input`
 
@@ -157,7 +157,7 @@ Input :: union {
 
 What `parse_input` decodes: either a key or a mouse event.
 
-*tui/key.odin:82*
+*[tui/key.odin:82](../tui/key.odin#L82)*
 
 ### `Key`
 
@@ -182,7 +182,7 @@ if k, ok := msg.(tui.Key); ok && k.kind == .Enter {
 }
 ```
 
-*tui/key.odin:53*
+*[tui/key.odin:53](../tui/key.odin#L53)*
 
 ### `Key_Kind`
 
@@ -224,7 +224,7 @@ Key_Kind :: enum u8 {
 Which key was pressed. `.Rune` means an ordinary character, carried in
 `Key.r`; everything else is a named key with no rune.
 
-*tui/key.odin:12*
+*[tui/key.odin:12](../tui/key.odin#L12)*
 
 ### `Local`
 
@@ -238,7 +238,7 @@ Local :: struct {
 Saved terminal state for a local session, so raw mode can be undone. Zero
 value is fine; pass the same one to enter/exit/backend.
 
-*tui/local.odin:46*
+*[tui/local.odin:46](../tui/local.odin#L46)*
 
 ### `Mouse`
 
@@ -256,7 +256,7 @@ Mouse :: struct {
 A mouse event, in zero-based cell coordinates. Only delivered when
 `Program.mouse` was set before `run`.
 
-*tui/key.odin:72*
+*[tui/key.odin:72](../tui/key.odin#L72)*
 
 ### `Mouse_Kind`
 
@@ -272,7 +272,7 @@ Mouse_Kind :: enum u8 {
 
 What the mouse did. Wheel events carry no button.
 
-*tui/key.odin:62*
+*[tui/key.odin:62](../tui/key.odin#L62)*
 
 ### `Msg`
 
@@ -299,7 +299,7 @@ case tui.Resize:
 }
 ```
 
-*tui/tui.odin:51*
+*[tui/tui.odin:51](../tui/tui.odin#L51)*
 
 ### `Program`
 
@@ -325,7 +325,7 @@ One running app: its backend, its screen, and the loop's own bookkeeping.
 Set `fps` and `mouse` before `run`; read `frame`, `elapsed`, `bytes_out` and
 `bytes_in` any time.
 
-*tui/tui.odin:74*
+*[tui/tui.odin:74](../tui/tui.odin#L74)*
 
 ### `Resize`
 
@@ -338,7 +338,7 @@ Resize :: struct {
 Sent when the terminal geometry changes. The screen buffer has already been
 resized by the time your `update` sees this.
 
-*tui/tui.odin:28*
+*[tui/tui.odin:28](../tui/tui.odin#L28)*
 
 ### `Screen`
 
@@ -359,7 +359,7 @@ The cell grid. `cur` is the frame being drawn, `prev` the one last sent to the
 terminal; `flush` emits the difference. Apps normally only draw into it and
 let `run` handle the rest.
 
-*tui/screen.odin:130*
+*[tui/screen.odin:130](../tui/screen.odin#L130)*
 
 ### `Style`
 
@@ -395,7 +395,7 @@ Example:
 style := tui.Style{fg = tui.ansi(2), bg = tui.no_color(), attrs = {.Bold}}
 ```
 
-*tui/screen.odin:90*
+*[tui/screen.odin:90](../tui/screen.odin#L90)*
 
 ### `Tick`
 
@@ -410,7 +410,7 @@ Tick :: struct {
 Sent once per frame. Drive animation off `dt` (real seconds since the previous
 tick), never off `frame` — see docs/cookbook.md.
 
-*tui/tui.odin:34*
+*[tui/tui.odin:34](../tui/tui.odin#L34)*
 
 ## Constants
 
@@ -422,7 +422,7 @@ BORDER_DOUBLE :: Border{'╔', '╗', '╚', '╝', '═', '║'}
 
 Double-ruled.
 
-*tui/screen.odin:346*
+*[tui/screen.odin:346](../tui/screen.odin#L346)*
 
 ### `BORDER_ROUND`
 
@@ -432,7 +432,7 @@ BORDER_ROUND :: Border{'╭', '╮', '╰', '╯', '─', '│'}
 
 Rounded corners.
 
-*tui/screen.odin:342*
+*[tui/screen.odin:342](../tui/screen.odin#L342)*
 
 ### `BORDER_SHARP`
 
@@ -442,7 +442,7 @@ BORDER_SHARP :: Border{'┌', '┐', '└', '┘', '─', '│'}
 
 Square corners.
 
-*tui/screen.odin:344*
+*[tui/screen.odin:344](../tui/screen.odin#L344)*
 
 ### `BORDER_THICK`
 
@@ -452,18 +452,12 @@ BORDER_THICK :: Border{'┏', '┓', '┗', '┛', '━', '┃'}
 
 Heavy weight.
 
-*tui/screen.odin:348*
+*[tui/screen.odin:348](../tui/screen.odin#L348)*
 
 ### `MAX_COLS`
 
 ```odin
 MAX_COLS :: 1000
-MAX_ROWS :: 300
-
-// Resizes the grids, forcing a full repaint on the next flush. A no-op if the
-// size is unchanged. Dimensions are clamped to MAX_COLS/MAX_ROWS.
-//
-// Driving a Program without `run` (e.g. in a test):
 ```
 
 Hard bounds on a screen, in cells.
@@ -481,20 +475,15 @@ rows — while bounding a session at roughly 9.6 MB of cell grid (two grids,
 16 bytes a cell). That worst case still multiplies by the session limit, so an
 operator expecting many concurrent users should size RAM accordingly.
 
-*tui/screen.odin:168*
+*[tui/screen.odin:168](../tui/screen.odin#L168)*
 
 ### `MAX_ROWS`
 
 ```odin
 MAX_ROWS :: 300
-
-// Resizes the grids, forcing a full repaint on the next flush. A no-op if the
-// size is unchanged. Dimensions are clamped to MAX_COLS/MAX_ROWS.
-//
-// Driving a Program without `run` (e.g. in a test):
 ```
 
-*tui/screen.odin:169*
+*[tui/screen.odin:169](../tui/screen.odin#L169)*
 
 ### `WIDE_CONT`
 
@@ -505,7 +494,7 @@ WIDE_CONT :: rune(-1) // right half of a double-width cell
 Occupies the right-hand cell of a double-width glyph. Never drawn itself —
 `flush` skips it, since the lead glyph already advanced the cursor over it.
 
-*tui/screen.odin:14*
+*[tui/screen.odin:14](../tui/screen.odin#L14)*
 
 ## Procedures
 
@@ -524,7 +513,7 @@ Example:
 green := tui.Style{fg = tui.ansi(2)}
 ```
 
-*tui/screen.odin:45*
+*[tui/screen.odin:45](../tui/screen.odin#L45)*
 
 ### `draw_box`
 
@@ -541,7 +530,7 @@ Example:
 tui.draw_box(s, 2, 1, 40, 10, tui.Style{fg = tui.ansi(6)}, tui.BORDER_ROUND, " files ")
 ```
 
-*tui/screen.odin:356*
+*[tui/screen.odin:356](../tui/screen.odin#L356)*
 
 ### `draw_text`
 
@@ -557,7 +546,7 @@ Example:
 tui.draw_text(s, 2, 1, "score: 42", tui.Style{})
 ```
 
-*tui/screen.odin:285*
+*[tui/screen.odin:285](../tui/screen.odin#L285)*
 
 ### `draw_text_clipped`
 
@@ -573,7 +562,7 @@ Example:
 tui.draw_text_clipped(s, 0, 0, 12, "a very long label", tui.Style{})
 ```
 
-*tui/screen.odin:302*
+*[tui/screen.odin:302](../tui/screen.odin#L302)*
 
 ### `fill_rect`
 
@@ -589,7 +578,7 @@ Example:
 tui.fill_rect(s, 0, 0, s.w, 1, ' ', tui.Style{bg = tui.ansi(4)}) // status bar
 ```
 
-*tui/screen.odin:328*
+*[tui/screen.odin:328](../tui/screen.odin#L328)*
 
 ### `flush`
 
@@ -600,7 +589,7 @@ flush :: proc(s: ^Screen) -> []u8
 Produces the escape sequence stream that turns the previously rendered frame
 into the current one. Returns an empty slice when nothing changed.
 
-*tui/screen.odin:525*
+*[tui/screen.odin:525](../tui/screen.odin#L525)*
 
 ### `key_name`
 
@@ -617,7 +606,7 @@ buf: [16]u8
 label := tui.key_name(tui.Key{kind = .Enter}, buf[:]) // "enter"
 ```
 
-*tui/key.odin:391*
+*[tui/key.odin:391](../tui/key.odin#L391)*
 
 ### `local_backend`
 
@@ -627,7 +616,7 @@ local_backend :: proc(l: ^Local) -> Backend
 
 A `Backend` over this process's own stdin/stdout.
 
-*tui/local.odin:52*
+*[tui/local.odin:52](../tui/local.odin#L52)*
 
 ### `local_enter_raw`
 
@@ -639,7 +628,7 @@ Puts the terminal into raw mode: no line buffering, no echo, no signal
 generation from Ctrl+C. Over SSH the *client* does this for us, which is why
 the server side never needs termios at all.
 
-*tui/local.odin:83*
+*[tui/local.odin:83](../tui/local.odin#L83)*
 
 ### `local_exit_raw`
 
@@ -650,7 +639,7 @@ local_exit_raw :: proc(l: ^Local)
 Restores the terminal settings saved by `local_enter_raw`. Safe to call twice;
 always `defer` it, or the user's shell is left in raw mode.
 
-*tui/local.odin:102*
+*[tui/local.odin:102](../tui/local.odin#L102)*
 
 ### `no_color`
 
@@ -667,7 +656,7 @@ Example:
 style := tui.Style{bg = tui.no_color()}
 ```
 
-*tui/screen.odin:38*
+*[tui/screen.odin:38](../tui/screen.odin#L38)*
 
 ### `parse_input`
 
@@ -697,7 +686,7 @@ if ok {
 }
 ```
 
-*tui/key.odin:104*
+*[tui/key.odin:104](../tui/key.odin#L104)*
 
 ### `quit`
 
@@ -715,7 +704,7 @@ if k, ok := msg.(tui.Key); ok && k.kind == .Esc {
 }
 ```
 
-*tui/tui.odin:97*
+*[tui/tui.odin:97](../tui/tui.odin#L97)*
 
 ### `rgb`
 
@@ -732,7 +721,7 @@ Example:
 orange := tui.Style{fg = tui.rgb(255, 128, 0)}
 ```
 
-*tui/screen.odin:52*
+*[tui/screen.odin:52](../tui/screen.odin#L52)*
 
 ### `run`
 
@@ -753,7 +742,7 @@ p.backend = tui.local_backend(&l)
 tui.run(&p, tui.App{data = m, update = update, view = view})
 ```
 
-*tui/tui.odin:142*
+*[tui/tui.odin:142](../tui/tui.odin#L142)*
 
 ### `rune_width`
 
@@ -781,7 +770,7 @@ Example:
 w := tui.rune_width('字') // 2 — East Asian Wide
 ```
 
-*tui/screen.odin:409*
+*[tui/screen.odin:409](../tui/screen.odin#L409)*
 
 ### `screen_clear`
 
@@ -791,7 +780,7 @@ screen_clear :: proc(s: ^Screen, style := Style{})
 
 Resets the working buffer. Called by the runtime before each view().
 
-*tui/screen.odin:194*
+*[tui/screen.odin:194](../tui/screen.odin#L194)*
 
 ### `screen_destroy`
 
@@ -801,7 +790,7 @@ screen_destroy :: proc(s: ^Screen)
 
 Frees what `screen_init` allocated.
 
-*tui/screen.odin:148*
+*[tui/screen.odin:148](../tui/screen.odin#L148)*
 
 ### `screen_init`
 
@@ -811,7 +800,7 @@ screen_init :: proc(s: ^Screen, w, h: int)
 
 Allocates the grids and output buffer. `run` calls this for you.
 
-*tui/screen.odin:142*
+*[tui/screen.odin:142](../tui/screen.odin#L142)*
 
 ### `screen_resize`
 
@@ -830,7 +819,7 @@ Example:
 tui.screen_resize(&p.screen, 100, 40)
 ```
 
-*tui/screen.odin:179*
+*[tui/screen.odin:179](../tui/screen.odin#L179)*
 
 ### `set_cell`
 
@@ -848,7 +837,7 @@ Example:
 tui.set_cell(s, 0, 0, '*', tui.Style{fg = tui.ansi(3)})
 ```
 
-*tui/screen.odin:213*
+*[tui/screen.odin:213](../tui/screen.odin#L213)*
 
 ### `set_cursor`
 
@@ -867,7 +856,7 @@ m := (^Model)(p.app.data)
 tui.set_cursor(s, m.cursor_x, m.cursor_y)
 ```
 
-*tui/screen.odin:385*
+*[tui/screen.odin:385](../tui/screen.odin#L385)*
 
 ### `text_width`
 
@@ -885,7 +874,7 @@ title := "status"
 x := (s.w - tui.text_width(title)) / 2 // center it
 ```
 
-*tui/screen.odin:455*
+*[tui/screen.odin:455](../tui/screen.odin#L455)*
 
 ### `with_attrs`
 
@@ -901,7 +890,7 @@ Example:
 bold := tui.with_attrs(base, {.Bold})
 ```
 
-*tui/screen.odin:117*
+*[tui/screen.odin:117](../tui/screen.odin#L117)*
 
 ### `with_bg`
 
@@ -917,7 +906,7 @@ Example:
 selected := tui.with_bg(base, tui.ansi(4)) // highlight a row
 ```
 
-*tui/screen.odin:109*
+*[tui/screen.odin:109](../tui/screen.odin#L109)*
 
 ### `with_fg`
 
@@ -933,4 +922,4 @@ Example:
 warn := tui.with_fg(base, tui.ansi(1)) // red on whatever base's background is
 ```
 
-*tui/screen.odin:101*
+*[tui/screen.odin:101](../tui/screen.odin#L101)*

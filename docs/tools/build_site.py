@@ -19,8 +19,12 @@ the site works offline and from file:// with zero network access.
 """
 import argparse, errno, glob, html, json, os, re, shutil, sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gen_symbols
+
 DOCS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(DOCS, "site")
+SRC_PKGS = ("tui", "ssh", "sshtui", "libssh")
 
 # Order of the sidebar. Anything not listed is appended alphabetically.
 # Sources outside docs/ that are pulled into the site, mapped to output names.
@@ -81,9 +85,165 @@ ODIN_TYPE = (r"string|cstring|rune|byte|bool|rawptr|uintptr|int|uint|i8|i16|i32|
              r"u8|u16|u32|u64|f16|f32|f64|any|typeid")
 
 
-def highlight(code, lang):
+class Linker:
+    """Resolves identifiers in Odin code to documentation links — but only the
+    ones that resolve with certainty. A qualified `tui.draw_box` whose member
+    is an exported symbol of that package is a link; a bare `read` is plain
+    text, always. The index comes from gen_symbols (i.e. from gen_api's parse
+    of the sources), never from anything hand-maintained, and the choice here
+    is deliberate: an unlinked identifier is fine, a wrongly-linked one is a
+    defect."""
+
+    def __init__(self):
+        self.index = gen_symbols.build_index()
+        self.by_pkg = gen_symbols.names_by_pkg(self.index)
+        self.std = gen_symbols.std_packages()
+        self.core = gen_symbols.odin_core()
+        self.quals = set(self.by_pkg) | set(self.std)
+        self.stats = {"qualified": 0, "stdlib": 0, "signature": 0,
+                      "imports": 0, "prose": 0, "prose_plain": 0,
+                      "idents_total": 0, "idents_plain": 0,
+                      "qualified_plain": 0, "src": 0}
+
+    def shadow_of(self, code, quals=None):
+        """Qualifiers `code` binds as locals: `ssh := ...`, `ssh: T`,
+        `ssh :: ...`, or a range-`for` loop variable in either position
+        (`for ssh in ...`, `for i, ssh in ...`). The `in` is required — a
+        condition loop like `for ls.read(...) > 0 {}` declares nothing."""
+        bare = re.sub(r'"(?:\\.|[^"\\])*"', '""', code)
+        bare = re.sub(r"//[^\n]*", "", bare)
+        return {q for q in (self.quals if quals is None else quals)
+                if re.search(rf"\b{q}\s*(:=|::|:\s)", bare)
+                or re.search(rf"\bfor\s+(?:[A-Za-z_]\w*\s*,\s*)?{q}\s+in\b", bare)}
+
+    def block_ctx(self, code, self_pkg=None, decl=None, page_shadow=frozenset()):
+        """Per-block link context. `shadow` holds qualifiers bound as locals
+        anywhere on the page (`page_shadow`, so a tutorial's `ssh := ...` in
+        one block suppresses `ssh.x` linking in the next block too) plus this
+        block's own bindings — cheap, and never links a field access on a
+        local as if it were a package member. `enum` disables unqualified
+        linking entirely: an enum body declares variants, it does not
+        reference symbols."""
+        return {"shadow": self.shadow_of(code) | set(page_shadow),
+                "self_pkg": self_pkg, "decl": decl,
+                "enum": bool(re.match(r"\s*\w+\s*::\s*(distinct\s+)?enum\b", code))}
+
+    def member_href(self, qual, name):
+        """(href, external) for `qual.name`, or None if not certain."""
+        if qual in self.by_pkg:
+            if name in self.by_pkg[qual]:
+                return self.index[f"{qual}.{name}"]["h"], False
+            return None
+        url = gen_symbols.std_link(self.core, self.std, qual, name)
+        return (url, True) if url else None
+
+    def file_ctx(self, code):
+        """Link context for one package source file. Qualifiers come from
+        the file's own import lines, aliases included (`import ls
+        "../libssh"` makes `ls.` mean otsh:libssh in this file and nowhere
+        else) — the most certain resolution there is. Unqualified linking
+        stays off: resolving a file's own package-level names would need
+        real scope analysis, and a plain identifier beats a guessed one."""
+        alias = {}
+        for m in re.finditer(r'^import\s+(?:([A-Za-z_]\w*)\s+)?"([^"]+)"',
+                             code, re.M):
+            name_override, spec = m.group(1), m.group(2)
+            if spec.startswith("../"):
+                coll, path = "otsh", spec[3:]
+            elif ":" in spec:
+                coll, path = spec.split(":", 1)
+            else:
+                continue
+            name = name_override or path.rsplit("/", 1)[-1]
+            if coll == "otsh" and path in self.by_pkg:
+                alias[name] = (coll, path)
+            elif coll == "core" and self.core and \
+                    glob.glob(os.path.join(self.core, path, "*.odin")):
+                alias[name] = (coll, path)
+        return {"alias": alias, "shadow": self.shadow_of(code, set(alias)),
+                "self_pkg": None, "decl": None, "enum": False,
+                "base": "../../", "src": True}
+
+    def resolve_qualified(self, ctx, qual, name):
+        """(href, external, canonical_key, core_path) for `qual.name` under
+        this context, or None. href is site-root-relative for internal
+        targets. In a file context only the file's own imports resolve; in a
+        doc context the qualifier is the package name itself."""
+        if qual in ctx["shadow"]:
+            return None
+        if "alias" in ctx:
+            target = ctx["alias"].get(qual)
+            if not target:
+                return None
+            coll, path = target
+            if coll == "otsh":
+                if name in self.by_pkg[path]:
+                    key = f"{path}.{name}"
+                    return self.index[key]["h"], False, key, None
+                return None
+            if self.core and gen_symbols.std_symbol_exists(self.core, path, name):
+                url = gen_symbols.STD_URL.format(path=path) + "#" + name
+                return url, True, f"{qual}.{name}", path
+            return None
+        if qual not in self.quals:
+            return None
+        target = self.member_href(qual, name)
+        if not target:
+            return None
+        href, ext = target
+        return href, ext, f"{qual}.{name}", self.std[qual] if ext else None
+
+    def import_href(self, spec):
+        """Link target for an import path string: `"otsh:x"`, `"core:x"`, or
+        (as the package sources themselves write it) the relative `"../x"`."""
+        m = re.match(r'^"(?:(otsh|core):([\w/]+)|\.\./(\w+))"$', spec)
+        if not m:
+            return None
+        coll = m.group(1) or "otsh"
+        path = m.group(2) or m.group(3)
+        if coll == "otsh":
+            if path in self.by_pkg:
+                return f"api-{path}.html", False, f"otsh:{path}"
+            return None
+        if self.core and os.path.isdir(os.path.join(self.core, path)):
+            return gen_symbols.STD_URL.format(path=path), True, f"core:{path}"
+        return None
+
+    def prose_link(self, span, shadow=frozenset()):
+        """A whole inline-code span that reads exactly `pkg.symbol` links to
+        that symbol. Only the fully-qualified, fully-resolvable form —
+        `tui.draw_box` is a fact, a bare `run` might be the reader's own
+        proc — and never a qualifier some code block on the same page binds
+        as a local (`shadow`): prose discussing that local must not link to
+        the package it happens to be named after. `span` is already
+        HTML-escaped; identifiers escape to themselves, so a match
+        guarantees no entities are present."""
+        m = re.fullmatch(r"([a-z_][a-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)", span)
+        if not m or m.group(1) not in self.quals or m.group(1) in shadow:
+            return None
+        target = self.member_href(m.group(1), m.group(2))
+        if not target:
+            self.stats["prose_plain"] += 1
+            return None
+        self.stats["prose"] += 1
+        href, ext = target
+        inner = f"<code>{span}</code>"
+        if ext:
+            path = self.std[m.group(1)]
+            return (f'<a class="sym ext" href="{href}" data-sym="{m.group()}" '
+                    f'data-pkg="core:{path}" target="_blank" rel="noopener">{inner}</a>')
+        return f'<a class="sym" href="{href}" data-sym="{m.group()}">{inner}</a>'
+
+
+
+LINKER = None  # set by build(); None keeps highlight()/inline() link-free
+
+
+def highlight(code, lang, ctx=None):
     """Very small tokenizer. Correctness over cleverness: anything unmatched
-    is emitted as plain escaped text."""
+    is emitted as plain escaped text. With a link context (Odin blocks during
+    a site build) it also wraps certainty-resolvable symbols in <a> — see
+    Linker for what qualifies."""
     out, i, n = [], 0, len(code)
     if lang in ("sh", "bash", "shell", "console", ""):
         for line in code.split("\n"):
@@ -102,6 +262,10 @@ def highlight(code, lang):
         r"|(?P<n>\b\d[\d_]*(?:\.\d+)?\b)"
         r"|(?P<w>[A-Za-z_][A-Za-z0-9_]*)"
     )
+    member = re.compile(r"\.([A-Za-z_][A-Za-z0-9_]*)")
+    # >0 while the next string literal may be an import path: `import "x"`
+    # (2) or `import alias "x"` (still 1 after the alias word).
+    import_due = 0
     while i < n:
         m = token.search(code, i)
         if not m:
@@ -113,20 +277,111 @@ def highlight(code, lang):
         if kind == "w":
             word = m.group()
             after = code[m.end():m.end() + 3]
+            if ctx and LINKER and not ctx.get("src") and \
+                    not (re.fullmatch(ODIN_KW, word) or
+                         re.fullmatch(ODIN_LIT, word) or
+                         re.fullmatch(ODIN_TYPE, word)):
+                LINKER.stats["idents_total"] += 1
+
+            # qualified reference: pkg.symbol / stdqual.symbol / alias.symbol.
+            # The qualifier must not itself be a member access (`cfg.ssh.serve`
+            # is a field chain on a local, not the ssh package).
+            if (ctx and LINKER
+                    and (word in LINKER.quals or word in ctx.get("alias", {}))
+                    and (m.start() == 0 or code[m.start() - 1] != ".")):
+                mm = member.match(code, m.end())
+                if mm:
+                    res = LINKER.resolve_qualified(ctx, word, mm.group(1))
+                    if res:
+                        href, ext, key, core_path = res
+                        mem = mm.group(1)
+                        inner = (f"{word}." +
+                                 (f'<span class="t">{mem}</span>'
+                                  if mem[0].isupper() else mem))
+                        if ext:
+                            out.append(
+                                f'<a class="sym ext" href="{href}" '
+                                f'data-sym="{key}" data-pkg="core:{core_path}" '
+                                f'target="_blank" rel="noopener">{inner}</a>')
+                        else:
+                            out.append(
+                                f'<a class="sym" href="{ctx.get("base", "")}{href}" '
+                                f'data-sym="{key}">{inner}</a>')
+                        LINKER.stats["src" if ctx.get("src") else
+                                     "stdlib" if ext else "qualified"] += 1
+                        import_due = 0
+                        i = mm.end()
+                        continue
+                    if not ctx.get("src") and \
+                            mm.group(1) not in ("odin", "md", "h"):  # filenames
+                        LINKER.stats["qualified_plain"] += 1
+
             if re.fullmatch(ODIN_KW, word):
                 out.append(f'<span class="k">{text}</span>')
             elif re.fullmatch(ODIN_LIT, word):
                 out.append(f'<span class="l">{text}</span>')
             elif re.fullmatch(ODIN_TYPE, word):
                 out.append(f'<span class="t">{text}</span>')
-            elif after.startswith(" ::"):
-                out.append(f'<span class="d">{text}</span>')
-            elif word[0].isupper():
-                out.append(f'<span class="t">{text}</span>')
             else:
-                out.append(text)
+                # unqualified reference inside a signature block on that
+                # package's own API page: `Program` in api-tui.html can only
+                # be tui.Program. Guards: capitalized only (fields and params
+                # are lowercase by convention); never a member access (`.X`);
+                # never inside an enum body; never the entry's own name; and
+                # never a name being *declared*. Declaration detection: after
+                # `:`, `^`, `]`, `->` or `=` the word can only be a type or
+                # value reference; anywhere else (start of line, `(`, `{`,
+                # `,`) it is a reference only if the same-line token run
+                # ahead does NOT lead into a `name, name: T` colon — that
+                # colon means this word is part of the declared-name list.
+                sig_link = None
+                if (ctx and LINKER and ctx.get("self_pkg") and not ctx["enum"]
+                        and word[0].isupper() and word != ctx.get("decl")
+                        and word in LINKER.by_pkg[ctx["self_pkg"]]
+                        and (m.start() == 0 or code[m.start() - 1] != ".")):
+                    j = m.start() - 1
+                    while j >= 0 and code[j] in " \t":
+                        j -= 1
+                    prev = code[j] if j >= 0 else ""
+                    declared = prev not in ":^]>=" and re.match(
+                        r"[ \t]*(?:,[ \t]*[A-Za-z_][A-Za-z0-9_]*)*[ \t]*:",
+                        code[m.end():])
+                    if not declared:
+                        e = LINKER.index[f"{ctx['self_pkg']}.{word}"]
+                        sig_link = (f'<a class="sym" href="{e["h"]}" '
+                                    f'data-sym="{ctx["self_pkg"]}.{word}">'
+                                    f'<span class="t">{text}</span></a>')
+                if sig_link:
+                    LINKER.stats["signature"] += 1
+                    out.append(sig_link)
+                elif after.startswith(" ::"):
+                    out.append(f'<span class="d">{text}</span>')
+                elif word[0].isupper():
+                    out.append(f'<span class="t">{text}</span>')
+                else:
+                    out.append(text)
+                    if ctx and LINKER:
+                        LINKER.stats["idents_plain"] += 1
+            import_due = 2 if word == "import" else max(0, import_due - 1)
         else:
-            out.append(f'<span class="{kind}">{text}</span>')
+            # import "otsh:tui" / import "core:fmt" -> the package's docs
+            imp_link = None
+            if kind == "s" and ctx and LINKER and import_due > 0:
+                target = LINKER.import_href(m.group())
+                if target:
+                    href, ext, pkg = target
+                    if not ext:
+                        href = ctx.get("base", "") + href
+                    attrs = (' target="_blank" rel="noopener"' if ext else "")
+                    cls = "sym ext" if ext else "sym"
+                    imp_link = (f'<a class="{cls}" href="{href}" data-pkg="{pkg}"'
+                                f'{attrs}><span class="s">{text}</span></a>')
+            if imp_link:
+                LINKER.stats["imports"] += 1
+                out.append(imp_link)
+            else:
+                out.append(f'<span class="{kind}">{text}</span>')
+            import_due = 0
         i = m.end()
     return "".join(out)
 
@@ -149,6 +404,11 @@ def rewrite_path(href):
         return href
     if href.startswith("docs/"):
         href = href[len("docs/"):]
+    # Package sources get generated source pages with per-line anchors, so a
+    # reference entry's `../tui/tui.odin#L64` lands on the highlighted line.
+    m = re.match(r"^(?:\.\./)?((?:tui|ssh|sshtui|libssh)/[\w.\-]+\.odin)(#L\d+)?$", href)
+    if m:
+        return "src/" + m.group(1) + ".html" + (m.group(2) or "")
     if href.endswith(".odin") or "/examples/" in href:
         rel = href[href.index("examples/"):] if "examples/" in href else href
         return rel + ".txt" if rel.endswith(".odin") else rel
@@ -199,9 +459,12 @@ def snippet(text, limit=200):
     return cut + "…"
 
 
-def inline(text):
+def inline(text, symlink=True, shadow=frozenset()):
     """Inline markup. Code spans are pulled out first so their contents are
-    never treated as markup."""
+    never treated as markup. A span that reads exactly `pkg.symbol` becomes a
+    symbol link (see Linker.prose_link) — unless it already sits inside a
+    Markdown link's label, its qualifier is shadowed by a local in one of the
+    page's code blocks (`shadow`), or `symlink` is off (headings)."""
     spans = []
 
     def stash(m):
@@ -209,6 +472,7 @@ def inline(text):
         return f"\x00{len(spans)-1}\x00"
 
     text = re.sub(r"`([^`]+)`", stash, text)
+    in_link = set()
 
     raw = []
 
@@ -237,6 +501,8 @@ def inline(text):
 
     def link(m):
         label, href = m.group(1), m.group(2)
+        for ph in re.findall(r"\x00(\d+)\x00", label):
+            in_link.add(int(ph))
         href = rewrite_path(href)
         if href.rstrip("/").endswith("README.md"):
             href = "readme.html"
@@ -252,12 +518,20 @@ def inline(text):
     text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
     text = re.sub(r"(?<![\w*])\*([^*\n]+)\*(?![\w*])", r"<em>\1</em>", text)
     for i, s in enumerate(spans):
-        text = text.replace(f"\x00{i}\x00", f"<code>{s}</code>")
+        rep = None
+        if symlink and LINKER and i not in in_link:
+            rep = LINKER.prose_link(s, shadow)
+        text = text.replace(f"\x00{i}\x00", rep or f"<code>{s}</code>")
     return text
 
 
-def render(md):
+def render(md, api_pkg=None):
     """Markdown -> (html, outline, sections) for one page.
+
+    api_pkg is set when rendering a generated API reference page: the first
+    Odin block after an entry's `### \\`name\\`` heading is that entry's
+    signature, and inside a signature an unqualified capitalized identifier
+    can only mean that package's own symbol — so those get linked too.
 
     outline is [(level, id, title)] for h1-h3 — the page's table of
     contents, used to build the right-rail "on this page" mini-TOC.
@@ -278,6 +552,18 @@ def render(md):
     slug_seen = {}
     sections = []
     cur = {"level": 0, "id": None, "title": None, "text": []}
+    sig_decl = None  # entry name whose signature block comes next (API pages)
+
+    # Qualifiers any code block on this page binds as a local. Both code and
+    # prose linking honor this page-wide: once a page has a `ssh := ...`,
+    # every `ssh.x` on it means that local, in every block and every
+    # backtick mention — refusing the link everywhere beats guessing scope.
+    page_shadow = frozenset()
+    if LINKER:
+        sh = set()
+        for fence in re.findall(r"^```odin\n(.*?)^```", md, re.S | re.M):
+            sh |= LINKER.shadow_of(fence)
+        page_shadow = frozenset(sh)
 
     def flush():
         text = snippet(" ".join(t for t in cur["text"] if t))
@@ -301,7 +587,13 @@ def render(md):
                 body.append(lines[i])
                 i += 1
             i += 1
-            code = highlight("\n".join(body), lang)
+            src = "\n".join(body)
+            ctx = None
+            if LINKER and lang == "odin":
+                ctx = LINKER.block_ctx(src, self_pkg=api_pkg if sig_decl else None,
+                                       decl=sig_decl, page_shadow=page_shadow)
+            sig_decl = None
+            code = highlight(src, lang, ctx)
             lang_attr = html.escape(lang, quote=True)
             tag = (f'<div class="code" data-lang="{lang_attr}">'
                    f'<pre><code>{code}</code></pre></div>')
@@ -310,7 +602,17 @@ def render(md):
 
         m = re.match(r"^(#{1,4})\s+(.*)$", line)
         if m:
-            lvl, title = len(m.group(1)), inline(m.group(2))
+            lvl, title = len(m.group(1)), inline(m.group(2), symlink=False)
+            # On an API page, an entry heading whose next non-blank line opens
+            # an Odin fence is followed by that entry's signature block.
+            sig_decl = None
+            if api_pkg and lvl == 3:
+                em = re.fullmatch(r"`(\w+)`", m.group(2).strip())
+                j = i + 1
+                while j < len(lines) and not lines[j].strip():
+                    j += 1
+                if em and j < len(lines) and lines[j].startswith("```odin"):
+                    sig_decl = em.group(1)
             base = slug(m.group(2))
             n = slug_seen.get(base, 0)
             slug_seen[base] = n + 1
@@ -337,10 +639,11 @@ def render(md):
                 body.append(cells(lines[i]))
                 i += 1
             t = ["<div class='tablewrap'><table><thead><tr>"]
-            t += [f"<th>{inline(c)}</th>" for c in head]
+            t += [f"<th>{inline(c, shadow=page_shadow)}</th>" for c in head]
             t.append("</tr></thead><tbody>")
             for row in body:
-                t.append("<tr>" + "".join(f"<td>{inline(c)}</td>" for c in row) + "</tr>")
+                t.append("<tr>" + "".join(f"<td>{inline(c, shadow=page_shadow)}</td>"
+                                          for c in row) + "</tr>")
             t.append("</tbody></table></div>")
             tag = "".join(t)
             out.append(tag)
@@ -357,7 +660,7 @@ def render(md):
             while i < len(lines) and lines[i].startswith(">"):
                 body.append(lines[i].lstrip(">").strip())
                 i += 1
-            tag = f"<blockquote>{inline(' '.join(body))}</blockquote>"
+            tag = f"<blockquote>{inline(' '.join(body), shadow=page_shadow)}</blockquote>"
             out.append(tag)
             add_text(tag)
             continue
@@ -379,7 +682,7 @@ def render(md):
                             lines[i].startswith(" "):
                         text += " " + lines[i].strip()
                         i += 1
-                    items.append(inline(text))
+                    items.append(inline(text, shadow=page_shadow))
                 elif not lines[i].strip() and i + 1 < len(lines) and \
                         re.match(r"^(\s*)([-*]|\d+\.)\s+", lines[i + 1]):
                     i += 1
@@ -417,7 +720,7 @@ def render(md):
                 not re.match(r"^(#{1,4}\s|```|>|\s*\||\s*[-*]\s|\s*\d+\.\s|---+\s*$)", lines[i]):
             para.append(lines[i])
             i += 1
-        tag = f"<p>{inline(' '.join(para))}</p>"
+        tag = f"<p>{inline(' '.join(para), shadow=page_shadow)}</p>"
         out.append(tag)
         add_text(tag)
 
@@ -557,6 +860,39 @@ color:var(--muted);font-size:13px;line-height:1.4}
 .rail li.lvl3 a{padding-left:26px;font-size:12.5px}
 .rail a:hover{color:var(--fg);text-decoration:none}
 .rail a.active{color:var(--accent);border-left-color:var(--accent);font-weight:600}
+.code a.sym{color:inherit;text-decoration:none;border-bottom:1px dotted var(--muted)}
+.code a.sym:hover,.code a.sym:focus-visible{color:var(--accent);
+border-bottom:1px solid var(--accent);text-decoration:none}
+.code a.sym:hover .t,.code a.sym:focus-visible .t{color:var(--accent)}
+.symcard{position:fixed;z-index:60;width:min(480px,calc(100vw - 24px));
+background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+box-shadow:var(--shadow);padding:12px 14px;font-size:13px;line-height:1.5}
+.symcard[hidden]{display:none}
+.symhead{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:7px}
+.symname{font-weight:650;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+font-size:13px}
+.symkind{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);
+border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.sympkg{color:var(--muted);font-size:11.5px;margin-left:auto}
+.symsig{margin:0 0 8px;background:var(--code);border:1px solid var(--line);
+border-radius:var(--radius-sm);padding:8px 10px;overflow:auto;max-height:230px;
+font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;
+tab-size:4}
+.symdoc{margin:0 0 8px;color:var(--fg)}
+.symlinks{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px}
+body.srcpage main{max-width:var(--maxw);margin:0 auto;padding:26px 28px 80px;min-width:0}
+.srchead{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:14px;
+font-size:14px}
+.srchead .srcfile{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+font-weight:600}
+.srchead .srcsep{color:var(--muted)}
+.srchead .srcapi{margin-left:auto}
+body.srcpage .code pre{padding:14px 0}
+.srcline{display:block;padding:0 16px;scroll-margin-top:40px}
+.srcline .lno{display:inline-block;min-width:3.2em;margin-right:1.2em;text-align:right;
+color:var(--muted);text-decoration:none;user-select:none;-webkit-user-select:none}
+.srcline:target{background:var(--wash)}
+.srcline:target .lno{color:var(--accent);font-weight:700}
 body.landing main{background:linear-gradient(180deg,var(--wash),transparent 360px)}
 body.landing article{max-width:940px}
 body.landing h1{font-size:2.6em;letter-spacing:-.02em;margin-top:.1em}
@@ -603,13 +939,18 @@ SITE_JS = """(function(){
 "use strict";
 var root = document.documentElement, THEME_KEY = "otsh-theme";
 
+// localStorage can throw (private-mode Safari, some file:// contexts); a
+// missing preference must not take the whole script down with it.
+function storeGet(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
+function storeSet(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+
 function currentTheme(){
   return root.getAttribute("data-theme") ||
     (matchMedia("(prefers-color-scheme:dark)").matches ? "dark" : "light");
 }
 
 // theme toggle, persisted in localStorage, overriding prefers-color-scheme
-var saved = localStorage.getItem(THEME_KEY);
+var saved = storeGet(THEME_KEY);
 if (saved) root.setAttribute("data-theme", saved);
 var toggle = document.createElement("button");
 toggle.type = "button";
@@ -622,7 +963,7 @@ function labelToggle(){
 toggle.addEventListener("click", function(){
   var next = currentTheme() === "dark" ? "light" : "dark";
   root.setAttribute("data-theme", next);
-  localStorage.setItem(THEME_KEY, next);
+  storeSet(THEME_KEY, next);
   labelToggle();
 });
 labelToggle();
@@ -797,6 +1138,165 @@ if (input && results && window.OTSH_SEARCH) {
     input.select();
   });
 }
+
+// Symbol hover cards. Every <a class="sym"> was emitted by the build only for
+// identifiers it could resolve with certainty, and every href was verified by
+// --check; this code only *presents* that data (from symbols.js), it never
+// guesses. The links work with no JS at all — this layer adds the IDE-style
+// card on hover, keyboard focus, or tap, dismissed with Escape.
+var symIndex = window.OTSH_SYMBOLS || {};
+var card = null, cardFor = null, showTimer = null, hideTimer = null;
+
+function el(tag, cls, text){
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function withCode(target, text){
+  // `code` spans in doc summaries arrive as literal backticks; render them.
+  var parts = String(text).split("`");
+  for (var i = 0; i < parts.length; i++) {
+    if (!parts[i]) continue;
+    if (i % 2) target.appendChild(el("code", "", parts[i]));
+    else target.appendChild(document.createTextNode(parts[i]));
+  }
+  return target;
+}
+
+function ensureCard(){
+  if (card) return card;
+  card = el("div", "symcard");
+  card.id = "symcard";
+  card.setAttribute("role", "tooltip");
+  card.hidden = true;
+  card.addEventListener("mouseenter", function(){ clearTimeout(hideTimer); });
+  card.addEventListener("mouseleave", scheduleHide);
+  document.body.appendChild(card);
+  return card;
+}
+
+function fillCard(a){
+  var c = ensureCard();
+  c.textContent = "";
+  var key = a.getAttribute("data-sym");
+  var pkg = a.getAttribute("data-pkg");
+  var info = key ? symIndex[key] : null;
+  var head = el("div", "symhead");
+  if (info) {
+    head.appendChild(el("span", "symname", key));
+    head.appendChild(el("span", "symkind", info.k));
+    head.appendChild(el("span", "sympkg", info.p));
+    c.appendChild(head);
+    var sig = el("pre", "symsig");
+    sig.textContent = info.s;
+    c.appendChild(sig);
+    if (info.d) c.appendChild(withCode(el("p", "symdoc"), info.d));
+    var links = el("div", "symlinks");
+    var ref = el("a", "", "Reference");
+    ref.href = info.h;
+    links.appendChild(ref);
+    var src = el("a", "", info.f);
+    src.href = info.sf;
+    links.appendChild(src);
+    c.appendChild(links);
+  } else if (pkg) {
+    head.appendChild(el("span", "symname", key || pkg));
+    head.appendChild(el("span", "sympkg", pkg));
+    c.appendChild(head);
+    var external = a.classList.contains("ext");
+    c.appendChild(el("p", "symdoc", external
+      ? "Odin core library — documented at pkg.odin-lang.org."
+      : "otsh package — full reference on this site."));
+    var go = el("div", "symlinks");
+    var open = el("a", "", external ? "Open pkg.odin-lang.org ↗"
+                                    : "Package reference");
+    open.href = a.getAttribute("href");
+    if (external) { open.target = "_blank"; open.rel = "noopener"; }
+    go.appendChild(open);
+    c.appendChild(go);
+  } else {
+    return false;
+  }
+  return true;
+}
+
+function showCard(a){
+  clearTimeout(showTimer);
+  clearTimeout(hideTimer);
+  if (!fillCard(a)) return;
+  var c = card;
+  c.hidden = false;
+  var r = a.getBoundingClientRect();
+  var cw = c.offsetWidth, ch = c.offsetHeight;
+  var left = Math.max(8, Math.min(r.left, window.innerWidth - cw - 8));
+  var top = r.bottom + 8;
+  if (top + ch > window.innerHeight - 8) top = Math.max(8, r.top - ch - 8);
+  c.style.left = left + "px";
+  c.style.top = top + "px";
+  if (cardFor && cardFor !== a) cardFor.removeAttribute("aria-describedby");
+  cardFor = a;
+  a.setAttribute("aria-describedby", "symcard");
+}
+
+function hideCard(){
+  clearTimeout(showTimer);
+  clearTimeout(hideTimer);
+  if (cardFor) cardFor.removeAttribute("aria-describedby");
+  cardFor = null;
+  if (card) card.hidden = true;
+}
+
+function scheduleHide(){
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(hideCard, 200);
+}
+
+function symOf(node){
+  return node && node.closest ? node.closest("a.sym") : null;
+}
+
+document.addEventListener("mouseover", function(ev){
+  var a = symOf(ev.target);
+  if (!a) return;
+  clearTimeout(hideTimer);
+  if (cardFor === a) return;
+  clearTimeout(showTimer);
+  showTimer = setTimeout(function(){ showCard(a); }, 120);
+});
+document.addEventListener("mouseout", function(ev){
+  if (!symOf(ev.target)) return;
+  clearTimeout(showTimer);
+  scheduleHide();
+});
+document.addEventListener("focusin", function(ev){
+  var a = symOf(ev.target);
+  if (a) showCard(a);
+  else if (card && !card.contains(ev.target)) hideCard();
+});
+document.addEventListener("keydown", function(ev){
+  if (ev.key === "Escape" && cardFor) hideCard();
+});
+document.addEventListener("click", function(ev){
+  var a = symOf(ev.target);
+  if (!a) {
+    if (card && !card.hidden && !card.contains(ev.target)) hideCard();
+    return;
+  }
+  // No hover available (touch): first tap opens the card, a second tap — or
+  // any link inside the card — navigates.
+  if (matchMedia("(hover: none)").matches && cardFor !== a) {
+    ev.preventDefault();
+    showCard(a);
+  }
+});
+window.addEventListener("scroll", function(ev){
+  // scrolling the page moves the anchor out from under the fixed card, so
+  // close it — but scrolling *inside* the card (a long signature) is fine
+  if (cardFor && !(card && card.contains(ev.target))) hideCard();
+}, true);
+window.addEventListener("resize", function(){ if (cardFor) hideCard(); });
 })();
 """
 
@@ -828,12 +1328,71 @@ __PREVNEXT__
 __RAIL__
 </div>
 <script src="search-index.js"></script>
+<script src="symbols.js"></script>
 <script src="site.js"></script>
 </body></html>
 """
 
+# Standalone page for one package source file: the target of every "source"
+# link in the reference and on hover cards. Same CSS, same stored theme, no
+# nav chrome — it is a viewer, not a doc. Lines carry id="L<n>" anchors.
+SRC_PAGE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>__TITLE__</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>&#9646;</text></svg>">
+<style>__CSS__</style>
+<script>try{var t=localStorage.getItem("otsh-theme");
+if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body class="srcpage"><main>
+<div class="srchead"><a href="../../index.html">otsh docs</a><span class="srcsep">/</span>
+<span class="srcfile">__FILE__</span>
+<a class="srcapi" href="../../__APIPAGE__">__APILABEL__ reference</a></div>
+<div class="code" data-lang="odin"><pre><code>__BODY__</code></pre></div>
+</main></body></html>
+"""
+
+
+def build_src_pages():
+    """One HTML page per package source file, with per-line anchors. These
+    are what `pkg/file.odin:line` links resolve to, offline and on file://."""
+    n_pages = 0
+    for pkg in SRC_PKGS:
+        for path in sorted(glob.glob(os.path.join(os.path.dirname(DOCS), pkg, "*.odin"))):
+            rel = f"{pkg}/{os.path.basename(path)}"
+            code = open(path).read()
+            lines = code.split("\n")
+            if lines and lines[-1] == "":
+                lines.pop()
+            # Cross-package references in the file link out too, resolved
+            # through the file's own import lines (aliases included).
+            ctx = LINKER.file_ctx(code) if LINKER else None
+            body = []
+            for n, ln in enumerate(lines, 1):
+                # highlight() per line: these sources keep comments and
+                # strings on one line, so no token ever spans lines.
+                body.append(f'<span class="srcline" id="L{n}">'
+                            f'<a class="lno" href="#L{n}">{n}</a>'
+                            f'{highlight(ln, "odin", ctx)}</span>')
+            page = (SRC_PAGE
+                    .replace("__CSS__", CSS)
+                    .replace("__FILE__", rel)
+                    .replace("__APIPAGE__", f"api-{pkg}.html")
+                    .replace("__APILABEL__", f"otsh:{pkg}")
+                    .replace("__BODY__", "".join(body))
+                    .replace("__TITLE__", html.escape(rel) + " — otsh source"))
+            out_path = os.path.join(OUT, "src", pkg, os.path.basename(path) + ".html")
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            with open(out_path, "w") as fh:
+                fh.write(page)
+            n_pages += 1
+    return n_pages
+
 
 def build():
+    global LINKER
+    LINKER = Linker()
     md_files = sorted(f for f in os.listdir(DOCS) if f.endswith(".md"))
     # README lives one level up; expose it as a virtual "readme.md" page.
     sources = {f: os.path.join(DOCS, f) for f in md_files}
@@ -901,11 +1460,17 @@ def build():
     # Render every page once up front: the search index needs every page's
     # sections before any page is written, and the rail needs each page's
     # own outline.
+    # Source pages must exist before the .md pages render only in the sense
+    # that both come from the same build; generate them first so link checks
+    # in the same run always see them.
+    n_src = build_src_pages()
+
     rendered = {}
     search_entries = []
     for f in md_files:
+        am = re.match(r"^api-(\w+)\.md$", f)
         with open(sources[f]) as fh:
-            body, toc, secs = render(fh.read())
+            body, toc, secs = render(fh.read(), api_pkg=am.group(1) if am else None)
         outname = f[:-3] + ".html"
         for s in secs:
             search_entries.append({
@@ -922,6 +1487,7 @@ def build():
         fh.write("var OTSH_SEARCH = " + json.dumps(search_entries, separators=(",", ":")) + ";\n")
     with open(os.path.join(OUT, "site.js"), "w") as fh:
         fh.write(SITE_JS)
+    gen_symbols.write_index(OUT)
 
     built = 0
     for f in md_files:
@@ -976,6 +1542,18 @@ def build():
         with open(os.path.join(OUT, f[:-3] + ".html"), "w") as fh:
             fh.write(page)
         built += 1
+
+    st = LINKER.stats
+    linked = st["qualified"] + st["stdlib"] + st["signature"]
+    print(f"symbols: {len(LINKER.index)} indexed; {n_src} source pages "
+          f"({st['src']} links); doc code identifiers linked "
+          f"{linked}/{st['idents_total']} "
+          f"(qualified {st['qualified']}, stdlib {st['stdlib']}, "
+          f"signature {st['signature']}), imports {st['imports']}, "
+          f"prose mentions {st['prose']}; left plain: "
+          f"{st['qualified_plain']} unresolvable qualified, "
+          f"{st['prose_plain']} unresolvable prose"
+          + ("" if LINKER.core else "; NO odin core tree — stdlib links off"))
     return built
 
 
@@ -1010,6 +1588,24 @@ def check():
     if not os.path.exists(site_js) or os.path.getsize(site_js) == 0:
         problems.append("site.js is missing or empty")
 
+    # The symbol index and every symbol link on every page (including the
+    # generated source pages): each link must land on an anchor that exists.
+    # This is the check that makes hover cards and go-to-definition safe.
+    sym_problems, _ = gen_symbols.check_site(OUT)
+    problems += sym_problems
+
+    # Generated source pages: their few internal links must resolve too.
+    for page in sorted(glob.glob(os.path.join(OUT, "src", "*", "*.html"))):
+        rel = os.path.relpath(page, OUT)
+        doc = open(page).read()
+        for m in re.finditer(r'href="([^"#][^"]*?)"', doc):
+            target = m.group(1)
+            if target.startswith(("http", "data:", "mailto:")):
+                continue
+            t = os.path.join(os.path.dirname(page), target.split("#")[0])
+            if not os.path.exists(t):
+                problems.append(f"{rel}: dead link -> {target}")
+
     for page in pages:
         name = os.path.basename(page)
         doc = open(page).read()
@@ -1023,6 +1619,8 @@ def check():
 
         if '<script src="search-index.js">' not in doc:
             problems.append(f'{name}: missing <script src="search-index.js">')
+        if '<script src="symbols.js">' not in doc:
+            problems.append(f'{name}: missing <script src="symbols.js">')
         if '<script src="site.js">' not in doc:
             problems.append(f'{name}: missing <script src="site.js">')
 
