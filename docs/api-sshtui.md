@@ -68,7 +68,7 @@ sshtui.serve(sshtui.Config{
 })
 ```
 
-*sshtui/sshtui.odin:114*
+*[sshtui/sshtui.odin:114](../sshtui/sshtui.odin#L114)*
 
 ### `Create_Proc`
 
@@ -87,7 +87,7 @@ create :: proc(info: sshtui.Info) -> tui.App {
 destroy :: proc(app: tui.App) {free(app.data)}
 ```
 
-*sshtui/sshtui.odin:96*
+*[sshtui/sshtui.odin:96](../sshtui/sshtui.odin#L96)*
 
 ### `Destroy_Proc`
 
@@ -97,7 +97,7 @@ Destroy_Proc :: #type proc(app: tui.App)
 
 Called after the app's loop ends. Free whatever `create` allocated.
 
-*sshtui/sshtui.odin:98*
+*[sshtui/sshtui.odin:98](../sshtui/sshtui.odin#L98)*
 
 ### `Info`
 
@@ -133,7 +133,7 @@ create :: proc(info: sshtui.Info) -> tui.App {
 }
 ```
 
-*sshtui/sshtui.odin:31*
+*[sshtui/sshtui.odin:31](../sshtui/sshtui.odin#L31)*
 
 ## Constants
 
@@ -141,23 +141,11 @@ create :: proc(info: sshtui.Info) -> tui.App {
 
 ```odin
 DEFAULT_FPS :: 30
-
-// How to serve your app. The zero value works: it serves on 0.0.0.0:2222 with a
-// generated host key at ./hostkey, at 30fps, accepting every client.
-//
-// Example:
-//
-//	sshtui.serve(sshtui.Config{
-//		port          = 2222,
-//		host_key_path = "hostkey",
-//		create        = create,
-//		destroy       = destroy,
-//	})
 ```
 
 Frame rate used when `Config.fps` is zero.
 
-*sshtui/sshtui.odin:101*
+*[sshtui/sshtui.odin:101](../sshtui/sshtui.odin#L101)*
 
 ### `VERSION`
 
@@ -167,40 +155,31 @@ VERSION :: ssh.VERSION
 
 The version as a string, for banners and log lines.
 
-*sshtui/version.odin:15*
+*[sshtui/version.odin:15](../sshtui/version.odin#L15)*
 
 ### `VERSION_MAJOR`
 
 ```odin
 VERSION_MAJOR :: ssh.VERSION_MAJOR
-VERSION_MINOR :: ssh.VERSION_MINOR
-VERSION_PATCH :: ssh.VERSION_PATCH
-// The version as a string, for banners and log lines.
-VERSION :: ssh.VERSION
 ```
 
-*sshtui/version.odin:11*
+*[sshtui/version.odin:11](../sshtui/version.odin#L11)*
 
 ### `VERSION_MINOR`
 
 ```odin
 VERSION_MINOR :: ssh.VERSION_MINOR
-VERSION_PATCH :: ssh.VERSION_PATCH
-// The version as a string, for banners and log lines.
-VERSION :: ssh.VERSION
 ```
 
-*sshtui/version.odin:12*
+*[sshtui/version.odin:12](../sshtui/version.odin#L12)*
 
 ### `VERSION_PATCH`
 
 ```odin
 VERSION_PATCH :: ssh.VERSION_PATCH
-// The version as a string, for banners and log lines.
-VERSION :: ssh.VERSION
 ```
 
-*sshtui/version.odin:13*
+*[sshtui/version.odin:13](../sshtui/version.odin#L13)*
 
 ## Procedures
 
@@ -228,7 +207,7 @@ sshtui.delete_info(saved)
 The copy's `session` is nil: a cloned Info may outlive the connection, and a
 session pointer that outlives its session is a dangling pointer.
 
-*sshtui/sshtui.odin:64*
+*[sshtui/sshtui.odin:64](../sshtui/sshtui.odin#L64)*
 
 ### `delete_info`
 
@@ -239,7 +218,7 @@ delete_info :: proc(info: Info, allocator := context.allocator)
 Frees a value produced by clone_info. Never call it on an Info handed to
 `create` — those strings belong to the connection.
 
-*sshtui/sshtui.odin:79*
+*[sshtui/sshtui.odin:79](../sshtui/sshtui.odin#L79)*
 
 ### `run_local`
 
@@ -261,7 +240,7 @@ if local {
 }
 ```
 
-*sshtui/sshtui.odin:240*
+*[sshtui/sshtui.odin:240](../sshtui/sshtui.odin#L240)*
 
 ### `serve`
 
@@ -277,4 +256,4 @@ Example:
 sshtui.serve(sshtui.Config{create = create, destroy = destroy})
 ```
 
-*sshtui/sshtui.odin:155*
+*[sshtui/sshtui.odin:155](../sshtui/sshtui.odin#L155)*

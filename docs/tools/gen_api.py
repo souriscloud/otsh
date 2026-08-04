@@ -45,6 +45,12 @@ def classify(name, rhs):
         return "Constants"
     if r.startswith(("\"", "'")) or re.match(r"^-?\d", r):
         return "Constants"
+    if re.match(r"^[A-Z]", name):
+        # Type-case name with a non-literal RHS: a type alias, possibly
+        # platform-conditional (`Socket :: uintptr when ... else c.int`).
+        # Odin style reserves Mixed_Case for types; SCREAMING_CASE constants
+        # were already taken above.
+        return "Types"
     return "Constants"
 
 
@@ -77,7 +83,12 @@ def signature(lines, i):
         text = "\n".join(buf)
         if started and depth <= 0:
             break
-        if not started and ln.rstrip().endswith(("{",)):
+        if not started:
+            # No bracket opened on the declaration line: a simple constant
+            # (`MAX_COLS :: 1000`, a string, `Color :: distinct u32`). The
+            # declaration is complete at that line — grabbing further lines
+            # here used to leak the *next* declarations into this entry's
+            # signature block.
             break
     text = "\n".join(buf)
     # For procs, cut the body: keep everything up to the opening brace.
@@ -129,7 +140,11 @@ def parse(pkg):
                 seen.add(fm.group(1))
                 out.append({
                     "name": fm.group(1), "kind": "Procedures",
-                    "sig": fm.group(2).replace(" ---", ""), "doc": " ".join(doc).strip(),
+                    # The declaration as written, minus the foreign `---`
+                    # marker: `name :: proc(...)`, same shape as every
+                    # non-foreign entry.
+                    "sig": f"{fm.group(1)} :: {fm.group(2).replace(' ---', '')}",
+                    "doc": " ".join(doc).strip(),
                     "src": f"{rel}:{i+1}", "c": link,
                 })
                 continue
@@ -238,7 +253,11 @@ def render(pkg, import_path, blurb, syms):
                 undocumented += 1
             # Plain Markdown only — the site renderer escapes raw HTML, and
             # these pages must also read correctly on a plain Markdown viewer.
-            meta = f"*{s['src']}*"
+            # The source location is a relative link: GitHub resolves
+            # ../pkg/file.odin#L42 to the blob view, and build_site.py rewrites
+            # it onto the generated source page (src/pkg/file.odin.html#L42).
+            src_path, src_line = s["src"].rsplit(":", 1)
+            meta = f"*[{s['src']}](../{src_path}#L{src_line})*"
             if s["c"]:
                 meta += f" · C: `{s['c']}`"
             L += [meta, ""]

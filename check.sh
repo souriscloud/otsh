@@ -45,6 +45,7 @@ fi
 echo "docs"
 step "api reference is current" python3 docs/tools/gen_api.py --check
 step "site builds and validates" python3 docs/tools/build_site.py --check
+step "symbol index current, hover links resolve" python3 docs/tools/gen_symbols.py --check
 step "doc code samples are real" python3 docs/tools/check_examples.py --strict
 
 echo "bindings"
