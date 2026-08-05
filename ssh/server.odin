@@ -620,8 +620,13 @@ contains :: proc(haystack, needle: string) -> bool {
 //     is still strong, and some real libssh builds legitimately lack an entry
 //     (chacha20-poly1305 is absent from mbedTLS-backed builds). Refusing to
 //     start there would break a working deployment to no benefit.
+//
+// `quiet` silences only the non-fatal note about a default name this build
+// lacks; every refusal still speaks. `serve` sets it when it re-runs this on a
+// second bind after falling back from IPv6 to IPv4, where the note has already
+// been printed once and a second copy would look like a second problem.
 @(private)
-set_algorithms :: proc(b: ls.Bind, cfg: Config) -> bool {
+set_algorithms :: proc(b: ls.Bind, cfg: Config, quiet := false) -> bool {
 	// Options are probed on a throwaway bind so a rejected name cannot leave
 	// half-applied state on the real one. nil (allocation failure) degrades to
 	// the old whole-list-only check rather than refusing to start.
@@ -629,12 +634,12 @@ set_algorithms :: proc(b: ls.Bind, cfg: Config) -> bool {
 	defer if scratch != nil {ls.bind_free(scratch)}
 
 	ok := true
-	apply(b, scratch, .Key_Exchange, cfg.key_exchange, DEFAULT_KEX, "key exchange", &ok)
-	apply(b, scratch, .Ciphers_C_S, cfg.ciphers, DEFAULT_CIPHERS, "cipher (client->server)", &ok)
-	apply(b, scratch, .Ciphers_S_C, cfg.ciphers, DEFAULT_CIPHERS, "cipher (server->client)", &ok)
-	apply(b, scratch, .Hmac_C_S, cfg.macs, DEFAULT_MACS, "MAC (client->server)", &ok)
-	apply(b, scratch, .Hmac_S_C, cfg.macs, DEFAULT_MACS, "MAC (server->client)", &ok)
-	apply(b, scratch, .Hostkey_Algorithms, cfg.hostkey_algorithms, DEFAULT_HOSTKEYS, "host key algorithm", &ok)
+	apply(b, scratch, .Key_Exchange, cfg.key_exchange, DEFAULT_KEX, "key exchange", &ok, quiet)
+	apply(b, scratch, .Ciphers_C_S, cfg.ciphers, DEFAULT_CIPHERS, "cipher (client->server)", &ok, quiet)
+	apply(b, scratch, .Ciphers_S_C, cfg.ciphers, DEFAULT_CIPHERS, "cipher (server->client)", &ok, quiet)
+	apply(b, scratch, .Hmac_C_S, cfg.macs, DEFAULT_MACS, "MAC (client->server)", &ok, quiet)
+	apply(b, scratch, .Hmac_S_C, cfg.macs, DEFAULT_MACS, "MAC (server->client)", &ok, quiet)
+	apply(b, scratch, .Hostkey_Algorithms, cfg.hostkey_algorithms, DEFAULT_HOSTKEYS, "host key algorithm", &ok, quiet)
 	return ok
 }
 
@@ -646,6 +651,7 @@ apply :: proc(
 	opt: ls.Bind_Option,
 	value, fallback, what: string,
 	ok: ^bool,
+	quiet := false,
 ) {
 	configured := value != ""
 	v := configured ? value : fallback
@@ -682,11 +688,13 @@ apply :: proc(
 		case len(dropped) > 0 && len(kept) > 0:
 			// A default list, partially supported. Every otsh default is strong,
 			// so the survivors are safe — say what happened and carry on.
-			fmt.eprintfln(
-				"otsh: NOTE this libssh build does not provide %s: %s.\n" +
-				"      Continuing with the rest of the default list (%q).",
-				what, join_names(dropped), join_names(kept),
-			)
+			if !quiet {
+				fmt.eprintfln(
+					"otsh: NOTE this libssh build does not provide %s: %s.\n" +
+					"      Continuing with the rest of the default list (%q).",
+					what, join_names(dropped), join_names(kept),
+				)
+			}
 			v = join_names(kept)
 		}
 	}
@@ -735,13 +743,114 @@ join_names :: proc(names: []string) -> string {
 	return strings.join(names, ",", context.temp_allocator)
 }
 
-// Defaults applied to a zero-valued Config field. sshtui fills these in too;
-// they live here as well so calling ssh.serve directly cannot bind port 0.
-DEFAULT_HOST :: "0.0.0.0"
+// Bind address used when `Config.host` is empty. sshtui fills this in too; it
+// lives here as well so calling `ssh.serve` directly cannot bind port 0.
+//
+// `"::"` is the IPv6 wildcard, and on a dual-stack kernel one socket bound to
+// it serves BOTH families: IPv4 clients arrive as IPv4-mapped addresses, which
+// `peer_address` normalises back to the dotted quad, so an audit line for a
+// v4 client reads `addr=127.0.0.1` exactly as it did on an IPv4-only bind.
+// Where that is not available `serve` falls back to `DEFAULT_HOST_IPV4` and
+// says so on stderr; see below for the two ways it detects that.
+//
+// Why not `"0.0.0.0"`, which this used to be: `localhost` resolves to `::1`
+// before `127.0.0.1` on macOS and on Linux, so a client's first connection
+// attempt went to IPv6, found nothing listening, and only then retried on
+// IPv4. The wasted attempt costs one round trip. On loopback that is nothing —
+// measured on macOS 26.3, 200 connects each, the connect phase alone: median
+// 0.11 ms via `localhost` against an IPv4-only bind versus 0.06 ms against a
+// dual-stack one, which is at the edge of run-to-run noise. But the cost is
+// one RTT, not a constant, so it scales with distance to the server. Measured
+// in Docker on Linux 6.x with a 50 ms one-way delay on `lo` (netem), best of
+// five connects to `localhost`:
+//
+//	                     localhost   127.0.0.1   ::1
+//	bind 0.0.0.0         206.66 ms   104.39 ms   refused
+//	bind ::              104.09 ms   102.70 ms   107.70 ms
+//
+// The `localhost` column is the point: two round trips become one. The `::1`
+// column is the other half of it — an IPv4-only server is not reachable from an
+// IPv6-only client at all, which is not a latency problem but an outage.
+//
+// What this does NOT fix: a client whose first SYN is DROPPED rather than
+// refused — a firewall using `-j DROP`, some VPNs — waits out its full connect
+// timeout, and no bind address changes that, because a dropped packet never
+// reaches any listener. Measured with an `ip6tables ... -j DROP` rule in place:
+// 134 s to connect via `localhost` with an IPv4-only bind, and 135 s with a
+// dual-stack one. If connecting is slow in that way, the fix is in the
+// firewall, not here.
+//
+// Two things can make the dual-stack bind unusable, and `serve` handles both by
+// rebinding on `DEFAULT_HOST_IPV4` with an explanation on stderr:
+//
+//   - The host has no IPv6 at all, so binding `"::"` fails outright. (Note that
+//     Linux's `net.ipv6.conf.all.disable_ipv6=1` is NOT this case: measured in
+//     Docker, a `"::"` bind still succeeds there and still serves IPv4.)
+//   - The kernel makes the socket IPv6-ONLY, so it would refuse every IPv4
+//     client. libssh never sets `IPV6_V6ONLY` itself, so this is the kernel's
+//     default: Linux with `net.ipv6.bindv6only=1` (measured: the bind succeeds
+//     and IPv4 clients get "connection refused"), FreeBSD, and Windows. `serve`
+//     reads the option back off the listening socket and rebinds rather than
+//     serving an IPv4 outage.
+//
+// The fallback applies ONLY to this default. An operator who writes
+// `Config.host = "::"` asked for IPv6 and gets exactly that, refusals included.
+DEFAULT_HOST :: "::"
+// Where the default bind retreats to when a dual-stack socket is unavailable —
+// the IPv4 wildcard, which is what `DEFAULT_HOST` itself used to be. Never used
+// unless `Config.host` was left empty; see `DEFAULT_HOST`.
+DEFAULT_HOST_IPV4 :: "0.0.0.0"
 // Port used when `Config.port` is zero.
 DEFAULT_PORT :: 2222
 // Host key path used when `Config.host_key_path` is empty.
 DEFAULT_HOST_KEY :: "hostkey"
+
+// How `open_listener` finished. The two failures are kept apart because only
+// one of them is worth retrying on another address: a rejected algorithm list
+// will be rejected again, and re-printing its diagnostics would suggest two
+// separate problems.
+@(private)
+Listen_Outcome :: enum u8 {
+	Ok,           // bound and listening
+	Config_Error, // refused before any socket; the reason is already on stderr
+	Bind_Failed,  // libssh could not bind or listen on this address
+}
+
+// Builds a bind, applies every option to it, and listens.
+//
+// The returned bind is NOT freed on failure and is nil only when `ssh_bind_new`
+// itself failed: libssh keeps its error text on the bind object, so the caller
+// needs it alive long enough to read `ssh_get_error` off it, and only the
+// caller knows whether it wants to report that text or retry somewhere else.
+//
+// `quiet` suppresses the non-fatal "this libssh build does not provide …" note
+// from `set_algorithms`. It is set on the IPv4 retry, where the first attempt
+// has already printed it and a second copy would read as a second problem.
+@(private)
+open_listener :: proc(cfg: Config, quiet := false) -> (b: ls.Bind, outcome: Listen_Outcome) {
+	b = ls.bind_new()
+	if b == nil {
+		fmt.eprintln("otsh: ssh_bind_new failed")
+		return nil, .Bind_Failed
+	}
+
+	chost := strings.clone_to_cstring(cfg.host)
+	ckey := strings.clone_to_cstring(cfg.host_key_path)
+	defer delete(chost)
+	defer delete(ckey)
+	port := c.int(cfg.port)
+
+	ls.bind_options_set(b, .Bindaddr, rawptr(chost))
+	ls.bind_options_set(b, .Bindport, &port)
+	ls.bind_options_set(b, .Hostkey, rawptr(ckey))
+	if !set_algorithms(b, cfg, quiet) {
+		return b, .Config_Error
+	}
+	if ls.bind_listen(b) < 0 {
+		return b, .Bind_Failed
+	}
+	return b, .Ok
+}
 
 // Guards `serve` against a libssh too old to have the Terrapin fix (see
 // `serve`'s own doc comment). The check is at runtime, not compile time,
@@ -783,7 +892,12 @@ serve :: proc(cfg: Config) -> bool {
 		return false
 	}
 	cfg := cfg
-	if cfg.host == "" {cfg.host = DEFAULT_HOST}
+	// Whether the bind address is otsh's own default. This is the only case in
+	// which `serve` is allowed to bind something other than what it was asked
+	// for: an operator who wrote "::" chose IPv6 and must not be quietly moved
+	// off it. See DEFAULT_HOST.
+	host_defaulted := cfg.host == ""
+	if host_defaulted {cfg.host = DEFAULT_HOST}
 	if cfg.port == 0 {cfg.port = DEFAULT_PORT}
 	if cfg.host_key_path == "" {cfg.host_key_path = DEFAULT_HOST_KEY}
 
@@ -836,29 +950,60 @@ serve :: proc(cfg: Config) -> bool {
 		srv.secret = secret
 	}
 
-	srv.bind = ls.bind_new()
-	if srv.bind == nil {
-		fmt.eprintln("otsh: ssh_bind_new failed")
-		return false
+	// The listening socket. With the default host this asks for a dual-stack
+	// "::" bind and retreats to IPv4 if the host cannot give one — the two ways
+	// that can happen, and why they are worth the extra code, are in
+	// DEFAULT_HOST's own comment.
+	outcome: Listen_Outcome
+	srv.bind, outcome = open_listener(cfg)
+
+	// An IPv6-only socket is not a bind failure: it binds, it listens, and then
+	// it refuses every IPv4 client. Nothing reports it, so it has to be asked
+	// for.
+	if host_defaulted && outcome == .Ok && listener_is_v6only(ls.bind_get_fd(srv.bind)) {
+		fmt.eprintfln(
+			"otsh: the kernel made the %s listener IPv6-only, so it would refuse\n" +
+			"      every IPv4 client (Linux net.ipv6.bindv6only=1, or FreeBSD's or\n" +
+			"      Windows' default). Falling back to %s: IPv4 clients work, IPv6\n" +
+			"      clients do not. Set Config.host = %q to keep the IPv6-only bind.",
+			DEFAULT_HOST, DEFAULT_HOST_IPV4, DEFAULT_HOST,
+		)
+		ls.bind_free(srv.bind)
+		srv.bind = nil
+		cfg.host = DEFAULT_HOST_IPV4
+		srv.bind, outcome = open_listener(cfg, quiet = true)
+	} else if host_defaulted && outcome == .Bind_Failed {
+		// Deliberately does not name a cause. The usual one is a host with no
+		// IPv6 at all, but "cannot bind ::" is also what a busy port and a
+		// privileged port look like, and this code has not established which it
+		// is. It says what it saw and what it is about to try; if the retry
+		// fails too, the second error is printed below and is the real one.
+		fmt.eprintfln(
+			"otsh: cannot bind %s (%s).\n" +
+			"      Retrying on %s. If that works, this host has no usable IPv6 and\n" +
+			"      IPv6 clients will not be able to reach the server.",
+			DEFAULT_HOST,
+			srv.bind == nil ? "out of memory" : string(ls.get_error(rawptr(srv.bind))),
+			DEFAULT_HOST_IPV4,
+		)
+		if srv.bind != nil {ls.bind_free(srv.bind)}
+		srv.bind = nil
+		cfg.host = DEFAULT_HOST_IPV4
+		srv.bind, outcome = open_listener(cfg, quiet = true)
 	}
 
-	chost := strings.clone_to_cstring(cfg.host)
-	ckey := strings.clone_to_cstring(cfg.host_key_path)
-	defer delete(chost)
-	defer delete(ckey)
-	port := c.int(cfg.port)
-
-	ls.bind_options_set(srv.bind, .Bindaddr, rawptr(chost))
-	ls.bind_options_set(srv.bind, .Bindport, &port)
-	ls.bind_options_set(srv.bind, .Hostkey, rawptr(ckey))
-	if !set_algorithms(srv.bind, cfg) {
+	switch outcome {
+	case .Ok:
+	case .Config_Error:
+		return false // set_algorithms has already said what was wrong
+	case .Bind_Failed:
+		if srv.bind != nil {
+			fmt.eprintfln("otsh: listen failed: %s", ls.get_error(rawptr(srv.bind)))
+		}
 		return false
 	}
-
-	if ls.bind_listen(srv.bind) < 0 {
-		fmt.eprintfln("otsh: listen failed: %s", ls.get_error(rawptr(srv.bind)))
-		return false
-	}
+	// Read back what was actually bound, not what was asked for.
+	srv.host = cfg.host
 
 	// Past every failure path: the accept loop owns srv from here.
 	started = true
@@ -876,8 +1021,25 @@ serve :: proc(cfg: Config) -> bool {
 	// a server that may never draw a frame has no business mutating the parent
 	// shell's console state for one glyph, so here the arrow is ASCII.
 	arrow :: "->" when ODIN_OS == .Windows else "→"
+	// An IPv6 address needs brackets next to a port or it is unreadable: the
+	// default bind would otherwise print as ":::2222". Any address containing a
+	// colon is an IPv6 literal — a hostname cannot contain one.
+	shown := cfg.host
+	if strings.contains(cfg.host, ":") {
+		shown = fmt.tprintf("[%s]", cfg.host)
+	}
+	// The command on the right is meant to be copied and run. Neither wildcard
+	// is a host to connect to — and "[::]" is worse than useless, since a shell
+	// treats the brackets as a glob — so for those the hint names localhost,
+	// which is where somebody reading this line on the server is.
+	hint := cfg.host
+	if cfg.host == DEFAULT_HOST || cfg.host == DEFAULT_HOST_IPV4 {
+		hint = "localhost"
+	}
 	fmt.printfln("otsh: listening on %s:%d  %s  ssh -p %d %s",
-		cfg.host, cfg.port, arrow, cfg.port, cfg.host)
+		shown, cfg.port, arrow, cfg.port, hint)
+	// The audit line carries the bind address unbracketed, as the documented
+	// grammar in audit.odin says: `host` is an address, not a display string.
 	audit_emit(srv, Audit_Event{kind = .Listen, host = cfg.host, port = cfg.port})
 
 	// The listening socket, watched directly so the loop can wait with a

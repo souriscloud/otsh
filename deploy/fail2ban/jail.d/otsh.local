@@ -28,6 +28,21 @@ journalmatch = _SYSTEMD_UNIT=otsh.service
 port     = 2222
 protocol = tcp
 
+# Both address families reach this port. ssh.DEFAULT_HOST is the IPv6 wildcard
+# "::", so unless the app sets Config.host itself the server answers IPv6
+# clients and the audit log carries IPv6 addr= values. Nothing is set here for
+# it — fail2ban's IPv6 handling is global, not per-jail (`allowipv6` lives in
+# fail2ban.conf, and `auto` is already its default) — but two things are on
+# you, because a failure in either is silent:
+#
+#   * fail2ban must be 0.10 or newer. On 0.9 <HOST> cannot match an IPv6
+#     address at all: no ban, no error, nothing in fail2ban.log.
+#   * banaction must ban v6. nftables-multiport, set below, manages an `inet`
+#     table and covers both families; an iptables-only action covers neither
+#     v6 address it is handed.
+#
+# Prove it the same way as any other ban — from a real IPv6 source.
+
 # --- tuning ------------------------------------------------------------------
 #
 # 6 failures within 10 minutes earns a 1 hour ban. Conservative on purpose: a

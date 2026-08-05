@@ -18,7 +18,7 @@ Generated from `sshtui/*.odin` by `docs/tools/gen_api.py`. For how these fit tog
 
 ```odin
 Config :: struct {
-	host:          string, // default ssh.DEFAULT_HOST ("0.0.0.0")
+	host:          string, // default ssh.DEFAULT_HOST ("::", IPv4 and IPv6)
 	port:          int, // default ssh.DEFAULT_PORT (2222)
 	host_key_path: string, // default ssh.DEFAULT_HOST_KEY ("hostkey"); generated if missing
 	create:        Create_Proc,
@@ -54,8 +54,9 @@ Config :: struct {
 }
 ```
 
-How to serve your app. The zero value works: it serves on 0.0.0.0:2222 with a
-generated host key at ./hostkey, at 30fps, accepting every client.
+How to serve your app. The zero value works: it serves on [::]:2222 — one
+socket for IPv4 and IPv6 both, see `ssh.DEFAULT_HOST` — with a generated host
+key at ./hostkey, at 30fps, accepting every client.
 
 Example:
 
@@ -68,7 +69,7 @@ sshtui.serve(sshtui.Config{
 })
 ```
 
-*[sshtui/sshtui.odin:114](../sshtui/sshtui.odin#L114)*
+*[sshtui/sshtui.odin:115](../sshtui/sshtui.odin#L115)*
 
 ### `Create_Proc`
 
@@ -240,7 +241,7 @@ if local {
 }
 ```
 
-*[sshtui/sshtui.odin:240](../sshtui/sshtui.odin#L240)*
+*[sshtui/sshtui.odin:241](../sshtui/sshtui.odin#L241)*
 
 ### `serve`
 
@@ -256,4 +257,4 @@ Example:
 sshtui.serve(sshtui.Config{create = create, destroy = destroy})
 ```
 
-*[sshtui/sshtui.odin:155](../sshtui/sshtui.odin#L155)*
+*[sshtui/sshtui.odin:156](../sshtui/sshtui.odin#L156)*

@@ -8,7 +8,7 @@ Generated from `ssh/*.odin` by `docs/tools/gen_api.py`. For how these fit togeth
 
 **Types** — [`Audit_Event`](#audit-event), [`Audit_Kind`](#audit-kind), [`Audit_Limit`](#audit-limit), [`Audit_Sink`](#audit-sink), [`Auth_Method`](#auth-method), [`Auth_Methods`](#auth-methods), [`Auth_Request`](#auth-request), [`Authenticator`](#authenticator), [`Config`](#config), [`Handler`](#handler), [`Identity_Secret`](#identity-secret), [`Limits`](#limits), [`Pty`](#pty), [`Server`](#server), [`Session`](#session)
 
-**Constants** — [`ALL_AUTH`](#all-auth), [`AUDIT_LINE_MAX`](#audit-line-max), [`DEFAULT_CIPHERS`](#default-ciphers), [`DEFAULT_HOST`](#default-host), [`DEFAULT_HOST_KEY`](#default-host-key), [`DEFAULT_HOSTKEYS`](#default-hostkeys), [`DEFAULT_KEX`](#default-kex), [`DEFAULT_LIMITS`](#default-limits), [`DEFAULT_MACS`](#default-macs), [`DEFAULT_PORT`](#default-port), [`DEFAULT_SHUTDOWN_SECONDS`](#default-shutdown-seconds), [`ID_BYTES`](#id-bytes), [`ID_SIZE`](#id-size), [`MAX_PTY_COLS`](#max-pty-cols), [`MAX_PTY_ROWS`](#max-pty-rows), [`SECRET_SIZE`](#secret-size), [`VERSION`](#version), [`VERSION_MAJOR`](#version-major), [`VERSION_MINOR`](#version-minor), [`VERSION_PATCH`](#version-patch)
+**Constants** — [`ALL_AUTH`](#all-auth), [`AUDIT_LINE_MAX`](#audit-line-max), [`DEFAULT_CIPHERS`](#default-ciphers), [`DEFAULT_HOST`](#default-host), [`DEFAULT_HOST_IPV4`](#default-host-ipv4), [`DEFAULT_HOST_KEY`](#default-host-key), [`DEFAULT_HOSTKEYS`](#default-hostkeys), [`DEFAULT_KEX`](#default-kex), [`DEFAULT_LIMITS`](#default-limits), [`DEFAULT_MACS`](#default-macs), [`DEFAULT_PORT`](#default-port), [`DEFAULT_SHUTDOWN_SECONDS`](#default-shutdown-seconds), [`ID_BYTES`](#id-bytes), [`ID_SIZE`](#id-size), [`MAX_PTY_COLS`](#max-pty-cols), [`MAX_PTY_ROWS`](#max-pty-rows), [`SECRET_SIZE`](#secret-size), [`VERSION`](#version), [`VERSION_MAJOR`](#version-major), [`VERSION_MINOR`](#version-minor), [`VERSION_PATCH`](#version-patch)
 
 **Procedures** — [`audit_format`](#audit-format), [`audit_stderr`](#audit-stderr), [`ensure_host_key`](#ensure-host-key), [`fingerprint`](#fingerprint), [`id`](#id), [`ids_equal`](#ids-equal), [`key_type`](#key-type), [`load_or_create_secret`](#load-or-create-secret), [`pseudonym`](#pseudonym), [`read`](#read), [`remote_addr`](#remote-addr), [`serve`](#serve), [`shutdown`](#shutdown), [`shutting_down`](#shutting-down), [`size`](#size), [`take_resize`](#take-resize), [`term`](#term), [`user`](#user), [`warn_if_world_readable`](#warn-if-world-readable), [`write`](#write), [`write_string`](#write-string)
 
@@ -472,13 +472,77 @@ AEAD ciphers only: no CBC, no stream ciphers with separate MACs.
 ### `DEFAULT_HOST`
 
 ```odin
-DEFAULT_HOST :: "0.0.0.0"
+DEFAULT_HOST :: "::"
 ```
 
-Defaults applied to a zero-valued Config field. sshtui fills these in too;
-they live here as well so calling ssh.serve directly cannot bind port 0.
+Bind address used when `Config.host` is empty. sshtui fills this in too; it
+lives here as well so calling `ssh.serve` directly cannot bind port 0.
 
-*[ssh/server.odin:740](../ssh/server.odin#L740)*
+`"::"` is the IPv6 wildcard, and on a dual-stack kernel one socket bound to
+it serves BOTH families: IPv4 clients arrive as IPv4-mapped addresses, which
+`peer_address` normalises back to the dotted quad, so an audit line for a
+v4 client reads `addr=127.0.0.1` exactly as it did on an IPv4-only bind.
+Where that is not available `serve` falls back to `DEFAULT_HOST_IPV4` and
+says so on stderr; see below for the two ways it detects that.
+
+Why not `"0.0.0.0"`, which this used to be: `localhost` resolves to `::1`
+before `127.0.0.1` on macOS and on Linux, so a client's first connection
+attempt went to IPv6, found nothing listening, and only then retried on
+IPv4. The wasted attempt costs one round trip. On loopback that is nothing —
+measured on macOS 26.3, 200 connects each, the connect phase alone: median
+0.11 ms via `localhost` against an IPv4-only bind versus 0.06 ms against a
+dual-stack one, which is at the edge of run-to-run noise. But the cost is
+one RTT, not a constant, so it scales with distance to the server. Measured
+in Docker on Linux 6.x with a 50 ms one-way delay on `lo` (netem), best of
+five connects to `localhost`:
+
+```
+                     localhost   127.0.0.1   ::1
+bind 0.0.0.0         206.66 ms   104.39 ms   refused
+bind ::              104.09 ms   102.70 ms   107.70 ms
+```
+
+The `localhost` column is the point: two round trips become one. The `::1`
+column is the other half of it — an IPv4-only server is not reachable from an
+IPv6-only client at all, which is not a latency problem but an outage.
+
+What this does NOT fix: a client whose first SYN is DROPPED rather than
+refused — a firewall using `-j DROP`, some VPNs — waits out its full connect
+timeout, and no bind address changes that, because a dropped packet never
+reaches any listener. Measured with an `ip6tables ... -j DROP` rule in place:
+134 s to connect via `localhost` with an IPv4-only bind, and 135 s with a
+dual-stack one. If connecting is slow in that way, the fix is in the
+firewall, not here.
+
+Two things can make the dual-stack bind unusable, and `serve` handles both by
+rebinding on `DEFAULT_HOST_IPV4` with an explanation on stderr:
+
+  - The host has no IPv6 at all, so binding `"::"` fails outright. (Note that
+    Linux's `net.ipv6.conf.all.disable_ipv6=1` is NOT this case: measured in
+    Docker, a `"::"` bind still succeeds there and still serves IPv4.)
+  - The kernel makes the socket IPv6-ONLY, so it would refuse every IPv4
+    client. libssh never sets `IPV6_V6ONLY` itself, so this is the kernel's
+    default: Linux with `net.ipv6.bindv6only=1` (measured: the bind succeeds
+    and IPv4 clients get "connection refused"), FreeBSD, and Windows. `serve`
+    reads the option back off the listening socket and rebinds rather than
+    serving an IPv4 outage.
+
+The fallback applies ONLY to this default. An operator who writes
+`Config.host = "::"` asked for IPv6 and gets exactly that, refusals included.
+
+*[ssh/server.odin:798](../ssh/server.odin#L798)*
+
+### `DEFAULT_HOST_IPV4`
+
+```odin
+DEFAULT_HOST_IPV4 :: "0.0.0.0"
+```
+
+Where the default bind retreats to when a dual-stack socket is unavailable —
+the IPv4 wildcard, which is what `DEFAULT_HOST` itself used to be. Never used
+unless `Config.host` was left empty; see `DEFAULT_HOST`.
+
+*[ssh/server.odin:802](../ssh/server.odin#L802)*
 
 ### `DEFAULT_HOST_KEY`
 
@@ -488,7 +552,7 @@ DEFAULT_HOST_KEY :: "hostkey"
 
 Host key path used when `Config.host_key_path` is empty.
 
-*[ssh/server.odin:744](../ssh/server.odin#L744)*
+*[ssh/server.odin:806](../ssh/server.odin#L806)*
 
 ### `DEFAULT_HOSTKEYS`
 
@@ -548,7 +612,7 @@ DEFAULT_PORT :: 2222
 
 Port used when `Config.port` is zero.
 
-*[ssh/server.odin:742](../ssh/server.odin#L742)*
+*[ssh/server.odin:804](../ssh/server.odin#L804)*
 
 ### `DEFAULT_SHUTDOWN_SECONDS`
 
@@ -865,7 +929,7 @@ handler :: proc(s: ^ssh.Session) {
 ssh.serve(ssh.Config{handler = handler})
 ```
 
-*[ssh/server.odin:781](../ssh/server.odin#L781)*
+*[ssh/server.odin:890](../ssh/server.odin#L890)*
 
 ### `shutdown`
 

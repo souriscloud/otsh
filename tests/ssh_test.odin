@@ -4,6 +4,7 @@ package otsh_tests
 
 import "core:os"
 import "core:path/filepath"
+import "core:strings"
 import "core:testing"
 import "core:time"
 import "otsh:ssh"
@@ -186,6 +187,31 @@ server_defaults_are_usable :: proc(t: ^testing.T) {
 	testing.expect(t, ssh.DEFAULT_HOST_KEY != "", "expected a default host key path")
 }
 
+// The default bind serves both address families from one socket, and the
+// fallback it retreats to when the host cannot do that serves only IPv4. The
+// two constants have to be that way round: `serve` reaches for the fallback
+// exactly when IPv6 is what failed, so a second IPv6 address there would fail
+// the same way and the server would not start at all.
+//
+// Everything else about the bind needs a socket and is measured instead; what
+// this pins is the pair of constants the whole arrangement rests on. See
+// `DEFAULT_HOST` for the measurements.
+@(test)
+default_bind_is_dual_stack :: proc(t: ^testing.T) {
+	testing.expect_value(t, ssh.DEFAULT_HOST, "::")
+	testing.expect_value(t, ssh.DEFAULT_HOST_IPV4, "0.0.0.0")
+	testing.expect(
+		t,
+		strings.contains(ssh.DEFAULT_HOST, ":"),
+		"DEFAULT_HOST must be an IPv6 address for the dual-stack bind to happen",
+	)
+	testing.expect(
+		t,
+		!strings.contains(ssh.DEFAULT_HOST_IPV4, ":"),
+		"the fallback must be IPv4 — it exists for hosts where IPv6 does not work",
+	)
+}
+
 // --- audit ------------------------------------------------------------------
 //
 // The line format is a contract — log filters are written against it — so these
@@ -228,6 +254,27 @@ audit_lines_are_exact :: proc(t: ^testing.T) {
 		t,
 		audit_line(buf[:], ssh.Audit_Event{kind = .Listen, host = "0.0.0.0", port = 2229}),
 		"otsh: audit ts=" + AUDIT_TS + " event=listen host=0.0.0.0 port=2229",
+	)
+	// The listen line every server emits on the default bind. ':' is inside the
+	// value scrub's allowed set, which it has to be: `DEFAULT_HOST` is "::" and
+	// a scrubbed `host=??` would be unreadable and unmatchable.
+	testing.expect_value(
+		t,
+		audit_line(buf[:], ssh.Audit_Event{kind = .Listen, host = ssh.DEFAULT_HOST, port = 2229}),
+		"otsh: audit ts=" + AUDIT_TS + " event=listen host=:: port=2229",
+	)
+	// An IPv6 peer, which the default bind now accepts. Note what is NOT here:
+	// an `::ffff:` IPv4-mapped address. `peer_address` converts those back to
+	// the dotted quad before any of this sees them, so an IPv4 client's audit
+	// line reads the same on a dual-stack listener as on an IPv4-only one, and
+	// deploy/fail2ban's `addr=<HOST>` keeps matching what it always matched.
+	// (Verified against real clients rather than here — it takes a socket:
+	// v4-mapped `addr=::ffff:127.0.0.1` before the change, `addr=127.0.0.1`
+	// after, on both macOS and Linux.)
+	testing.expect_value(
+		t,
+		audit_line(buf[:], ssh.Audit_Event{kind = .Accept, addr = "2001:db8::dead"}),
+		"otsh: audit ts=" + AUDIT_TS + " event=accept addr=2001:db8::dead",
 	)
 	testing.expect_value(
 		t,

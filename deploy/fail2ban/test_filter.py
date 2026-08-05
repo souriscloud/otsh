@@ -113,6 +113,25 @@ CONTRACT = [
     ("contract: reject v6",
      "otsh: audit ts=%s event=reject addr=2001:db8::1 limit=per_ip" % TS,
      True, "2001:db8::1"),
+    # The default bind is the IPv6 wildcard "::" (ssh.DEFAULT_HOST), so a
+    # client over IPv6 loopback is an ordinary line now, not a curiosity.
+    ("contract: auth ok=false from ::1",
+     "otsh: audit ts=%s event=auth addr=::1 method=none user=souris ok=false"
+     % TS,
+     True, "::1"),
+    ("contract: kex_fail from ::1",
+     "otsh: audit ts=%s event=kex_fail addr=::1" % TS,
+     True, "::1"),
+    # An IPv4 client on that same dual-stack socket. getpeername reports it as
+    # ::ffff:127.0.0.1; ssh/net_posix.odin converts it back before the line is
+    # formatted, so what a filter sees is the dotted quad and this corpus entry
+    # is identical to what an IPv4-only server produced. There is deliberately
+    # no ::ffff: line here: otsh does not emit that form, and asserting how
+    # <HOST> would treat one would be testing fail2ban, not this filter.
+    ("contract: auth ok=false from an IPv4 client on the dual-stack bind",
+     "otsh: audit ts=%s event=auth addr=127.0.0.1 method=none user=souris "
+     "ok=false" % TS,
+     True, "127.0.0.1"),
     # docs/ssh.md#audit's single-line example of the format.
     ("contract: auth ok=false (docs example)",
      "otsh: audit ts=2026-07-29T12:00:00Z event=auth addr=203.0.113.7 "
@@ -367,7 +386,10 @@ def main():
     print()
     print("verified against a real fail2ban-regex 1.1.0 (Alpine): the current")
     print("failregexes match exactly the failure lines of this corpus, v4 and")
-    print("v6, bare and prefixed, extracting addr= every time.")
+    print("v6, bare and prefixed, extracting addr= every time. Re-run after")
+    print("the bind default became dual-stack, on a 17-line corpus carrying")
+    print("the addr=::1 and host=:: lines that produces: 10 matched, 7 missed,")
+    print("every extracted address the line's own addr= value.")
     print("the systemd-backend prefix modeled in group (c) is now confirmed")
     print("live: on Debian 13 / systemd 257 / fail2ban 1.1.0, journald stores")
     print("MESSAGE as the bare 'otsh: audit ...' line, and fail2ban's")

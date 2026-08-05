@@ -1,5 +1,5 @@
 #+build windows
-// The winsock half of net_posix.odin: same two private procedures, same
+// The winsock half of net_posix.odin: same three private procedures, same
 // contracts.
 //
 // Winsock needs WSAStartup before any of this works. libssh does it inside
@@ -46,6 +46,34 @@ wait_readable :: proc(fd: ls.Socket, timeout_ms: int) -> (readable: bool, alive:
 	return rc > 0, true
 }
 
+// Whether `fd` is an IPv6 socket the kernel has put in IPv6-only mode — one
+// that will refuse every IPv4 client. See net_posix.odin for why `serve` asks.
+//
+// Windows is the platform where the answer is expected to be yes: winsock has
+// defaulted IPV6_V6ONLY to 1 since Vista, so a "::" bind here should be found
+// IPv6-only and `serve` should fall back to 0.0.0.0. That is a prediction from
+// the documented default, not a measurement — no Windows machine was available
+// for this change, and the code does not depend on the prediction being right:
+// whatever getsockopt reports is what gets acted on.
+@(private)
+listener_is_v6only :: proc(fd: ls.Socket) -> bool {
+	if !ls.socket_valid(fd) {
+		return false
+	}
+	v: win32.c_int
+	vlen := win32.c_int(size_of(v))
+	if win32.getsockopt(
+		   win32.SOCKET(fd),
+		   win32.IPPROTO_IPV6,
+		   win32.IPV6_V6ONLY,
+		   ([^]win32.c_char)(&v),
+		   &vlen,
+	   ) != 0 {
+		return false
+	}
+	return v != 0
+}
+
 // Formats the peer address of `fd` into `dst`, returning a string viewing it.
 // Numeric only — no reverse DNS, which would leak the connection to a resolver
 // and block the thread while doing it.
@@ -69,8 +97,24 @@ peer_address :: proc(fd: ls.Socket, dst: []u8) -> string {
 		af = win32.AF_INET
 	case win32.AF_INET6:
 		sin6 := (^win32.sockaddr_in6)(&ss)
-		src = &sin6.sin6_addr
-		af = win32.AF_INET6
+		// Same normalisation as net_posix.odin: an IPv4 client on a dual-stack
+		// listener arrives as ::ffff:a.b.c.d and must be reported as a.b.c.d, so
+		// that an audit line, a limiter key and a fail2ban match do not depend on
+		// which family the server's socket happens to be. core:sys/windows has no
+		// IN6_IS_ADDR_V4MAPPED, so the test is written out: 80 zero bits then
+		// 0xffff.
+		a := sin6.sin6_addr.s6_addr
+		mapped := a[10] == 0xff && a[11] == 0xff
+		for i in 0 ..< 10 {
+			mapped = mapped && a[i] == 0
+		}
+		if mapped {
+			src = &sin6.sin6_addr.s6_addr[12]
+			af = win32.AF_INET
+		} else {
+			src = &sin6.sin6_addr
+			af = win32.AF_INET6
+		}
 	case:
 		return ""
 	}

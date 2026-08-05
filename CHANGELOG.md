@@ -32,6 +32,53 @@ describes how one is made.
 
 ## Unreleased
 
+### Changed
+
+- **`ssh.DEFAULT_HOST` is now `"::"`, not `"0.0.0.0"`.** A server that does not
+  set `Config.host` binds the IPv6 wildcard, which on a dual-stack kernel
+  serves IPv4 and IPv6 from one socket. `localhost` resolves to `::1` before
+  `127.0.0.1` on both macOS and Linux, so an IPv4-only server made every
+  `ssh localhost` try IPv6 first, get refused and retry — one wasted round trip
+  per connection — and was unreachable from an IPv6-only client at all.
+  Measured on Linux with a 50 ms one-way delay on `lo`: `localhost` connects in
+  206.66 ms against `0.0.0.0` and 104.09 ms against `::`, and `::1` goes from
+  "connection refused" to 107.70 ms. On loopback with no added delay the saving
+  is about 0.03 ms — real and invisible. It does **not** fix a slow connect
+  caused by a dropped SYN; measured with an `ip6tables … -j DROP` rule in
+  place, both binds take over two minutes, because a dropped packet never
+  reaches a listener.
+
+  Where a dual-stack socket is not available, `serve` rebinds on the new
+  `ssh.DEFAULT_HOST_IPV4` (`"0.0.0.0"`) and says why on stderr. Both cases are
+  measured, in Docker: a `"::"` bind that fails outright (no `AF_INET6` at
+  all), and one that succeeds but that the kernel made IPv6-only, which would
+  refuse every IPv4 client — Linux with `net.ipv6.bindv6only=1`, and FreeBSD's
+  and Windows' default. libssh never sets `IPV6_V6ONLY` itself, so `serve`
+  reads it back off the listening socket. The fallback applies only to the
+  default: an explicit `Config.host` is bound exactly as written.
+
+  **If you need the old behaviour**, set `Config.host = ssh.DEFAULT_HOST_IPV4`.
+  Do that deliberately if anything in front of your server — firewall, rate
+  limiter, fail2ban action — is written for IPv4 only, because such a control
+  does not partly cover the v6 half, it does not cover it at all, and it fails
+  silently. The artifacts in `deploy/` are paired for both families already.
+
+- The peer address of an IPv4 client is reported as a dotted quad on a
+  dual-stack listener too. `getpeername` returns the IPv4-mapped
+  `::ffff:127.0.0.1` there; `ssh.remote_addr`, `Auth_Request.remote_addr`, the
+  audit log and the per-address limiter all see `127.0.0.1`, exactly as on an
+  IPv4-only bind, so `deploy/fail2ban`'s `addr=<HOST>` and any existing ban
+  rule keep matching what they always matched.
+
+- The startup line brackets an IPv6 bind address (`listening on [::]:2222`
+  rather than `:::2222`) and the `ssh …` hint after it names `localhost` when
+  the bind address is a wildcard, since neither wildcard is a host you can
+  connect to.
+
+### Added
+
+- `ssh.DEFAULT_HOST_IPV4` — the IPv4 wildcard the default bind falls back to.
+
 ## 0.2.0 — 2026-08-01
 
 A security-review release. `ssh.write` changes its contract, which is why this

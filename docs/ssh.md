@@ -56,7 +56,7 @@ or by a `shutdown(srv)` call — and the connected sessions have drained. See
 
 | Field | Type | Zero value |
 | --- | --- | --- |
-| `host` | `string` | `""` uses `DEFAULT_HOST` (`"0.0.0.0"`). |
+| `host` | `string` | `""` uses `DEFAULT_HOST` (`"::"`), which serves IPv4 and IPv6 from one socket, falling back to `DEFAULT_HOST_IPV4` (`"0.0.0.0"`) with a message on stderr where that is not possible. See [Bind address](#bind-address). |
 | `port` | `int` | `0` uses `DEFAULT_PORT` (`2222`). |
 | `host_key_path` | `string` | `""` uses `DEFAULT_HOST_KEY` (`"hostkey"`). Generated on first run if missing. |
 | `handler` | `Handler` | No default. A `nil` handler still completes the handshake and auth, acks the shell request, then immediately closes with exit status 0 — the client sees a clean, silent, instant disconnect. |
@@ -76,6 +76,65 @@ or by a `shutdown(srv)` call — and the connected sessions have drained. See
 `key_exchange`, `ciphers`, `macs`, and `hostkey_algorithms` take libssh's
 comma-separated algorithm-name format (e.g. what `DEFAULT_CIPHERS` is written
 in below) — not Odin literals of any structured type.
+
+### Bind address
+
+The default is `DEFAULT_HOST`, the IPv6 wildcard `"::"`. On a dual-stack
+kernel one socket bound there serves **both** families: an IPv4 client arrives
+as an IPv4-mapped address, which `otsh` converts back to the dotted quad
+before anything sees it, so `ssh.remote_addr` and every audit line read
+`127.0.0.1`, not `::ffff:127.0.0.1`. Nothing downstream — the limiter's
+per-address counting, the fail2ban filter in `deploy/` — has to know which
+family the socket is.
+
+It used to be `"0.0.0.0"`, and the reason it changed is that `localhost`
+resolves to `::1` before `127.0.0.1` on both macOS and Linux. An IPv4-only
+server therefore made every `ssh localhost` attempt IPv6 first, get refused,
+and retry — one wasted round trip per connection, and no reachability at all
+from an IPv6-only client. Measured in Docker on Linux with a 50 ms one-way
+delay on `lo`, best of five connects:
+
+| bind | via `localhost` | via `127.0.0.1` | via `::1` |
+| --- | --- | --- | --- |
+| `0.0.0.0` | 206.66 ms | 104.39 ms | connection refused |
+| `::` | 104.09 ms | 102.70 ms | 107.70 ms |
+
+On loopback with no added delay the same saving is a twentieth of a
+millisecond — real, and invisible (measured on macOS, 200 connects each: the
+connect phase alone is a median 0.11 ms via `localhost` against `0.0.0.0` and
+0.06 ms against `::`). The cost is one RTT, so it scales with distance to the
+server.
+
+**This does not fix a slow connect caused by a dropped SYN.** Where a firewall
+uses `DROP` rather than a refusal, the client waits out its full connect
+timeout and no bind address changes that, because a dropped packet never
+reaches any listener: measured with an `ip6tables … -j DROP` rule in place,
+`ssh localhost` took 134 s against an IPv4-only bind and 135 s against a
+dual-stack one. That symptom is a firewall to fix, not this.
+
+Two things can make the dual-stack bind unusable. `serve` handles both by
+rebinding on `DEFAULT_HOST_IPV4` (`"0.0.0.0"`) and saying so on stderr:
+
+- **The host has no IPv6 at all**, so binding `"::"` fails. Note that Linux's
+  `net.ipv6.conf.all.disable_ipv6=1` is *not* this case — measured, a `"::"`
+  bind still succeeds there and still serves IPv4.
+- **The kernel makes the socket IPv6-only**, which would refuse every IPv4
+  client. libssh never sets `IPV6_V6ONLY` itself (`bind_socket` in its
+  `src/bind.c` sets `SO_REUSEADDR` and nothing else, in every version `otsh`
+  supports), so this is the kernel's default: Linux with
+  `net.ipv6.bindv6only=1`, FreeBSD, and Windows. `serve` reads the option back
+  off the listening socket and rebinds rather than serving an IPv4 outage.
+
+```
+otsh: the kernel made the :: listener IPv6-only, so it would refuse
+      every IPv4 client (Linux net.ipv6.bindv6only=1, or FreeBSD's or
+      Windows' default). Falling back to 0.0.0.0: IPv4 clients work, IPv6
+      clients do not. Set Config.host = "::" to keep the IPv6-only bind.
+```
+
+The fallback applies **only** to the default. Set `Config.host` yourself and
+you get exactly what you asked for — `"::"` stays IPv6-only where the kernel
+made it so, `"0.0.0.0"` stays IPv4, `"127.0.0.1"` stays loopback.
 
 ## Handler
 
@@ -449,7 +508,12 @@ lines ships in `deploy/` and is walked through in
 - `addr` is present on every event except `listen`, and holds the peer
   address in numeric form — an IPv4 dotted quad, or an IPv6 address with an
   optional `%zone`. **Every failure record a filter cares about — `reject`,
-  `kex_fail`, and `auth` with `ok=false` — carries `addr`.**
+  `kex_fail`, and `auth` with `ok=false` — carries `addr`.** An IPv4 client is
+  always a dotted quad, never the IPv4-mapped `::ffff:127.0.0.1` form, even
+  though the default bind is a dual-stack IPv6 socket that is what
+  `getpeername` reports: `otsh` normalises it, so the field does not depend on
+  which family the listening socket happens to be. See
+  [Bind address](#bind-address).
 - Values never contain a space, an `=`, or a control character. Every byte
   outside `[A-Za-z0-9.:_@/+,%-]` is replaced with `?`, and values are capped:
   `addr` and `host` at 64 bytes, `user`, `term` and `id` at 32. `user` and
@@ -471,6 +535,14 @@ otsh: audit ts=2026-07-29T19:34:24Z event=session_end addr=127.0.0.1 secs=3.412 
 The `method=none ok=false` line is the OpenSSH client trying the `none`
 method first, as it always does; this server was configured with
 `methods = {.Publickey}`, so it refused and the client offered its key.
+
+That capture predates the dual-stack default, which is why its `listen` line
+reads `host=0.0.0.0`; on the current default it reads `host=::`. The `addr`
+lines are unaffected — an IPv4 client is still `addr=127.0.0.1`. What is new
+is that a client reaching the same server over IPv6 now gets in, and logs
+`addr=::1` (or its global v6 address). If you filter these lines, make sure
+what reads them handles IPv6 — for fail2ban that means 0.10 or newer, which
+`deploy/fail2ban/filter.d/otsh.conf` explains.
 
 ### Writing your own sink
 

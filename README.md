@@ -15,7 +15,7 @@ every machine.
 ```sh
 git clone https://github.com/souriscloud/otsh && cd otsh
 ./build.sh examples/tracker      # builds examples/tracker -> ./tracker
-./tracker                        # serves on 0.0.0.0:2222
+./tracker                        # serves on [::]:2222 — IPv4 and IPv6
 ```
 
 In another terminal:
