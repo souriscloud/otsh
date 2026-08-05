@@ -548,6 +548,53 @@ Both files being group- or world-readable triggers a startup warning
 (`warn_if_world_readable`); it doesn't stop the server, so don't rely on the
 warning catching a misconfigured deploy for you.
 
+## If connecting feels slow, it is probably your terminal, not the server
+
+Some terminal emulators push their own terminfo to a host the first time you
+`ssh` to it, so that curses programs like `nano` or `btop` render correctly
+there. Ghostty does this — `shell-integration-features` includes
+`ssh-terminfo`, which wraps `ssh` in a shell function that runs roughly:
+
+<!-- check:skip Ghostty's own shell-integration source, not otsh code -->
+```sh
+infocmp -0 -x xterm-ghostty |
+  ssh -o ControlMaster=yes -o ControlPersist=60s "$@" '
+      infocmp xterm-ghostty >/dev/null 2>&1 && exit 0
+      command -v tic >/dev/null 2>&1 || exit 1
+      mkdir -p ~/.terminfo && tic -x - && exit 0'
+```
+
+That needs to **run a command** on the far end. An otsh server refuses `exec`
+by design — it only ever speaks TUI, so `cb_exec_request` returns an error and
+no program is ever run — which means `tic` cannot succeed. The emulator only
+caches hosts where the install *worked*, so against otsh it retries on every
+single connection, forever, and each attempt is time you wait before your app
+appears. The giveaway is a line like `Setting up xterm-ghostty terminfo on
+…` followed by `Warning: Failed to install terminfo.`
+
+Confirm it in one line — bypass the wrapper and compare:
+
+```sh
+time command ssh -p 2222 localhost    # plain ssh, no shell-integration wrapper
+```
+
+The fix is to tell the emulator this host is already done, which keeps the
+feature working everywhere else. For Ghostty:
+
+```sh
+ghostty +ssh-cache --add=user@yourhost    # skip terminfo for this host only
+ghostty +ssh-cache                        # list; --remove= to undo
+```
+
+Nothing is lost by skipping it. Terminfo exists so a *shell* on the remote can
+drive your terminal; an otsh app writes ANSI escapes straight down the channel
+and never consults a terminfo database — that is the same reason the server
+never allocates a pty. `TERM` still arrives and is readable as `Info.term`;
+otsh simply does not need a local entry for it to render.
+
+Turning the feature off globally would also work and is the wrong trade: you
+would lose correct terminfo on every ordinary server you ssh into.
+
 ## Where to go next
 
 - [`./concepts.md`](./concepts.md) — if any of the above felt like magic:
