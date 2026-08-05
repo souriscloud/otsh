@@ -100,8 +100,9 @@ Destroy_Proc :: #type proc(app: tui.App)
 // Frame rate used when `Config.fps` is zero.
 DEFAULT_FPS :: 30
 
-// How to serve your app. The zero value works: it serves on 0.0.0.0:2222 with a
-// generated host key at ./hostkey, at 30fps, accepting every client.
+// How to serve your app. The zero value works: it serves on [::]:2222 — one
+// socket for IPv4 and IPv6 both, see `ssh.DEFAULT_HOST` — with a generated host
+// key at ./hostkey, at 30fps, accepting every client.
 //
 // Example:
 //
@@ -112,7 +113,7 @@ DEFAULT_FPS :: 30
 //		destroy       = destroy,
 //	})
 Config :: struct {
-	host:          string, // default ssh.DEFAULT_HOST ("0.0.0.0")
+	host:          string, // default ssh.DEFAULT_HOST ("::", IPv4 and IPv6)
 	port:          int, // default ssh.DEFAULT_PORT (2222)
 	host_key_path: string, // default ssh.DEFAULT_HOST_KEY ("hostkey"); generated if missing
 	create:        Create_Proc,

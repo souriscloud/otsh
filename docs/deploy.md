@@ -266,8 +266,9 @@ shift the extracted host. It is not wired into `check.sh`; it is documentation
 you can execute.
 
 The filter has also been run through a **real `fail2ban-regex` 1.1.0**: on a
-13-line corpus (the capture plus IPv6, journal- and syslog-prefixed, and
-forged-field variants) it matches exactly the 7 failure lines, misses the 6
+17-line corpus (the capture plus IPv6 — including the `addr=::1` lines the
+dual-stack default now produces — journal- and syslog-prefixed, and
+forged-field variants) it matches exactly the 10 failure lines, misses the 7
 benign ones, and extracts the `addr=` value every time. That run is also how
 the filter's one non-obvious construction was found: fail2ban excises the
 matched timestamp text from the line before `failregex` runs, so the regexes
@@ -297,6 +298,37 @@ test network was IPv4-only — the regex handles v6, the end-to-end journal path
 for v6 was not exercised), and fail2ban 0.9, whose `<HOST>` cannot match IPv6
 at all — on 0.9 an IPv6 audit line matches nothing, silently. Check
 `fail2ban-client version` before assuming your v6 listener is covered.
+
+### IPv6, now that the default bind serves it
+
+`ssh.DEFAULT_HOST` is the IPv6 wildcard `"::"`, so unless you set
+`Config.host` yourself your server answers IPv6 clients — and IPv6 `addr=`
+lines are no longer an exotic case in your log, they are the ordinary one for
+anybody whose resolver hands out a AAAA record. Two consequences for this
+stack:
+
+- **fail2ban must be 0.10 or newer.** On 0.9 an IPv6 audit line matches
+  nothing, silently: no ban, no error, no log entry saying so. Before this
+  change that only lost you the rare v6 client; now it can be most of them.
+- **`banaction` must cover both families.** `nftables-multiport`, which the
+  shipped jail sets, manages an `inet` table and bans v4 and v6 alike. Verify
+  it the same way as any other ban — from a v6 source — rather than assuming.
+
+What did **not** change is the IPv4 side. An IPv4 client on the dual-stack
+socket is reported by `getpeername` as the IPv4-mapped `::ffff:127.0.0.1`, and
+`otsh` converts that back to `127.0.0.1` before the audit line is formatted —
+measured on macOS and on Linux, before and after — so `addr=<HOST>` matches
+exactly what it always matched and no existing ban rule needs revisiting. Had
+it not been normalised, every IPv4 attacker's `addr=` would have changed shape
+under you.
+
+The standing rate limits in
+[`../deploy/nftables-ratelimit.conf`](../deploy/nftables-ratelimit.conf) were
+already written for both families — every rule there is paired, `ip saddr` and
+`ip6 saddr`, over paired `ipv4_addr`/`ipv6_addr` sets — so that layer needs no
+change. If you have edited it, or written your own, check the pairing: an
+`ip`-only rule does not see `ip6` traffic at all, and a v4-only limit in front
+of a dual-stack listener is one an attacker simply routes around.
 
 ## Layer 3: the built-in `Limits`
 

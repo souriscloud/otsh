@@ -91,7 +91,7 @@ main :: proc() {
 <!-- check:verbatim sshtui/sshtui.odin -->
 ```odin
 Config :: struct {
-	host:          string, // default "0.0.0.0"
+	host:          string, // default "::" (IPv4 and IPv6)
 	port:          int, // default 2222
 	host_key_path: string, // default "./hostkey"; generated if missing
 	create:        Create_Proc,
@@ -112,11 +112,11 @@ Config :: struct {
 
 Every field left at its zero value falls back to a documented default; nothing
 about `Config{create = create}` alone is an error, it just serves on
-`0.0.0.0:2222` with a host key file called `hostkey` in the working directory.
+`[::]:2222` with a host key file called `hostkey` in the working directory.
 
 | Field | Zero value means | Notes |
 | --- | --- | --- |
-| `host` | `"0.0.0.0"` | Bind address, resolved in `serve`. |
+| `host` | `"::"` | Bind address, resolved in `serve`. The IPv6 wildcard serves IPv4 clients too, falling back to `"0.0.0.0"` where the host cannot do that — see [ssh.md § Bind address](./ssh.md#bind-address). |
 | `port` | `2222` | |
 | `host_key_path` | `"hostkey"` | Created on first run if it does not exist (`ssh.ensure_host_key`). Clients pin this in `known_hosts`, so keep it stable across restarts — back it up. |
 | `create` | connection is accepted, then silently dropped | Effectively required. `serve` checks `cfg.create == nil` per session and returns without running anything; `run_local` returns `false`. |

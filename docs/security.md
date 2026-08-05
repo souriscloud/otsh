@@ -585,22 +585,31 @@ Before exposing an `otsh` server to the internet:
    (`deploy/nftables-ratelimit.conf`, with pf equivalents), a fail2ban filter
    for the audit log, and a hardened systemd unit; it also states where that
    stops being enough.
-8. **Decide whether you want an audit log**, then set `Config.audit` (or
+8. **Check that whatever is in front of it covers IPv6.** `ssh.DEFAULT_HOST`
+   is the IPv6 wildcard `"::"`, so unless you set `Config.host` the server
+   answers on both families and a host with a global IPv6 address is reachable
+   over it. A firewall, rate limiter or fail2ban action written only for IPv4
+   is not a partial control here — it is no control at all for the v6 half,
+   and it fails silently. The shipped `deploy/` artifacts are paired for both
+   families; anything you wrote yourself needs checking. Binding
+   `Config.host = "0.0.0.0"` is the deliberate way to stay IPv4-only. See
+   [ssh.md § Bind address](./ssh.md#bind-address).
+9. **Decide whether you want an audit log**, then set `Config.audit` (or
    leave it `nil`) on purpose rather than by default. `ssh.audit_stderr`
    gives you one parseable line per connection, auth attempt and session,
    which is what a log filter or an incident review needs — at the cost of
    a file recording every peer address that reached your server. Both
    choices are defensible; drifting into one is not (§9).
-9. **Use `ssh.ids_equal`, never `==`,** for any comparison against a
-   stored id (§4).
-10. **Never treat `Info.user` as identity or authorization** — it is
+10. **Use `ssh.ids_equal`, never `==`,** for any comparison against a
+    stored id (§4).
+11. **Never treat `Info.user` as identity or authorization** — it is
     client-chosen text, not a verified claim (§9).
-11. **Decide what happens to a user who loses their key** — there is no
+12. **Decide what happens to a user who loses their key** — there is no
     recovery path in `otsh` — before it happens in production, not after
     (§9).
-12. **Keep libssh patched.** It is the transport; its vulnerabilities are
+13. **Keep libssh patched.** It is the transport; its vulnerabilities are
     yours (§9).
-13. **Do not expect `exec` or `subsystem` to work, and do not add them
+14. **Do not expect `exec` or `subsystem` to work, and do not add them
     without understanding why they were left out** — this server's
     request handling assumes a single interactive shell channel (§8).
 
