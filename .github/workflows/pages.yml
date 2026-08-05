@@ -44,6 +44,11 @@ concurrency:
 
 jobs:
   build:
+    # Skipped entirely while the repository is private, because Pages is a paid
+    # feature there and the deploy would fail on every docs push — a permanent
+    # red X that means nothing except "this repo is private". The moment it is
+    # made public this starts running on its own, with no edit needed here.
+    if: github.event.repository.visibility == 'public'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
