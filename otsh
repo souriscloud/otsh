@@ -216,7 +216,12 @@ cmd_version() {
 cmd_flags() {
 	resolve_libssh
 	# Two lines, nothing else on stdout, so this can be read by eye or by a
-	# script. Note for the reader: paste these, do not $(otsh flags) them —
+	# script. Paste these, do not $(otsh flags) them — the linker value
+	# contains a space, so word splitting turns it into two arguments and
+	# odin reports `Unknown flag: 'Wl,-rpath,...'`. In a script use
+	#   eval "odin build . $(otsh flags | tr '\n' ' ')"
+	# which re-parses the quoting. Original note follows:
+	# paste these, do not $(otsh flags) them —
 	# the linker flags contain a space and word splitting would break them.
 	printf -- '-collection:otsh=%s\n' "$OTSH"
 	printf -- '-extra-linker-flags:"%s"\n' "$LDFLAGS"

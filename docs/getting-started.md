@@ -650,7 +650,21 @@ odin build /path/to/yourapp \
 ```
 
 Paste, do not substitute: `odin build . $(otsh flags)` is wrong, because the
-linker flags contain a space and the shell would split them into two arguments.
+linker flags contain a space and the shell splits them into two arguments —
+`Unknown flag: 'Wl,-rpath,…'` is what that looks like when it happens.
+
+If you do want it in a script, `eval` re-parses the quoting and works:
+
+```sh
+eval "odin build . -out:yourapp $(otsh flags | tr '\n' ' ')"
+```
+
+In a Makefile the same idea, with `$$` so make passes the `$` through:
+
+```make
+yourapp:
+	eval "odin build . -out:yourapp $$(otsh flags | tr '\n' ' ')"
+```
 
 Deriving the library path yourself instead, which is what `otsh` does when
 `pkg-config` is present:
