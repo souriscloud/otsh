@@ -7,6 +7,12 @@ link it into a project that lives outside this repo. It does not re-explain
 protocol trick, the auth model, and what is and is not hardened. Read that
 before you expose anything here to the network.
 
+In a hurry: `./otsh new ~/src/myapp && ./otsh run ~/src/myapp` scaffolds a
+project outside this repo and starts it. [Quick start](#quick-start-the-otsh-command)
+is that path in full; every flag it passes is written out in [Using otsh from
+a project outside this repo](#using-otsh-from-a-project-outside-this-repo) for
+anyone who would rather drive the compiler themselves.
+
 ## Requirements
 
 - **Odin, nightly.** otsh uses `core:sys/posix`, which tracks Odin's nightly
@@ -24,15 +30,116 @@ before you expose anything here to the network.
   clang`. On macOS the Command Line Tools already provide it.
 - **macOS, Linux, Windows or FreeBSD.** macOS, Linux and Windows have all been
   built and run; FreeBSD has not — see [Platform
-  support](#platform-support) immediately below before you rely on that one.
+  support](#platform-support) below before you rely on that one.
 
-`build.sh` and `test.sh` resolve the compiler in this order: `$ODIN` if it is
-set; then a gitignored `.odin-path` file next to the script, if what it
-contains resolves to an executable; then `odin` on your `$PATH`. `.odin-path`
-exists for machines where the compiler is not on `$PATH`, and is never
-committed. A path in it that does not resolve is skipped rather than obeyed,
-so one checkout seen by two machines at once — a worktree bind-mounted into a
-container, say — still builds on the machine the file was not written on.
+`./otsh doctor` checks all of the above and tells you which one is missing,
+as a checklist rather than as a compiler backtrace:
+
+```
+otsh doctor — /path/to/otsh
+
+  ok    odin      /usr/local/bin/odin  (dev-2026-07-nightly:819fdc7)
+  ok    libssh    0.12.2  (>= 0.10.6)  /opt/homebrew/opt/libssh/lib
+  ok    clang     /usr/bin/clang
+  ok    otsh      0.3.0  (libssh, ssh, tui, sshtui)
+
+all good
+```
+
+It exits non-zero when something is actually broken, so it is usable in a
+setup script. On a stock `ubuntu:24.04` with nothing installed it reports three
+failures — odin, libssh and clang — each with the line that fixes it; after
+`apt install libssh-dev pkg-config clang` only the compiler is still missing.
+Both of those were run in a container, and the second is how the libssh check
+came to be written the way it is: an empty `/usr/local/lib`, which that image
+has and which is where the search falls back to, was reported as "found" until
+the check started looking for the library *file* rather than the directory.
+
+The compiler is resolved in this order: `$ODIN` if it is set; then a gitignored
+`.odin-path` file next to `otsh`, if what it contains resolves to an
+executable; then `odin` on your `$PATH`. `.odin-path` exists for machines where
+the compiler is not on `$PATH`, and is never committed. A path in it that does
+not resolve is skipped rather than obeyed, so one checkout seen by two machines
+at once — a worktree bind-mounted into a container, say — still builds on the
+machine the file was not written on. `otsh`, `build.sh` and `test.sh` all get
+this from the same place: the latter two are wrappers around the first.
+
+## Quick start: the `otsh` command
+
+`otsh`, at the root of this repository, is the whole toolchain: it knows where
+the collection is and where libssh lives, so nothing has to be typed twice.
+
+```sh
+git clone https://github.com/souriscloud/otsh
+otsh/otsh doctor              # is this machine ready?
+otsh/otsh new ~/src/myapp     # a project that builds and serves as-is
+otsh/otsh run ~/src/myapp     # build it and start it
+```
+
+Then, from another terminal — or another machine:
+
+```sh
+ssh -p 2222 localhost
+```
+
+Put it on your `$PATH` once and stop typing the path to the checkout:
+
+```sh
+mkdir -p ~/.local/bin
+ln -s "$PWD/otsh/otsh" ~/.local/bin/otsh     # or /usr/local/bin/otsh
+```
+
+**Symlink it — do not copy it.** The script resolves its own real location
+through the symlink and points `-collection:otsh=` at the checkout it finds
+there. A copy sitting in `~/.local/bin` has no `ssh/`, `tui/` or `sshtui/` next
+to it, and nothing will build. Nothing about how otsh is distributed changes
+here: your app still compiles against a directory of source, and pinning it is
+still [checking out a tag](#pinning-and-upgrading-otsh).
+
+| command | what it does |
+| --- | --- |
+| `otsh new path/to/app [--port N]` | scaffold a runnable project — see below |
+| `otsh build path/to/app [flags]` | build it; the binary lands **in that directory**, named after it |
+| `otsh run path/to/app [args]` | build, then run it from that directory; args after it go to your program |
+| `otsh test [path/to/pkg] [flags]` | run a package's tests (default: otsh's own suite) |
+| `otsh flags` | print the two compiler flags, for a Makefile, a justfile or an IDE |
+| `otsh doctor` | check odin, libssh against the 0.10.6 floor, and clang |
+| `otsh version` | version, checkout path, and the commit that checkout is on |
+
+The first bare word is always the package directory; anything starting with a
+dash is passed straight to the compiler, so `otsh build ~/src/myapp -o:speed`
+and `otsh test -define:ODIN_TEST_NAMES=…` both do the obvious thing.
+
+The binary landing *in* the project directory rather than in your current one
+is deliberate, and `otsh run` starting it from there is the same decision:
+`Config.host_key_path` is a relative path, so a server started from wherever
+you happened to be standing scatters host keys around your filesystem — and a
+host key that moves is a host key mismatch on every client that already
+connected once.
+
+`./build.sh` and `./test.sh` still exist and still behave exactly as they
+always have, including dropping the binary in your *current* directory; they
+are now thin wrappers around `otsh build` and `otsh test`. Use whichever you
+have the habit of.
+
+### What `otsh new` writes
+
+Three files, and nothing you have to edit before it runs:
+
+| file | |
+| --- | --- |
+| `main.odin` | the three procs and a config — a box showing who connected, the terminal size, and a keypress count. It also wires `--local` |
+| `build.sh` | the project's own build script. It records the checkout it was generated against and delegates to `otsh build`; `OTSH_ROOT=/elsewhere ./build.sh` overrides that without editing the file, and an `otsh` on `$PATH` is the fallback if the recorded checkout is gone |
+| `.gitignore` | `*hostkey`, `*_secret`, `*.pem` and the build output — the two secrets are generated on first run, and committing a host key lets anyone impersonate your server |
+
+`main.odin` opens with a `#assert` on `sshtui.VERSION_MINOR` pinning the otsh
+minor it was generated against, so pointing the project at an older checkout is
+a compile error with a sentence attached rather than a puzzle. See [Assert the
+version you need](#assert-the-version-you-need).
+
+Once it exists, the project stands on its own — `cd ~/src/myapp && ./build.sh
+&& ./myapp` needs nothing else, and `otsh` never has to be run from inside its
+own repository.
 
 ## Platform support
 
@@ -288,8 +395,14 @@ in 15) and disappears at `-define:ODIN_TEST_THREADS=1` (0 in 15).
 
 ## Build and run the examples
 
-`build.sh` builds one app against the otsh source tree and drops the binary,
-named after the source directory, in your current directory:
+`./otsh run` builds one and starts it:
+
+```sh
+./otsh run examples/tracker    # then: ssh -p 2222 localhost
+```
+
+`build.sh` does the build alone, dropping the binary — named after the source
+directory — in your current directory:
 
 ```sh
 ./build.sh                     # examples/tracker  -> ./tracker
@@ -297,8 +410,10 @@ named after the source directory, in your current directory:
 ./build.sh examples/members    # examples/members -> ./members
 ```
 
-Run any of them and connect with a normal `ssh` client — no special client,
-no extra flags, no configuration on the connecting side.
+The commands below use `build.sh` because the ports and the run steps are
+worth seeing separately. Run any of them and connect with a normal `ssh`
+client — no special client, no extra flags, no configuration on the connecting
+side.
 
 ### tracker — a full app
 
@@ -356,8 +471,11 @@ below.
 
 An otsh app is a directory with one `main.odin`, three procs
 (`create`, `update`, `view`), and a `destroy` to free what `create`
-allocated. Make a new directory anywhere — it does not need to live inside
-this repo:
+allocated. `./otsh new ~/src/greeter` writes exactly that shape and you can
+skip to running it; the rest of this section builds the same thing by hand,
+because the file is short enough to be worth reading once.
+
+Make a new directory anywhere — it does not need to live inside this repo:
 
 ```sh
 mkdir -p ~/src/greeter
@@ -440,8 +558,16 @@ main :: proc() {
 }
 ```
 
-Build it with `build.sh` from the otsh repo, pointing at your app's
-directory:
+Build and run it from anywhere:
+
+```sh
+otsh run ~/src/greeter
+ssh -p 2300 localhost
+```
+
+or, if you would rather keep the two steps apart and have the binary land in
+the directory you are standing in, `build.sh` from the otsh repo still does
+that:
 
 ```sh
 cd /path/to/otsh
@@ -492,9 +618,42 @@ Try it:
 
 ## Using otsh from a project outside this repo
 
-Nothing about otsh needs to be vendored or installed system-wide. Point the
-Odin compiler at this checkout with `-collection:otsh=`, and tell the linker
-where your system's libssh lives:
+Nothing about otsh needs to be vendored or installed system-wide, and your
+project does not need to live anywhere near this checkout.
+
+```sh
+otsh build /path/to/yourapp     # -> /path/to/yourapp/yourapp
+```
+
+That is the whole of it, from any directory. What follows is what those two
+words expand to, because a wrapper you cannot see through is a wrapper you
+cannot debug — and because a Makefile, a `justfile`, an IDE build
+configuration or your own script has every right to drive the compiler
+directly.
+
+### The two flags, and getting them out
+
+```sh
+$ otsh flags
+-collection:otsh=/path/to/otsh
+-extra-linker-flags:"-L/opt/homebrew/opt/libssh/lib -Wl,-rpath,/opt/homebrew/opt/libssh/lib"
+```
+
+Paste those into an ordinary `odin build`, exactly as printed — the quotes are
+part of it:
+
+```sh
+odin build /path/to/yourapp \
+  -out:yourapp \
+  -collection:otsh=/path/to/otsh \
+  -extra-linker-flags:"-L/opt/homebrew/opt/libssh/lib -Wl,-rpath,/opt/homebrew/opt/libssh/lib"
+```
+
+Paste, do not substitute: `odin build . $(otsh flags)` is wrong, because the
+linker flags contain a space and the shell would split them into two arguments.
+
+Deriving the library path yourself instead, which is what `otsh` does when
+`pkg-config` is present:
 
 ```sh
 odin build /path/to/yourapp \
@@ -502,6 +661,8 @@ odin build /path/to/yourapp \
   -collection:otsh=/path/to/otsh \
   -extra-linker-flags:"-L$(pkg-config --variable=libdir libssh) -Wl,-rpath,$(pkg-config --variable=libdir libssh)"
 ```
+
+### Why each flag is there
 
 `-collection:otsh=` is what makes `import "otsh:sshtui"` / `"otsh:tui"` /
 `"otsh:ssh"` resolve — it's a source import, not a linked library, so there is
@@ -518,9 +679,13 @@ all, while the same link without `-rpath` produced one that dies with
 libssh in the default multiarch libdir the flag is a no-op, which is why it
 takes a non-default prefix to see it working.
 
-`./build.sh path/to/yourapp` (run from inside this repo) passes exactly these
-two flags for you, using `pkg-config` when it's available and falling back to
-`/opt/homebrew/opt/libssh/lib` or `/usr/local/lib` otherwise.
+`otsh build`, `otsh run`, the `build.sh` that `otsh new` generates, and this
+repo's own `./build.sh` all pass exactly these two flags, using `pkg-config`
+when it's available and falling back to `/opt/homebrew/opt/libssh/lib` or
+`/usr/local/lib` otherwise. On Windows the second flag is spelled
+`/LIBPATH:C:/vcpkg/installed/x64-windows/lib` instead — the MSVC linker has no
+`-L` and no rpath at all, which is why `ssh.dll` has to be on `%PATH%` at run
+time there.
 
 ## Pinning and upgrading otsh
 
@@ -540,6 +705,21 @@ Two consequences worth being explicit about:
   error, in front of you, before anything ships.
 - **A running server does not pick up an upgrade.** Upgrading is rebuild and
   restart, always. Nothing hot-reloads.
+
+The `otsh` command does not change any of this — it is ergonomics on top of
+the same two compiler flags. What it does add is a way to see which checkout
+you are actually building against, which matters most when `otsh` is a symlink
+on your `$PATH` and the checkout is out of sight:
+
+```sh
+$ otsh version
+otsh 0.3.0
+  source   /path/to/otsh
+  commit   v0.3.0-1-g9789806
+```
+
+The commit line is the honest answer: a tag you checked out and then pulled
+past is no longer that tag, and `git describe` says so.
 
 ### Pin by checking out a tag
 
@@ -576,7 +756,9 @@ import "otsh:sshtui"
         "this app needs otsh >= 0.3.0")
 ```
 
-Built against a v0.2.0 checkout that produces:
+`otsh new` writes this line into every project it scaffolds, pinned to the
+minor of the checkout it was generated from, so a new project starts with the
+guard already in place. Built against a v0.2.0 checkout it produces:
 
 ```
 Error: Compile time assertion: sshtui.VERSION_MAJOR == 0 && sshtui.VERSION_MINOR >= 3

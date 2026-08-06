@@ -23,6 +23,16 @@ id_rsa*
 # Both land in the repo root too, the same way the bundled examples do.
 /greeter
 /sshdoc
+# `./otsh build <dir>` leaves the binary beside its source instead of in the
+# current directory, so an example built that way lands one level down. Same
+# binaries, different place; the .exe/.pdb/.dSYM rules below are unanchored and
+# already cover the Windows and macOS debug leftovers wherever they appear.
+/examples/tracker/tracker
+/examples/whoami/whoami
+/examples/members/members
+/examples/guestbook/guestbook
+/examples/stopwatch/stopwatch
+/examples/notes/notes
 *.exe
 *.pdb
 *.o

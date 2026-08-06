@@ -14,8 +14,7 @@ every machine.
 
 ```sh
 git clone https://github.com/souriscloud/otsh && cd otsh
-./build.sh examples/tracker      # builds examples/tracker -> ./tracker
-./tracker                        # serves on [::]:2222 — IPv4 and IPv6
+./otsh run examples/tracker      # build it and start it — [::]:2222, IPv4 and IPv6
 ```
 
 In another terminal:
@@ -31,11 +30,34 @@ board; close an issue and every other session sees it change.
 The identical binary also runs with no network at all:
 
 ```sh
-./tracker --local
+./otsh run examples/tracker --local
 ```
 
 Same code, same `Model`, same `view` — `sshtui.run_local` just points the
 renderer at your terminal instead of an SSH channel.
+
+## Start your own
+
+```sh
+./otsh new ~/src/myapp           # main.odin, a build script, a .gitignore
+./otsh run ~/src/myapp           # then, from anywhere: ssh -p 2222 localhost
+```
+
+The scaffold builds and serves as-is — no editing, no flags to get right
+first. `./otsh` is a single script at the root of this repo; symlink it onto
+your `$PATH` and it works from any directory:
+
+```sh
+ln -s "$PWD/otsh" ~/.local/bin/otsh
+```
+
+It knows where the collection and your libssh are, so you never write those
+flags. `otsh flags` prints them anyway, for a Makefile or an IDE, and `otsh
+doctor` tells you which of odin, libssh and clang is missing when something
+will not build. Nothing is installed system-wide: `-collection:otsh=` still
+points at this source tree, so the version your app uses is still the commit
+this checkout is on. Full detail in [getting
+started](docs/getting-started.md).
 
 ## The trick
 
@@ -219,6 +241,8 @@ untrusted input is on you — otsh hands you bytes.
 - libssh ≥ 0.10.6 (`brew install libssh` / `apt install libssh-dev`) — the
   server refuses to start against anything older, which is where the Terrapin
   fix landed
+- `./otsh doctor` checks both, plus the `clang` Odin links with on Linux, and
+  names what is missing
 - macOS and Linux are the primary platforms. Windows builds and runs too,
   verified once on real hardware against a vcpkg libssh — see
   [getting started](docs/getting-started.md) for exactly what that covered.

@@ -32,6 +32,67 @@ describes how one is made.
 
 ## Unreleased
 
+### Added
+
+- **`otsh`, one executable at the repository root, so starting a project is a
+  command rather than a build script you write yourself.** Getting to "hello
+  world" used to mean cloning the repo and then hand-writing an `odin build`
+  line carrying `-collection:otsh=` and `-extra-linker-flags:"-L… -Wl,-rpath,…"`
+  — ceremony that has to be exactly right before anything works at all, and
+  that every new project pays again.
+
+  ```sh
+  ln -s "$PWD/otsh" ~/.local/bin/otsh    # once
+  otsh new ~/src/myapp                   # scaffold
+  otsh run ~/src/myapp                   # build and serve
+  ```
+
+  Subcommands: `new`, `build`, `run`, `test`, `flags`, `doctor`, `version`,
+  `help`. The first bare word is always the package directory and anything
+  starting with a dash goes to the compiler, so `otsh build ~/src/myapp
+  -o:speed` and `otsh test -define:ODIN_TEST_NAMES=…` both work.
+
+  - **It resolves its own real location**, walking the symlink chain by hand
+    rather than trusting `$0` or `readlink -f` (a GNU extension macOS did not
+    carry for most of its life). That is what makes a symlink on `$PATH` work:
+    the collection has to name the checkout, not `~/.local/bin`. Verified
+    through a two-hop chain, from a working directory that was neither the
+    repo nor the project.
+  - **`otsh new` writes a project that builds and serves with no editing**: a
+    `main.odin` with the three procs, a `--local` flag and a `#assert` pinning
+    the otsh minor it was generated against; its own `build.sh`, which records
+    the checkout and honours `OTSH_ROOT`; and a `.gitignore` covering
+    `*hostkey`, `*_secret` and the binary.
+  - **`otsh build` leaves the binary in the project directory** and `otsh run`
+    starts it from there, because `Config.host_key_path` is relative — a
+    server started from wherever you were standing scatters host keys, and a
+    host key that moves is a mismatch warning on every returning client.
+  - **`otsh flags` prints the two flags and nothing else**, so a Makefile, a
+    `justfile`, an IDE or your own script can use them instead of this tool.
+    Paste them; `$(otsh flags)` would word-split the linker flags.
+  - **`otsh doctor` reports odin, libssh against the 0.10.6 floor, and clang**
+    as a checklist with the install line for whatever is missing, and exits
+    non-zero. Measured on a bare `ubuntu:24.04`, where it found a bug in its
+    own first draft: an empty `/usr/local/lib` — present on a machine with no
+    libssh at all — was being reported as "found", so it now looks for the
+    library file rather than the directory.
+
+  This is ergonomics, not a new distribution model. `-collection:otsh=` still
+  points at a source tree, nothing is installed system-wide, and pinning is
+  still checking out a tag — see "Pinning and upgrading otsh" in
+  [docs/getting-started.md](docs/getting-started.md), which is unchanged.
+
+### Changed
+
+- **`build.sh` and `test.sh` are now thin wrappers around `otsh`.** Same
+  command line, same defaults, same output locations, same exit codes —
+  `./build.sh` still drops the binary in your current directory and
+  `./test.sh` still runs the suite in `tests/`. What changed is that the
+  compiler resolution and the libssh discovery, including the Windows
+  `/LIBPATH:` branch, now live in exactly one file instead of being copied
+  into each script. `./otsh build path/to/app` is the same build with the
+  binary left beside its source instead.
+
 ## 0.3.0 — 2026-08-06
 
 ### Changed

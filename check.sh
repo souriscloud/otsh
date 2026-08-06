@@ -33,6 +33,17 @@ done
 rm -f tracker whoami members guestbook stopwatch notes
 rm -f tracker.exe whoami.exe members.exe guestbook.exe stopwatch.exe notes.exe *.pdb
 
+echo "scaffold"
+# `otsh new` writes Odin source out of a shell script, and it is the first
+# thing a new reader runs. Nothing else here would notice it drifting from the
+# tui/sshtui API — the examples would still build fine — so scaffold one into a
+# temporary directory and build it, outside the repository, the way a user
+# would. A scaffold that does not compile is the worst failure this tool has.
+scaffold_root="$(mktemp -d)"
+step "otsh new scaffolds a project" ./otsh new "$scaffold_root/probe"
+step "the scaffolded project builds" ./otsh build "$scaffold_root/probe"
+rm -rf "$scaffold_root"
+
 echo "tests"
 if out=$(./test.sh 2>&1); then
 	printf '  ok    %s\n' "$(echo "$out" | grep -o 'Finished [0-9]* test.*' | tail -1)"

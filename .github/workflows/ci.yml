@@ -89,6 +89,18 @@ jobs:
           ./build.sh
           for ex in examples/*/; do ./build.sh "$ex"; done
 
+      # `otsh new` is the first command a new user runs, and the main.odin it
+      # writes is Odin source embedded in a shell script — invisible to every
+      # other check here. The examples would keep building happily while the
+      # scaffold rotted against a changed tui/sshtui API, and the person who
+      # found out would be someone trying otsh for the first time. So scaffold
+      # a project outside the checkout and build it. One `odin build`, in the
+      # job that already has the toolchain installed.
+      - name: Scaffold a project and build it
+        run: |
+          ./otsh new "$RUNNER_TEMP/scaffold-probe"
+          ./otsh build "$RUNNER_TEMP/scaffold-probe"
+
       - name: Run tests
         run: ./test.sh
 
