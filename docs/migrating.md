@@ -9,9 +9,53 @@ otsh is `0.MINOR.PATCH` before 1.0, so a **minor** bump may break your build and
 a **patch** bump may not. If you are moving across more than one minor, read
 every section between where you are and where you are going.
 
-Nothing here is urgent for anyone yet. otsh has one tag and no known dependents,
-so the removal below is written down to set the pattern rather than to rescue
-anybody.
+How to actually perform an upgrade — pinning to a tag, asserting a minimum
+version, and what a rebuild does and does not catch — is in
+[getting-started.md](./getting-started.md#pinning-and-upgrading-otsh). This page
+is only the per-change detail.
+
+## 0.3.0 — the default bind address
+
+**Changed:** `ssh.DEFAULT_HOST` from `"0.0.0.0"` to `"::"`. **Added:**
+`ssh.DEFAULT_HOST_IPV4`.
+
+**Does your code break?** No. Nothing fails to compile, and nothing about your
+app changes. This one is here precisely because a compiler cannot warn you
+about it.
+
+**What actually changed:** a server that never sets `Config.host` used to bind
+the IPv4 wildcard and answer IPv4 clients only. It now binds the IPv6 wildcard,
+which on a dual-stack kernel serves both families from one socket. Where a
+dual-stack socket is not available — no `AF_INET6` at all, or a kernel that
+made the socket IPv6-only, as `net.ipv6.bindv6only=1` does — `serve` rebinds on
+`DEFAULT_HOST_IPV4` and says so on stderr.
+
+**What to check before you upgrade a deployed server:** anything in front of
+the process that is written for IPv4. A firewall rule, an nftables set, a
+fail2ban action, a rate limiter, an allow-list. Such a control does not
+partially cover the IPv6 half — it does not cover it at all, and it does so
+silently, because the traffic simply never reaches the rule. The artifacts in
+`deploy/` are paired for both families already; anything you wrote yourself
+probably is not.
+
+**What to do:** either extend those controls to IPv6, or keep the old
+behaviour deliberately:
+
+<!-- check:decls -->
+```odin
+import "otsh:ssh"
+import "otsh:sshtui"
+
+old_ipv4_only :: proc() -> sshtui.Config {
+	return sshtui.Config{host = ssh.DEFAULT_HOST_IPV4}
+}
+```
+
+**What did not change:** the peer address an IPv4 client is reported as. A
+dual-stack `getpeername` hands back the IPv4-mapped `::ffff:127.0.0.1`; otsh
+converts it to the dotted quad before anything sees it, so `ssh.remote_addr`,
+the audit log and the per-address limiter read `127.0.0.1` exactly as before,
+and existing `addr=` log filters keep matching.
 
 ## 0.1.0 — the session input ring
 

@@ -522,6 +522,92 @@ takes a non-default prefix to see it working.
 two flags for you, using `pkg-config` when it's available and falling back to
 `/opt/homebrew/opt/libssh/lib` or `/usr/local/lib` otherwise.
 
+## Pinning and upgrading otsh
+
+There is no package manager here, and that shapes the whole answer.
+`-collection:otsh=` points the compiler at a *directory of source*, so **the
+version of otsh your app uses is whatever commit that directory is sitting
+on**. Nothing is installed, nothing is vendored into your binary as a
+prebuilt artifact, and there is no otsh shared library to keep in step —
+`import "otsh:sshtui"` compiles otsh's source into your executable every
+time you build. The only real shared library in the picture is libssh, and
+that one is your system's.
+
+Two consequences worth being explicit about:
+
+- **There is no ABI to break.** You never have a binary compiled against one
+  otsh running with another. An incompatible change is always a *compile*
+  error, in front of you, before anything ships.
+- **A running server does not pick up an upgrade.** Upgrading is rebuild and
+  restart, always. Nothing hot-reloads.
+
+### Pin by checking out a tag
+
+```sh
+git clone https://github.com/souriscloud/otsh
+cd otsh && git checkout v0.3.0        # the tag is the artifact
+```
+
+Then build your app against that path as shown above. For a project you want
+reproducible, a submodule pinned to the tag records the exact commit for you:
+
+```sh
+git submodule add https://github.com/souriscloud/otsh vendor/otsh
+git -C vendor/otsh checkout v0.3.0
+git commit -am "pin otsh v0.3.0"
+```
+
+If several of your apps share one otsh checkout, upgrading it upgrades all of
+them at once. That is fine until it isn't — give an app its own checkout when
+you want to move it on its own schedule.
+
+### Assert the version you need
+
+`ssh.VERSION_MAJOR` / `_MINOR` / `_PATCH` and the string `ssh.VERSION` are
+compile-time constants, re-exported from `sshtui` so an app that imports only
+that package can reach them. Asserting turns "pointed at the wrong checkout"
+into a clear build failure instead of a confusing one:
+
+<!-- check:decls -->
+```odin
+import "otsh:sshtui"
+
+#assert(sshtui.VERSION_MAJOR == 0 && sshtui.VERSION_MINOR >= 3,
+        "this app needs otsh >= 0.3.0")
+```
+
+Built against a v0.2.0 checkout that produces:
+
+```
+Error: Compile time assertion: sshtui.VERSION_MAJOR == 0 && sshtui.VERSION_MINOR >= 3
+       ("this app needs otsh >= 0.3.0")
+```
+
+### The upgrade itself
+
+1. `git fetch --tags` in your otsh checkout, then `git checkout vX.Y.Z` for the tag you want.
+2. Read [CHANGELOG.md](../CHANGELOG.md) for every version between the one you
+   were on and the one you are moving to. otsh is `0.MINOR.PATCH`: a **minor**
+   may break you, a **patch** may not. Anything needing more than a paragraph
+   gets a section in [migrating.md](./migrating.md).
+3. Rebuild your app. There is no separate otsh build step. Compile errors are
+   the whole of the mechanical risk — if it compiles, no API you used has
+   changed shape.
+4. Run your own tests, then restart the service.
+
+Behaviour changes are the part a compiler cannot catch for you, which is why
+the changelog spells them out. 0.3.0 is the current example: the default bind
+address changed, so a server that never set `Config.host` began answering IPv6
+clients as well as IPv4. Nothing about that fails to compile — it is a
+deployment fact, and it matters if a firewall or ban action in front of your
+process only knows about IPv4.
+
+Restarting is safe to do under load. `serve` handles `SIGTERM`, so a
+`systemctl restart` stops accepting, tells each connected session its input has
+finished, lets every app restore its client's terminal, and exits — measured at
+about half a second with sessions attached. See "Shutdown" in
+[ssh.md](./ssh.md).
+
 ## First-run artifacts
 
 The first time an app runs, `sshtui.serve` (via `ssh.serve` /
