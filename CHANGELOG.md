@@ -32,6 +32,8 @@ describes how one is made.
 
 ## Unreleased
 
+## 0.3.0 — 2026-08-06
+
 ### Changed
 
 - **`ssh.DEFAULT_HOST` is now `"::"`, not `"0.0.0.0"`.** A server that does not
@@ -78,6 +80,37 @@ describes how one is made.
 ### Added
 
 - `ssh.DEFAULT_HOST_IPV4` — the IPv4 wildcard the default bind falls back to.
+
+### Documentation
+
+- A **from-zero concepts page** (`docs/concepts.md`): what a terminal is, what
+  ANSI escapes are, raw mode, the SSH channel, why answering `pty-req` without
+  allocating a pty works, and the update/view model. Somebody who has never
+  written a TUI can start there.
+- Two more tutorials — a first app in ten minutes (`docs/tutorial-first-app.md`)
+  and a persistent per-user notes app (`docs/tutorial-notes.md`), the latter
+  shipping as `examples/notes`. Four tutorials now, each ending in something
+  that runs.
+- **IDE-style code view on the docs site.** Hovering, focusing or tapping a
+  known symbol in any code block shows its signature, doc summary and package;
+  clicking navigates to its reference entry; symbols from Odin's standard
+  library link to `pkg.odin-lang.org`. Generated source pages carry per-line
+  anchors, so every `tui/screen.odin:356` is a working go-to-definition link.
+  Only identifiers that resolve with certainty are linked — 86% of tokens are
+  deliberately left plain, because a wrong tooltip is worse than none.
+- `docs/bindings.md` (maintaining the C interop layer), `docs/compatibility.md`
+  (the measured Odin and libssh support matrix), `docs/releasing.md`,
+  `docs/migrating.md`, and a `deploy/` guide verified against a live systemd,
+  journald, fail2ban and nftables stack.
+- Two new gates, because documentation here is cited as evidence:
+  `docs/tools/check_examples.py` requires every fenced Odin block to compile,
+  match verbatim the file it cites, or carry a written reason for being
+  skipped (201 blocks, 0 unannotated); `docs/tools/gen_symbols.py --check`
+  verifies every symbol link on every page resolves. Both run in `check.sh`.
+- The site publishes to GitHub Pages from a workflow, and a terminfo-pushing
+  terminal (Ghostty's `ssh-terminfo`) making connections feel slow is
+  explained in `docs/getting-started.md` — otsh refuses `exec`, so the install
+  can never succeed and is retried forever unless the host is cached.
 
 ## 0.2.0 — 2026-08-01
 

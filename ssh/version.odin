@@ -42,7 +42,7 @@ package ssh
 //
 //	#assert(ssh.VERSION_MAJOR == 0 && ssh.VERSION_MINOR >= 1)
 VERSION_MAJOR :: 0
-VERSION_MINOR :: 2
+VERSION_MINOR :: 3
 VERSION_PATCH :: 0
 
 // The same version as a string, for banners and log lines: "0.2.0".
@@ -51,4 +51,4 @@ VERSION_PATCH :: 0
 // has no compile-time integer-to-string. tests/version_test.odin asserts the two
 // spellings agree, since a bumped triple beside a stale string is exactly the
 // mistake a release makes.
-VERSION :: "0.2.0"
+VERSION :: "0.3.0"

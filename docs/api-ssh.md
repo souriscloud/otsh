@@ -681,7 +681,7 @@ Length of the identity secret, in bytes.
 ### `VERSION`
 
 ```odin
-VERSION :: "0.2.0"
+VERSION :: "0.3.0"
 ```
 
 The same version as a string, for banners and log lines: "0.2.0".
@@ -713,7 +713,7 @@ Example:
 ### `VERSION_MINOR`
 
 ```odin
-VERSION_MINOR :: 2
+VERSION_MINOR :: 3
 ```
 
 *[ssh/version.odin:45](../ssh/version.odin#L45)*
