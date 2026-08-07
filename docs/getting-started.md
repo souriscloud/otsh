@@ -935,3 +935,7 @@ would lose correct terminfo on every ordinary server you ssh into.
 - [`./architecture.md`](./architecture.md) — internals: threading model, the
   diff renderer, the blocking/polling strategy.
 - [`./cookbook.md`](./cookbook.md) — recipes for common app patterns.
+- [`./static-linking.md`](./static-linking.md) — shipping a binary to a machine
+  that has no libssh installed, or into a scratch container: what each platform
+  can and cannot do, `otsh build --static`, and why a statically linked libssh
+  makes the next libssh CVE your redeploy.

@@ -410,13 +410,9 @@ allocated memory, bind its matching deallocator in the same change.**
 
 <!-- check:verbatim libssh/libssh.odin -->
 ```odin
-when ODIN_OS == .Darwin || ODIN_OS == .Linux || ODIN_OS == .FreeBSD {
-	foreign import lib "system:ssh"
-} else when ODIN_OS == .Windows {
-	foreign import lib "system:ssh.lib"
-} else {
-	#panic("libssh bindings support unix-likes and Windows")
-}
+LIB :: #config(OTSH_LIBSSH, "system:ssh.lib" when ODIN_OS == .Windows else "system:ssh")
+
+foreign import lib {LIB}
 ```
 
 `system:` means "ask the platform linker for this", so the linker still needs
@@ -424,6 +420,13 @@ the directory. `build.sh` supplies it — with `-L$LIBDIR -Wl,-rpath,$LIBDIR` on
 unix-likes and `/LIBPATH:$LIBDIR` for MSVC, where `$LIBDIR` comes from
 `pkg-config --variable=libdir libssh` or the vcpkg install root. There is no
 rpath on Windows, so `ssh.dll` must also be on `%PATH%` at run time.
+
+The library is named through a constant rather than written into the
+`foreign import` directly so that a `-define` can replace it — pointing it at
+a `libssh.a` is what produces a binary with no libssh dependency. The braced
+form is required for that: `foreign import` takes a string *literal*, so
+`foreign import lib LIB` is a syntax error, and only `foreign import lib {LIB}`
+accepts a compile-time constant. See [Static linking](static-linking.md).
 
 One trap here has already bitten, and it is the reason the symbol check exists.
 `callbacks.h` declares `ssh_threads_get_pthread` on every platform, but
