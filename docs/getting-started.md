@@ -115,9 +115,14 @@ ssh -p 2222 localhost
 Put it on your `$PATH` once and stop typing the path to the checkout:
 
 ```sh
-mkdir -p ~/.local/bin
-ln -s "$PWD/otsh/otsh" ~/.local/bin/otsh     # or /usr/local/bin/otsh
+otsh/otsh install          # symlinks itself somewhere on your $PATH
 ```
+
+It picks a directory already on your `$PATH` if there is a writable one, and
+otherwise `~/.local/bin`, telling you the exact line to add for your shell —
+`fish_add_path` for fish, a `PATH` export for bash and zsh. `otsh install
+--uninstall` removes it. It refuses to overwrite anything that is not its own
+symlink.
 
 **Symlink it — do not copy it.** The script resolves its own real location
 through the symlink and points `-collection:otsh=` at the checkout it finds

@@ -218,6 +218,7 @@ usage: otsh <command> [arguments]
   test [dir] [flags]     run a package's tests (default: otsh's own suite)
   flags                  print the -collection: and -extra-linker-flags:
                          values, for a Makefile, justfile or IDE
+  install                put `otsh` on your $PATH (or --uninstall)
   use-odin [path]        record where your Odin compiler lives (or --unset)
   doctor                 check odin, libssh and clang
   version                version and checkout of this otsh
@@ -237,6 +238,66 @@ because this checkout is what your app compiles against:
 
 docs: $OTSH/docs/getting-started.md
 EOF
+}
+
+# Put `otsh` on $PATH, so the checkout stops being something you have to type.
+#
+# A symlink, never a copy: the script locates the collection relative to its own
+# real path, so a copy sitting in ~/.local/bin has no ssh/ or tui/ beside it and
+# nothing builds. `install` is the one chore left after `git clone`, and it can
+# at least do itself.
+cmd_install() {
+	local target dir want_uninstall="" shell_hint
+	case "${1:-}" in
+	--uninstall) want_uninstall=yes ;;
+	"") ;;
+	*) die "usage: $PROG install [--uninstall]" ;;
+	esac
+
+	# Prefer somewhere already on $PATH; fall back to the XDG-ish default,
+	# which is where a user-level binary belongs even if $PATH lags behind.
+	dir=""
+	for d in "${XDG_BIN_HOME:-}" "$HOME/.local/bin" "$HOME/bin" /usr/local/bin; do
+		[ -n "$d" ] || continue
+		case ":$PATH:" in *":$d:"*) [ -d "$d" ] && [ -w "$d" ] && dir="$d" && break ;; esac
+	done
+	[ -n "$dir" ] || dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
+	target="$dir/otsh"
+
+	if [ -n "$want_uninstall" ]; then
+		if [ -L "$target" ]; then
+			rm -f "$target"
+			printf '%s: removed %s\n' "$PROG" "$target"
+		else
+			printf '%s: nothing to remove at %s\n' "$PROG" "$target"
+		fi
+		return 0
+	fi
+
+	# Refuse to clobber something that is not ours rather than silently
+	# replacing a real file somebody put there.
+	if [ -e "$target" ] && [ ! -L "$target" ]; then
+		die "$target exists and is not a symlink; move it aside first"
+	fi
+
+	mkdir -p "$dir" || die "cannot create $dir"
+	ln -sf "$OTSH/otsh" "$target" || die "cannot write $target"
+	printf '%s: %s -> %s\n' "$PROG" "$target" "$OTSH/otsh"
+
+	case ":$PATH:" in
+	*":$dir:"*)
+		printf '\nready — `otsh doctor` from anywhere.\n'
+		;;
+	*)
+		case "${SHELL##*/}" in
+		fish) shell_hint="fish_add_path $dir" ;;
+		zsh) shell_hint="echo 'export PATH=\"$dir:\$PATH\"' >> ~/.zshrc" ;;
+		*) shell_hint="echo 'export PATH=\"$dir:\$PATH\"' >> ~/.bashrc" ;;
+		esac
+		printf '\n%s is not on your $PATH yet. Add it:\n  %s\n' "$dir" "$shell_hint"
+		printf 'then open a new shell, or run it now with:\n  %s doctor\n' "$target"
+		;;
+	esac
 }
 
 cmd_version() {
@@ -850,6 +911,7 @@ build) cmd_build "$@" ;;
 run) cmd_run "$@" ;;
 test) cmd_test "$@" ;;
 flags) cmd_flags "$@" ;;
+install) cmd_install "$@" ;;
 use-odin | use_odin) cmd_use_odin "$@" ;;
 doctor) cmd_doctor "$@" ;;
 version | --version | -v) cmd_version "$@" ;;
