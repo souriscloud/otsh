@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # otsh — one command for starting, building and running SSH-served TUIs.
 #
 #   otsh new ~/src/myapp      scaffold a project that builds and serves as-is
@@ -7,368 +7,294 @@
 #   otsh flags                print the two flags, for your own build system
 #   otsh doctor               check the three things that actually go wrong
 #
+# The tool itself is an Odin program in cmd/otsh — it used to be ~900 lines of
+# bash, which did not run at all on a stock Alpine, on FreeBSD, or on any
+# Linux stripped to essentials, and macOS's /bin/bash is a 3.2 whose heredoc
+# parsing already cost this project one real bug. This file is only the
+# bootstrap: it builds cmd/otsh into bin/ on first use (and again when its
+# sources change) and execs it. After that first build it is a two-stat
+# detour on the way to the real tool.
+#
+# /bin/sh, not bash, and strictly POSIX: the whole point of the rewrite is
+# machines where bash does not exist, so the bootstrap must not smuggle the
+# dependency back in. Everything portable-sh cannot do lives in cmd/otsh.
+#
+# Building the tool needs the Odin compiler — which is fine, because so does
+# everything else here: otsh's one job is driving that compiler at a source
+# collection. The one honest gap is the machine that has no Odin yet, whose
+# owner runs `otsh doctor` to find out what is missing. For exactly that case
+# the tail of this file carries a portable-sh copy of doctor's checklist (and
+# of help and version), so the answer is the same checklist it always was,
+# not a shell error. Keep it in step with cmd/otsh/doctor.odin — change one,
+# change the other.
+#
 # Install it by putting a symlink on your PATH — this file stays in the
 # checkout, because the checkout is what your app compiles against:
 #
 #   ln -s "$PWD/otsh" ~/.local/bin/otsh
 #
 # so it resolves its own real location through that symlink rather than
-# trusting $0. Nothing is installed anywhere else, and nothing here changes
-# how otsh is distributed: -collection:otsh= still points at a source tree, so
-# the version your app uses is still whatever commit this checkout is on. See
-# "Pinning and upgrading otsh" in docs/getting-started.md.
-#
-# build.sh and test.sh are thin wrappers around `otsh build` / `otsh test`;
-# this file is the one place the compiler and libssh get located.
-set -euo pipefail
+# trusting $0 blindly. Nothing is installed anywhere else, and nothing here
+# changes how otsh is distributed: -collection:otsh= still points at a source
+# tree, so the version your app uses is still whatever commit this checkout
+# is on. Prebuilt binaries from the GitHub releases are the same tool
+# compiled for you: drop one into bin/ under its release name —
+# bin/otsh-linux-amd64, say — and this file execs it without ever building.
+set -eu
 
 # --- where am I ---------------------------------------------------------------
-# Not $0: the supported install is a symlink on $PATH, and -collection:otsh=
-# has to name the checkout it points at, not ~/.local/bin. Walk the chain by
-# hand rather than with `readlink -f`, which is a GNU extension that macOS did
-# not carry for most of its life and that Git Bash inherits from MSYS.
-self="${BASH_SOURCE[0]}"
+# Walk the symlink chain by hand rather than with `readlink -f`, which is a
+# GNU extension that macOS did not carry for most of its life and that Git
+# Bash inherits from MSYS. Plain `readlink` is everywhere, busybox included.
+self="$0"
 while [ -L "$self" ]; do
-	self_dir="$(cd -P "$(dirname "$self")" && pwd)"
+	self_dir="$(CDPATH='' cd -P "$(dirname "$self")" && pwd)"
 	link="$(readlink "$self")"
 	case "$link" in
 	/*) self="$link" ;;
 	*) self="$self_dir/$link" ;;
 	esac
 done
-OTSH="$(cd -P "$(dirname "$self")" && pwd)"
+OTSH="$(CDPATH='' cd -P "$(dirname "$self")" && pwd)"
 
 # build.sh and test.sh set this so their diagnostics still say "build.sh:"
 # rather than pointing at a wrapper the caller never invoked.
 PROG="${OTSH_PROG:-otsh}"
 
-UNAME="$(uname -s)"
+# The tool is named per OS and architecture — bin/otsh-linux-arm64, not
+# bin/otsh — because one checkout is often seen by two machines at once: a
+# worktree bind-mounted into a container builds its Linux tool beside the
+# host's macOS one instead of exec-ing it and dying on "exec format error".
+# The names match the GitHub release artifacts on purpose, so a downloaded
+# binary drops into bin/ as-is and this file execs it without ever building.
+EXE=
+case "$(uname -s)" in
+Darwin) TOOL_OS=darwin ;;
+Linux) TOOL_OS=linux ;;
+FreeBSD) TOOL_OS=freebsd ;;
+MINGW* | MSYS* | CYGWIN*)
+	TOOL_OS=windows
+	EXE=.exe
+	;;
+*) TOOL_OS="$(uname -s | tr 'A-Z' 'a-z')" ;;
+esac
+case "$(uname -m)" in
+arm64 | aarch64) TOOL_ARCH=arm64 ;;
+x86_64 | amd64) TOOL_ARCH=amd64 ;;
+*) TOOL_ARCH="$(uname -m)" ;;
+esac
+TOOL="$OTSH/bin/otsh-$TOOL_OS-$TOOL_ARCH$EXE"
 
-die() {
-	printf '%s: %s\n' "$PROG" "$1" >&2
-	shift
-	for line in "$@"; do printf '  %s\n' "$line" >&2; done
-	exit 1
+# --- the fast path ------------------------------------------------------------
+# A built tool that is newer than every file in cmd/otsh runs as-is. `find
+# -newer` is POSIX and busybox has it; a missing bin/ just means building.
+if [ -x "$TOOL" ] && [ -z "$(find "$OTSH/cmd/otsh" -type f -newer "$TOOL" 2>/dev/null)" ]; then
+	exec "$TOOL" "$@"
+fi
+
+# --- find the compiler --------------------------------------------------------
+# The same resolution order cmd/otsh itself uses, so the tool the bootstrap
+# builds is built by the compiler the tool would have chosen:
+#   $ODIN, then .odin-path in this checkout, then the use-odin config file,
+#   then $PATH, then the places Odin actually ends up when built from source.
+# Each file is only taken when what it names actually resolves.
+home="${HOME:-/nonexistent}"
+ODIN_CONF="${XDG_CONFIG_HOME:-$home/.config}/otsh/odin-path"
+
+odin="${ODIN:-}"
+if [ -z "$odin" ]; then
+	for f in "$OTSH/.odin-path" "$ODIN_CONF"; do
+		[ -f "$f" ] || continue
+		p="$(cat "$f")"
+		if command -v "$p" >/dev/null 2>&1; then
+			odin="$p"
+			break
+		fi
+	done
+fi
+if [ -z "$odin" ] && command -v odin >/dev/null 2>&1; then
+	odin=odin
+fi
+if [ -z "$odin" ]; then
+	for p in "${ODIN_ROOT:-}/odin" \
+		"$home/odin/odin" "$home/.odin/odin" \
+		"$home/src/Odin/odin" "$home/src/odin/odin" \
+		"$home/Odin/odin" "$home/dev/Odin/odin" \
+		/usr/local/odin/odin /opt/odin/odin /opt/Odin/odin; do
+		case "$p" in /odin) continue ;; esac
+		if [ -x "$p" ] && "$p" version >/dev/null 2>&1; then
+			odin="$p"
+			break
+		fi
+	done
+fi
+
+# What require_odin would report having tried: an explicit $ODIN even when it
+# resolves to nothing, `odin` otherwise.
+tried="${odin:-${ODIN:-odin}}"
+
+if [ -n "$odin" ] && command -v "$odin" >/dev/null 2>&1; then
+	# First run, or cmd/otsh changed under the built tool. Compiler errors go
+	# straight to the caller — swallowing them would turn a broken tree into
+	# "otsh stopped working" with no evidence.
+	echo "$PROG: building the otsh tool (cmd/otsh -> bin/otsh-$TOOL_OS-$TOOL_ARCH$EXE)..." >&2
+	mkdir -p "$OTSH/bin"
+	"$odin" build "$OTSH/cmd/otsh" -out:"$TOOL"
+	exec "$TOOL" "$@"
+fi
+
+# --- no compiler anywhere -----------------------------------------------------
+# The tool cannot be built, so the read-only commands are answered here, in
+# portable sh, and everything else gets the same message `otsh build` gives.
+# This tail exists for one reader: the person on a fresh machine asking
+# doctor what is missing. Its output must match cmd/otsh — the golden battery
+# in the commit that introduced it diffed the two.
+
+sh_otsh_version() {
+	[ -f "$OTSH/ssh/version.odin" ] || {
+		printf '(unknown)'
+		return
+	}
+	awk -F'"' '/^VERSION ::/ {print $2; exit}' "$OTSH/ssh/version.odin"
 }
 
-# --- toolchain ----------------------------------------------------------------
-
-# Where a user-level compiler path lives. This is the one a *consumer* of otsh
-# should use: the checkout is a dependency, and configuration does not belong
-# inside a dependency — pin a second version, or re-clone, and an .odin-path
-# written in there is gone. `otsh use-odin` writes this file.
-ODIN_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/otsh/odin-path"
-
-# Compiler resolution, most specific first:
-#   $ODIN                     this invocation only
-#   $OTSH/.odin-path          this checkout (gitignored; for otsh's own devs)
-#   $ODIN_CONF                this user, every checkout and project
-#   odin                      $PATH
-# Each file is only taken when what it names actually resolves. One checkout
-# can be seen by two machines at once — a container with the worktree bind
-# mounted in, for instance — and a path written on the other one must not
-# shadow a perfectly good `odin` on this one's $PATH.
-resolve_odin() {
-	local odin_path f
-	if [ -z "${ODIN:-}" ]; then
-		for f in "$OTSH/.odin-path" "$ODIN_CONF"; do
-			[ -f "$f" ] || continue
-			odin_path="$(cat "$f")"
-			if command -v "$odin_path" >/dev/null; then
-				ODIN="$odin_path"
-				break
-			fi
-		done
-	fi
-	# Nothing configured and nothing on $PATH: look where Odin actually ends
-	# up when people build it from source or unpack a nightly. Getting this
-	# right is the difference between "it just worked" and a first run that
-	# stops to ask a question the tool could have answered itself. Explicit
-	# settings above always win; this only ever fires as a last resort.
-	if [ -z "${ODIN:-}" ] && ! command -v odin >/dev/null; then
-		for odin_path in \
-			"${ODIN_ROOT:-}/odin" \
-			"$HOME/odin/odin" "$HOME/.odin/odin" \
-			"$HOME/src/Odin/odin" "$HOME/src/odin/odin" \
-			"$HOME/Odin/odin" "$HOME/dev/Odin/odin" \
-			/usr/local/odin/odin /opt/odin/odin /opt/Odin/odin; do
-			case "$odin_path" in /odin) continue ;; esac
-			if [ -x "$odin_path" ] && "$odin_path" version >/dev/null 2>&1; then
-				ODIN="$odin_path"
-				ODIN_FOUND_AT="$odin_path"
-				break
-			fi
-		done
-	fi
-	ODIN="${ODIN:-odin}"
-}
-
-require_odin() {
-	resolve_odin
-	if ! command -v "$ODIN" >/dev/null; then
-		die "odin compiler not found (tried '$ODIN')." \
-			"Install it from https://odin-lang.org, or if you have it somewhere" \
-			"custom, record that once for every project:" \
-			"    $PROG use-odin /path/to/odin" \
-			"For a single command, ODIN=/path/to/odin $PROG ... also works."
-	fi
-}
-
-# libssh is not on the default linker search path on macOS/Homebrew, and on
-# Windows it is not on any path at all. Sets LIBDIR and LDFLAGS.
-resolve_libssh() {
-	case "$UNAME" in
+# Sets LIBDIR, exactly as cmd/otsh's resolve_libssh does.
+sh_resolve_libssh() {
+	case "$(uname -s)" in
 	MINGW* | MSYS* | CYGWIN*)
-		# This branch exists so CI and Git Bash on Windows can run the same
-		# script. It built every package and all five examples by hand on
-		# Windows 11 with vcpkg libssh 0.12.0 on 2026-07-31; the hosted CI
-		# windows job has since run green once. vcpkg is the expected libssh
-		# provider on Windows, and the MSVC linker spells a library search path
-		# /LIBPATH:, not -L. There is no rpath equivalent — ssh.dll has to be on
-		# %PATH% at run time.
-		VCPKG="${VCPKG_ROOT:-${VCPKG_INSTALLATION_ROOT:-C:/vcpkg}}"
-		LIBDIR="${VCPKG}/installed/x64-windows/lib"
-		LDFLAGS="/LIBPATH:${LIBDIR}"
+		LIBDIR="${VCPKG_ROOT:-${VCPKG_INSTALLATION_ROOT:-C:/vcpkg}}/installed/x64-windows/lib"
 		;;
 	*)
-		if command -v pkg-config >/dev/null && pkg-config --exists libssh; then
+		if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists libssh; then
 			LIBDIR="$(pkg-config --variable=libdir libssh)"
 		elif [ -d /opt/homebrew/opt/libssh/lib ]; then
 			LIBDIR="/opt/homebrew/opt/libssh/lib"
 		else
 			LIBDIR="/usr/local/lib"
 		fi
-		LDFLAGS="-L${LIBDIR} -Wl,-rpath,${LIBDIR}"
 		;;
 	esac
 }
 
-# --- static linking -----------------------------------------------------------
-#
-# Two modes, because the platforms genuinely differ and pretending otherwise
-# would ship a flag that fails confusingly on one of them:
-#
-#   --static        libssh and its crypto/compression dependencies come from
-#                   archives; the platform C library stays dynamic. Works on
-#                   macOS and Linux. On macOS this is the most that exists.
-#   --fully-static  the above plus `-static`: no dynamic dependencies at all.
-#                   Linux only.
-#
-# The mechanism is libssh/libssh.odin's OTSH_LIBSSH define. `-lssh` resolves to
-# the shared library before an archive on every linker tested, so adding
-# libssh.a to the command line does nothing while the `-l` is still there; the
-# define replaces the `-l` with the archive's own path. See the comment on LIB
-# in libssh/libssh.odin and docs/static-linking.md.
-#
-# Everything below is a search for archives that a package manager may or may
-# not have installed. It reports what is missing rather than handing the linker
-# a half-built command line, because the linker's version of "you are missing
-# libcrypto.a" is four hundred lines of undefined BN_* symbols.
-
-# Directories worth searching for an archive, most specific first.
-static_search_dirs() {
-	local m d
-	printf '%s\n' "$LIBDIR"
-	if command -v pkg-config >/dev/null; then
-		for m in libcrypto zlib libzstd; do
-			pkg-config --exists "$m" 2>/dev/null && pkg-config --variable=libdir "$m"
-		done
+sh_libssh_version() {
+	if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists libssh; then
+		pkg-config --modversion libssh
+		return 0
 	fi
-	# Homebrew keeps OpenSSL outside its main prefix on purpose — macOS ships
-	# its own ancient libcrypto in /usr/lib and Homebrew will not shadow it —
-	# so the keg has to be named separately.
-	printf '%s\n' \
-		/opt/homebrew/opt/openssl@3/lib /usr/local/opt/openssl@3/lib \
-		/opt/homebrew/lib /usr/local/lib
-	# Debian/Ubuntu multiarch, then the usual suspects.
-	for d in /usr/lib/*-linux-gnu* /usr/lib64 /usr/lib; do
-		[ -d "$d" ] && printf '%s\n' "$d"
-	done
-}
-
-# Absolute path of lib<name>.a if one exists, nothing otherwise.
-find_archive() {
-	local d
-	while IFS= read -r d; do
-		if [ -f "$d/lib$1.a" ]; then
-			printf '%s\n' "$d/lib$1.a"
+	for inc in \
+		"${LIBDIR%/lib}/include" \
+		/opt/homebrew/opt/libssh/include \
+		/usr/local/opt/libssh/include \
+		/opt/homebrew/include \
+		/usr/local/include \
+		/usr/include \
+		/opt/local/include; do
+		h="$inc/libssh/libssh_version.h"
+		if [ -f "$h" ]; then
+			awk '/^#define LIBSSH_VERSION_MAJOR/ {maj=$3}
+			     /^#define LIBSSH_VERSION_MINOR/ {min=$3}
+			     /^#define LIBSSH_VERSION_MICRO/ {mic=$3}
+			     END {if (maj != "") printf "%s.%s.%s\n", maj, min, mic}' "$h"
 			return 0
 		fi
-	done <<EOF
-$(static_search_dirs)
-EOF
+	done
 	return 1
 }
 
-# Sets LIBSSH_A and STATIC_LIBS. $1 non-empty means --fully-static.
-resolve_libssh_static() {
-	local want_full="${1:-}" a tok
-
-	resolve_libssh
-
-	case "$UNAME" in
-	MINGW* | MSYS* | CYGWIN*)
-		die "static linking is not supported on Windows." \
-			"vcpkg's libssh:x64-windows triplet is a DLL plus an import library;" \
-			"there is no libssh.lib to link. x64-windows-static builds one, but" \
-			"otsh has never been tested against it — see docs/static-linking.md."
-		;;
-	esac
-
-	if [ -n "$want_full" ] && [ "$UNAME" = Darwin ]; then
-		die "macOS cannot link a fully static executable." \
-			"Apple ships no static libSystem or libc.a — the SDK has neither, and" \
-			"clang stops at \`ld: library 'crt0.o' not found\`. Statically linked" \
-			"binaries are unsupported on Darwin and have been for many releases." \
-			"Use --static instead: it removes the libssh, libcrypto and Kerberos" \
-			"dependencies and leaves only libSystem, which every mac already has."
-	fi
-
-	LIBSSH_A="$LIBDIR/libssh.a"
-	if [ ! -f "$LIBSSH_A" ]; then
-		die "no libssh.a in $LIBDIR — nothing to link statically." \
-			"That directory has the shared library otsh normally links against," \
-			"but no archive beside it. Some distributions ship one and some do not:" \
-			"  brew install libssh              # macOS: ships libssh.a" \
-			"  apt install libssh-dev           # Debian/Ubuntu: ships libssh.a" \
-			"  Alpine's libssh-dev ships only libssh.so — build libssh yourself" \
-			"See docs/static-linking.md for building libssh as an archive."
-	fi
-
-	# libssh cannot do anything without a crypto backend.
-	if ! a="$(find_archive crypto)"; then
-		die "found libssh.a but no libcrypto.a to go with it." \
-			"libssh's crypto backend is OpenSSL on every platform otsh is built on." \
-			"  brew install openssl@3           # macOS" \
-			"  apt install libssl-dev           # Debian/Ubuntu" \
-			"  apk add openssl-libs-static      # Alpine"
-	fi
-	STATIC_LIBS="$a"
-
-	# zlib. Linux distributions ship libz.a; macOS ships only the dylib (the
-	# SDK has libz.tbd stubs and no archive at all), so there it stays dynamic
-	# — which is harmless, because libz is part of the OS.
-	if a="$(find_archive z)"; then
-		STATIC_LIBS="$STATIC_LIBS $a"
-	else
-		STATIC_LIBS="$STATIC_LIBS -lz"
-	fi
-
-	# Whatever else this OpenSSL was built against. libssh's own .pc file
-	# declares no static dependencies whatsoever — `pkg-config --static --libs
-	# libssh` prints just `-lssh` on Homebrew 0.12.2 and Debian 0.11.5 alike —
-	# but libcrypto's does, and on Debian it names zstd, without which the link
-	# dies on ZSTD_decompressStream. Each -l becomes an archive where one
-	# exists, because passing `-lfoo` next to libfoo.a still records a
-	# dependency on the shared object and produces a "static" binary that is
-	# nothing of the sort.
-	if command -v pkg-config >/dev/null && pkg-config --exists libcrypto; then
-		for tok in $(pkg-config --static --libs libcrypto); do
-			case "$tok" in
-			-lcrypto | -lz | -L*) ;; # already placed above
-			-l*)
-				if a="$(find_archive "${tok#-l}")"; then
-					STATIC_LIBS="$STATIC_LIBS $a"
-				else
-					STATIC_LIBS="$STATIC_LIBS $tok"
-				fi
-				;;
-			*) STATIC_LIBS="$STATIC_LIBS $tok" ;; # -pthread and friends
-			esac
-		done
-	fi
-
-	# GSSAPI. Whether libssh.a needs Kerberos is a property of how it was
-	# built, not of the platform: Debian builds it with GSSAPI on, Alpine has
-	# no packaged archive at all, and a source build defaults to on wherever
-	# krb5 headers were present. Ask the archive rather than guessing.
-	if nm -u "$LIBSSH_A" 2>/dev/null | grep -q 'gss_acquire_cred'; then
-		if [ "$UNAME" = Darwin ]; then
-			STATIC_LIBS="$STATIC_LIBS -framework Kerberos"
-		elif a="$(find_archive gssapi_krb5)"; then
-			STATIC_LIBS="$STATIC_LIBS $a"
-		elif [ -n "$want_full" ]; then
-			die "$LIBSSH_A was built with GSSAPI, and there is no libgssapi_krb5.a to link." \
-				"MIT Kerberos ships no static libraries on Debian or Ubuntu —" \
-				"libkrb5-dev contains not one .a file — so a GSSAPI-enabled" \
-				"libssh.a cannot go into a fully static binary at all." \
-				"Either use --static, which links krb5 dynamically and still" \
-				"drops the libssh dependency, or build libssh yourself with" \
-				"-DWITH_GSSAPI=OFF. docs/static-linking.md has the cmake line."
-		else
-			STATIC_LIBS="$STATIC_LIBS -lgssapi_krb5"
-		fi
-	fi
-
-	if [ -n "$want_full" ]; then
-		STATIC_LIBS="$STATIC_LIBS -static"
-	fi
-}
-
-# Odin refuses an -out: without a recognised extension on Windows:
-#   Output path C:/otsh-ci/otsh/tracker must have an appropriate extension.
-# A directory's basename is extensionless, so add the one Windows wants.
-exe_suffix() {
-	case "$UNAME" in
-	MINGW* | MSYS* | CYGWIN*) printf '.exe' ;;
-	esac
-}
-
-# The version of this checkout, read off the source of truth rather than
-# repeated here: ssh/version.odin is what an app's #assert compares against.
-# Absent only when this file has been copied out of its checkout, which is the
-# one thing it must not be — say so rather than printing an awk error.
-otsh_version() {
-	[ -f "$OTSH/ssh/version.odin" ] || { printf '(unknown)'; return; }
-	awk -F'"' '/^VERSION ::/ {print $2; exit}' "$OTSH/ssh/version.odin"
-}
-otsh_version_minor() {
-	[ -f "$OTSH/ssh/version.odin" ] || { printf '0'; return; }
-	awk '/^VERSION_MINOR ::/ {print $3; exit}' "$OTSH/ssh/version.odin"
-}
-
-# --- shared argument handling -------------------------------------------------
-#
-# Every Odin flag is a single `-flag` or `-flag:value` token, so a bare word is
-# unambiguously the package directory. That is what lets `otsh build ~/app
-# -o:speed` and `otsh test -define:X` both do the obvious thing.
-#
-# Sets SRC (empty if none given) and ODIN_ARGS.
-split_args() {
-	local arg
-	SRC=""
-	ODIN_ARGS=()
-	for arg in "$@"; do
-		case "$arg" in
-		-*) ODIN_ARGS+=("$arg") ;;
-		*)
-			if [ -z "$SRC" ]; then SRC="$arg"; else ODIN_ARGS+=("$arg"); fi
-			;;
-		esac
+sh_libssh_lib_present() {
+	for f in "$LIBDIR"/libssh.so* "$LIBDIR"/libssh.dylib "$LIBDIR"/libssh.a "$LIBDIR"/ssh.lib; do
+		if [ -e "$f" ]; then return 0; fi
 	done
+	return 1
 }
 
-# A directory with no .odin file in it is the mistake worth naming: a typo in a
-# path, or a project that was never scaffolded.
-require_package() {
-	local dir="$1"
-	if [ ! -d "$dir" ]; then
-		die "no such directory: $dir" \
-			"otsh new $dir   creates a project there"
+# $1 >= $2, both dotted numeric. Positional parameters are function-local in
+# POSIX sh, so `set --` here clobbers nothing outside.
+sh_version_ge() {
+	va="$(printf '%s' "$1" | sed 's/[^0-9.].*//')"
+	vb="$(printf '%s' "$2" | sed 's/[^0-9.].*//')"
+	oldIFS="${IFS-}"
+	IFS=.
+	set -- $va
+	a1="${1:-0}" a2="${2:-0}" a3="${3:-0}"
+	set -- $vb
+	b1="${1:-0}" b2="${2:-0}" b3="${3:-0}"
+	IFS="$oldIFS"
+	[ $((a1 * 10000 + a2 * 100 + a3)) -ge $((b1 * 10000 + b2 * 100 + b3)) ]
+}
+
+sh_doctor() {
+	printf 'otsh doctor — %s\n\n' "$OTSH"
+	fails=1 # odin, or this code would not be running
+	warns=0
+
+	printf '  FAIL  %-9s %s\n' odin "not found (tried '$tried')"
+	printf '        %-9s %s\n' "" "install from https://odin-lang.org, or if it lives somewhere"
+	printf '        %-9s %s\n' "" "custom: $PROG use-odin /path/to/odin"
+
+	sh_resolve_libssh
+	ver="$(sh_libssh_version || true)"
+	if [ -n "$ver" ] && ! sh_version_ge "$ver" 0.10.6; then
+		printf '  FAIL  %-9s %s\n' libssh "$ver is below the 0.10.6 floor — ssh.serve will refuse to start"
+		printf '        %-9s %s\n' "" "0.10.6 carries the fix for CVE-2023-48795 (Terrapin)."
+		fails=$((fails + 1))
+	elif ! sh_libssh_lib_present; then
+		if [ -n "$ver" ]; then
+			printf '  warn  %-9s %s\n' libssh "headers say $ver, but there is no libssh in $LIBDIR"
+			printf '        %-9s %s\n' "" "that is the path otsh passes to the linker — install pkg-config so it is found properly"
+			warns=$((warns + 1))
+		else
+			printf '  FAIL  %-9s %s\n' libssh "not found (looked in $LIBDIR)"
+			printf '        %-9s %s\n' "" "brew install libssh pkg-config     # macOS"
+			printf '        %-9s %s\n' "" "apt install libssh-dev pkg-config  # Debian/Ubuntu"
+			printf '        %-9s %s\n' "" "vcpkg install libssh:x64-windows   # Windows"
+			fails=$((fails + 1))
+		fi
+	elif [ -n "$ver" ]; then
+		printf '  ok    %-9s %s\n' libssh "$ver  (>= 0.10.6)  $LIBDIR"
+	else
+		printf '  warn  %-9s %s\n' libssh "$LIBDIR has the library but no version to check"
+		printf '        %-9s %s\n' "" "install pkg-config or the libssh headers; the 0.10.6 floor is enforced at run time regardless"
+		warns=$((warns + 1))
 	fi
-	# `ls` rather than a glob: a non-matching glob under `set -u` is noisier
-	# than it is worth, and this needs no sorting or recursion.
-	if ! ls "$dir"/*.odin >/dev/null 2>&1; then
-		die "$dir has no .odin files — not an Odin package." \
-			"otsh new <dir>   creates one that builds and serves as-is"
+
+	if command -v clang >/dev/null 2>&1; then
+		printf '  ok    %-9s %s\n' clang "$(command -v clang)"
+	elif [ "$(uname -s)" = Linux ]; then
+		printf '  FAIL  %-9s %s\n' clang "not found — Odin links with it on Linux"
+		printf '        %-9s %s\n' "" "apt install clang  (build-essential is not a substitute)"
+		fails=$((fails + 1))
+	else
+		printf '  --    %-9s %s\n' clang "not found — not required on $(uname -s)"
+	fi
+
+	missing=""
+	for pkg in libssh ssh tui sshtui; do
+		[ -d "$OTSH/$pkg" ] || missing="$missing $pkg"
+	done
+	if [ -z "$missing" ]; then
+		printf '  ok    %-9s %s\n' otsh "$(sh_otsh_version)  (libssh, ssh, tui, sshtui)"
+	else
+		printf '  FAIL  %-9s %s\n' otsh "$OTSH is missing package(s):$missing"
+		printf '        %-9s %s\n' "" "this file must stay inside the checkout; symlink it, do not copy it"
+		fails=$((fails + 1))
+	fi
+
+	printf '\n%d problem(s) — nothing will build until these are fixed\n' "$fails"
+	exit 1
+}
+
+sh_version() {
+	printf 'otsh %s\n' "$(sh_otsh_version)"
+	printf '  source   %s\n' "$OTSH"
+	if command -v git >/dev/null 2>&1 && commit="$(git -C "$OTSH" describe --tags --always --dirty 2>/dev/null)"; then
+		printf '  commit   %s\n' "$commit"
 	fi
 }
 
-# --- commands -----------------------------------------------------------------
-
-cmd_help() {
+sh_help() {
 	cat <<EOF
-otsh $(otsh_version) — SSH-served TUIs in Odin
+otsh $(sh_otsh_version) — SSH-served TUIs in Odin
 $OTSH
 
 usage: otsh <command> [arguments]
@@ -406,743 +332,17 @@ docs: $OTSH/docs/getting-started.md
 EOF
 }
 
-# Put `otsh` on $PATH, so the checkout stops being something you have to type.
-#
-# A symlink, never a copy: the script locates the collection relative to its own
-# real path, so a copy sitting in ~/.local/bin has no ssh/ or tui/ beside it and
-# nothing builds. `install` is the one chore left after `git clone`, and it can
-# at least do itself.
-cmd_install() {
-	local target dir want_uninstall="" shell_hint
-	case "${1:-}" in
-	--uninstall) want_uninstall=yes ;;
-	"") ;;
-	*) die "usage: $PROG install [--uninstall]" ;;
-	esac
-
-	# Prefer somewhere already on $PATH; fall back to the XDG-ish default,
-	# which is where a user-level binary belongs even if $PATH lags behind.
-	dir=""
-	for d in "${XDG_BIN_HOME:-}" "$HOME/.local/bin" "$HOME/bin" /usr/local/bin; do
-		[ -n "$d" ] || continue
-		case ":$PATH:" in *":$d:"*) [ -d "$d" ] && [ -w "$d" ] && dir="$d" && break ;; esac
-	done
-	[ -n "$dir" ] || dir="${XDG_BIN_HOME:-$HOME/.local/bin}"
-	target="$dir/otsh"
-
-	if [ -n "$want_uninstall" ]; then
-		if [ -L "$target" ]; then
-			rm -f "$target"
-			printf '%s: removed %s\n' "$PROG" "$target"
-		else
-			printf '%s: nothing to remove at %s\n' "$PROG" "$target"
-		fi
-		return 0
-	fi
-
-	# Refuse to clobber something that is not ours rather than silently
-	# replacing a real file somebody put there.
-	if [ -e "$target" ] && [ ! -L "$target" ]; then
-		die "$target exists and is not a symlink; move it aside first"
-	fi
-
-	mkdir -p "$dir" || die "cannot create $dir"
-	ln -sf "$OTSH/otsh" "$target" || die "cannot write $target"
-	printf '%s: %s -> %s\n' "$PROG" "$target" "$OTSH/otsh"
-
-	case ":$PATH:" in
-	*":$dir:"*)
-		printf '\nready — `otsh doctor` from anywhere.\n'
-		;;
-	*)
-		case "${SHELL##*/}" in
-		fish) shell_hint="fish_add_path $dir" ;;
-		zsh) shell_hint="echo 'export PATH=\"$dir:\$PATH\"' >> ~/.zshrc" ;;
-		*) shell_hint="echo 'export PATH=\"$dir:\$PATH\"' >> ~/.bashrc" ;;
-		esac
-		printf '\n%s is not on your $PATH yet. Add it:\n  %s\n' "$dir" "$shell_hint"
-		printf 'then open a new shell, or run it now with:\n  %s doctor\n' "$target"
-		;;
-	esac
-}
-
-cmd_version() {
-	printf 'otsh %s\n' "$(otsh_version)"
-	printf '  source   %s\n' "$OTSH"
-	# The commit is the real pin: -collection:otsh= names a source tree, so an
-	# app's version is whatever that tree is checked out at, not a tag it once
-	# had. Absent outside a git checkout, which is fine — say nothing then.
-	if command -v git >/dev/null && commit="$(git -C "$OTSH" describe --tags --always --dirty 2>/dev/null)"; then
-		printf '  commit   %s\n' "$commit"
-	fi
-}
-
-cmd_flags() {
-	local static_mode="" full_static=""
-	case "${1:-}" in
-	--static) static_mode=yes ;;
-	--fully-static)
-		static_mode=yes
-		full_static=yes
-		;;
-	"") ;;
-	*) die "usage: $PROG flags [--static | --fully-static]" ;;
-	esac
-
-	# Two lines normally, three with --static, nothing else on stdout, so this
-	# can be read by eye or by a script. Paste these, do not $(otsh flags) them
-	# — the linker value contains a space, so word splitting turns it into two
-	# arguments and odin reports `Unknown flag: 'Wl,-rpath,...'`. In a script
-	# use
-	#   eval "odin build . $(otsh flags | tr '\n' ' ')"
-	# which re-parses the quoting. Original note follows:
-	# paste these, do not $(otsh flags) them —
-	# the linker flags contain a space and word splitting would break them.
-	# Resolved before anything is printed, so a mode this platform cannot do
-	# fails with an empty stdout rather than half a flag list somebody might
-	# paste.
-	if [ -n "$static_mode" ]; then
-		resolve_libssh_static "$full_static"
-	else
-		resolve_libssh
-	fi
-
-	printf -- '-collection:otsh=%s\n' "$OTSH"
-	if [ -n "$static_mode" ]; then
-		printf -- '-define:OTSH_LIBSSH=system:%s\n' "$LIBSSH_A"
-		printf -- '-extra-linker-flags:"%s"\n' "$STATIC_LIBS"
-	else
-		printf -- '-extra-linker-flags:"%s"\n' "$LDFLAGS"
-	fi
-}
-
-# Record a compiler path for this user, once, for every checkout and project.
-cmd_use_odin() {
-	local path
-	path="${1:-}"
-	if [ -z "$path" ]; then
-		resolve_odin
-		if [ -f "$ODIN_CONF" ]; then
-			printf '%s\n' "$ODIN_CONF -> $(cat "$ODIN_CONF")"
-		else
-			printf 'no user setting (%s does not exist)\n' "$ODIN_CONF"
-		fi
-		if command -v "$ODIN" >/dev/null; then
-			printf 'currently resolving to: %s\n' "$(command -v "$ODIN")"
-		else
-			printf 'currently resolving to: %s (not found)\n' "$ODIN"
-		fi
-		printf '\nusage: %s use-odin /path/to/odin   (or --unset)\n' "$PROG"
-		return 0
-	fi
-	if [ "$path" = "--unset" ]; then
-		rm -f "$ODIN_CONF"
-		printf '%s: removed %s\n' "$PROG" "$ODIN_CONF"
-		return 0
-	fi
-	# Refuse a path that will not work, rather than writing it and failing on
-	# the next build with a message pointing somewhere else.
-	command -v "$path" >/dev/null || die "not an executable: $path"
-	if ! "$path" version >/dev/null 2>&1; then
-		die "$path does not answer \`odin version\`; is it the Odin compiler?"
-	fi
-	mkdir -p "$(dirname "$ODIN_CONF")" || die "cannot create $(dirname "$ODIN_CONF")"
-	printf '%s\n' "$path" >"$ODIN_CONF"
-	printf '%s: %s -> %s (%s)\n' "$PROG" "$ODIN_CONF" "$path" "$("$path" version 2>/dev/null | head -1)"
-}
-
-cmd_doctor() {
-	printf 'otsh doctor — %s\n\n' "$OTSH"
-	fails=0
-	warns=0
-
-	ok() { printf '  ok    %-9s %s\n' "$1" "$2"; }
-	no() {
-		printf '  FAIL  %-9s %s\n' "$1" "$2"
-		shift 2
-		for l in "$@"; do printf '        %-9s %s\n' "" "$l"; done
-		fails=$((fails + 1))
-	}
-	warn() {
-		printf '  warn  %-9s %s\n' "$1" "$2"
-		shift 2
-		for l in "$@"; do printf '        %-9s %s\n' "" "$l"; done
-		warns=$((warns + 1))
-	}
-	skip() { printf '  --    %-9s %s\n' "$1" "$2"; }
-
-	# 1. the compiler
-	resolve_odin
-	if command -v "$ODIN" >/dev/null; then
-		# `odin version` prints "<path> version <tag>"; only the tag is news.
-		ok odin "$(command -v "$ODIN")  ($("$ODIN" version 2>/dev/null | head -1 | awk '{print $NF}'))"
-	else
-		no odin "not found (tried '$ODIN')" \
-			"install from https://odin-lang.org, or if it lives somewhere" \
-			"custom: $PROG use-odin /path/to/odin"
-	fi
-
-	# 2. libssh, against the floor ssh.serve enforces at runtime. 0.10.6 is
-	#    where the CVE-2023-48795 (Terrapin) fix landed; anything older
-	#    compiles and then refuses to bind.
-	resolve_libssh
-	libssh_ver="$(libssh_version || true)"
-	if [ -n "$libssh_ver" ] && ! version_ge "$libssh_ver" 0.10.6; then
-		no libssh "$libssh_ver is below the 0.10.6 floor — ssh.serve will refuse to start" \
-			"0.10.6 carries the fix for CVE-2023-48795 (Terrapin)."
-	elif ! libssh_lib_present; then
-		# LIBDIR is what otsh hands the linker, so "a version exists somewhere"
-		# is not the same as "this build will link". Say which one is true.
-		if [ -n "$libssh_ver" ]; then
-			warn libssh "headers say $libssh_ver, but there is no libssh in $LIBDIR" \
-				"that is the path otsh passes to the linker — install pkg-config so it is found properly"
-		else
-			no libssh "not found (looked in $LIBDIR)" \
-				"brew install libssh pkg-config     # macOS" \
-				"apt install libssh-dev pkg-config  # Debian/Ubuntu" \
-				"vcpkg install libssh:x64-windows   # Windows"
-		fi
-	elif [ -n "$libssh_ver" ]; then
-		ok libssh "$libssh_ver  (>= 0.10.6)  $LIBDIR"
-	else
-		warn libssh "$LIBDIR has the library but no version to check" \
-			"install pkg-config or the libssh headers; the 0.10.6 floor is enforced at run time regardless"
-	fi
-
-	# 3. clang. Odin shells out to it to link. On Linux nothing else will do —
-	#    gcc is not a substitute, and the failure is an opaque
-	#    "sh: 1: clang: not found" from inside the compiler. Elsewhere its
-	#    absence is not fatal (macOS ships it with the Command Line Tools;
-	#    Windows links with MSVC), so it is reported, not required.
-	if command -v clang >/dev/null; then
-		ok clang "$(command -v clang)"
-	elif [ "$UNAME" = Linux ]; then
-		no clang "not found — Odin links with it on Linux" \
-			"apt install clang  (build-essential is not a substitute)"
-	else
-		skip clang "not found — not required on $UNAME"
-	fi
-
-	# 4. the collection itself, which is the thing a stale symlink breaks.
-	missing=""
-	for pkg in libssh ssh tui sshtui; do
-		[ -d "$OTSH/$pkg" ] || missing="$missing $pkg"
-	done
-	if [ -z "$missing" ]; then
-		ok otsh "$(otsh_version)  (libssh, ssh, tui, sshtui)"
-	else
-		no otsh "$OTSH is missing package(s):$missing" \
-			"this file must stay inside the checkout; symlink it, do not copy it"
-	fi
-
-	printf '\n'
-	if [ "$fails" -gt 0 ]; then
-		printf '%d problem(s) — nothing will build until these are fixed\n' "$fails"
-		return 1
-	fi
-	if [ "$warns" -gt 0 ]; then
-		printf 'no blockers, %d warning(s)\n' "$warns"
-		return 0
-	fi
-	printf 'all good\n'
-}
-
-# libssh's version, from pkg-config where there is one and from the installed
-# header where there is not — a Homebrew or vcpkg install without pkg-config on
-# PATH is common enough to be worth the second path.
-libssh_version() {
-	local inc h
-	if command -v pkg-config >/dev/null && pkg-config --exists libssh; then
-		pkg-config --modversion libssh
-		return 0
-	fi
-	for inc in \
-		"${LIBDIR%/lib}/include" \
-		/opt/homebrew/opt/libssh/include \
-		/usr/local/opt/libssh/include \
-		/opt/homebrew/include \
-		/usr/local/include \
-		/usr/include \
-		/opt/local/include; do
-		h="$inc/libssh/libssh_version.h"
-		if [ -f "$h" ]; then
-			awk '/^#define LIBSSH_VERSION_MAJOR/ {maj=$3}
-			     /^#define LIBSSH_VERSION_MINOR/ {min=$3}
-			     /^#define LIBSSH_VERSION_MICRO/ {mic=$3}
-			     END {if (maj != "") printf "%s.%s.%s\n", maj, min, mic}' "$h"
-			return 0
-		fi
-	done
-	return 1
-}
-
-# Is there actually a libssh in LIBDIR? Testing `-d "$LIBDIR"` is not enough
-# and the difference is not academic: a bare ubuntu:24.04 with no libssh at all
-# still has an empty /usr/local/lib, which is where resolve_libssh falls back
-# to, so the directory test reported "found" to precisely the reader who has
-# nothing installed. Measured in a container before this was written.
-libssh_lib_present() {
-	local f
-	for f in "$LIBDIR"/libssh.so* "$LIBDIR"/libssh.dylib "$LIBDIR"/libssh.a "$LIBDIR"/ssh.lib; do
-		if [ -e "$f" ]; then return 0; fi
-	done
-	return 1
-}
-
-# $1 >= $2, both dotted numeric. Trailing non-numeric junk is dropped rather
-# than guessed at: a "0.11.0rc1" is treated as 0.11.0.
-version_ge() {
-	local a b a1 a2 a3 b1 b2 b3
-	a="$(printf '%s' "$1" | sed 's/[^0-9.].*//')"
-	b="$(printf '%s' "$2" | sed 's/[^0-9.].*//')"
-	IFS=. read -r a1 a2 a3 <<<"$a"
-	IFS=. read -r b1 b2 b3 <<<"$b"
-	[ $((${a1:-0} * 10000 + ${a2:-0} * 100 + ${a3:-0})) -ge \
-		$((${b1:-0} * 10000 + ${b2:-0} * 100 + ${b3:-0})) ]
-}
-
-cmd_build() {
-	local out="" out_dir="" src_abs name a
-	local static_mode="" full_static=""
-	local args=()
-	while [ "$#" -gt 0 ]; do
-		case "$1" in
-		--out)
-			out="${2:?--out needs a path}"
-			shift 2
-			;;
-		--out-dir)
-			out_dir="${2:?--out-dir needs a path}"
-			shift 2
-			;;
-		--static)
-			static_mode=yes
-			shift
-			;;
-		--fully-static)
-			static_mode=yes
-			full_static=yes
-			shift
-			;;
-		*)
-			args+=("$1")
-			shift
-			;;
-		esac
-	done
-
-	split_args ${args[@]+"${args[@]}"}
-	SRC="${SRC:-.}"
-	require_package "$SRC"
-	require_odin
-
-	local define_flag=()
-	if [ -n "$static_mode" ]; then
-		resolve_libssh_static "$full_static"
-		define_flag=(-define:OTSH_LIBSSH=system:"$LIBSSH_A")
-		LDFLAGS="$STATIC_LIBS"
-	else
-		resolve_libssh
-	fi
-
-	# Odin takes exactly one -extra-linker-flags — a second is rejected with
-	# "Previous flag set: 'extra-linker-flags'" — so a caller's own linker flags
-	# have to be folded into ours rather than passed through beside them. This
-	# is what lets somebody add the one library their distribution's libssh
-	# happens to need without giving up everything otsh resolved for them.
-	local passthrough=()
-	for a in ${ODIN_ARGS[@]+"${ODIN_ARGS[@]}"}; do
-		case "$a" in
-		-extra-linker-flags:*) LDFLAGS="$LDFLAGS ${a#-extra-linker-flags:}" ;;
-		*) passthrough+=("$a") ;;
-		esac
-	done
-	ODIN_ARGS=(${passthrough[@]+"${passthrough[@]}"})
-
-	# The binary is named after the package directory and lands *in* it, so
-	# that a project keeps its own build output, and so that `otsh run` can
-	# start it from there — an app's host_key_path is relative to its working
-	# directory, and a host key scattered wherever you happened to be standing
-	# is how clients end up seeing key-mismatch warnings.
-	src_abs="$(cd "$SRC" && pwd)"
-	name="$(basename "$src_abs")$(exe_suffix)"
-	if [ -n "$out_dir" ]; then out="$out_dir/$name"; fi
-	if [ -z "$out" ]; then out="$src_abs/$name"; fi
-
-	# An explicit -out: in the passthrough flags wins; Odin would reject two.
-	local out_flag=(-out:"$out")
-	for a in ${ODIN_ARGS[@]+"${ODIN_ARGS[@]}"}; do
-		case "$a" in -out:*)
-			out_flag=()
-			out=""
-			;;
-		esac
-	done
-
-	"$ODIN" build "$SRC" \
-		${out_flag[@]+"${out_flag[@]}"} \
-		-collection:otsh="$OTSH" \
-		${define_flag[@]+"${define_flag[@]}"} \
-		-extra-linker-flags:"${LDFLAGS}" \
-		${ODIN_ARGS[@]+"${ODIN_ARGS[@]}"}
-
-	if [ -n "$out" ] && [ "${OTSH_QUIET:-}" != "1" ]; then
-		printf '%s: built %s\n' "$PROG" "$out"
-	fi
-}
-
-cmd_run() {
-	# Everything after the directory is the *program's* argv, not the
-	# compiler's — `otsh run ~/src/myapp --local` is the whole point. Build
-	# with flags via `otsh build` first if you need them.
-	local src="" src_abs name
-	if [ "$#" -gt 0 ] && [ "${1#-}" = "$1" ]; then
-		src="$1"
-		shift
-	fi
-	src="${src:-.}"
-	require_package "$src"
-
-	src_abs="$(cd "$src" && pwd)"
-	name="$(basename "$src_abs")$(exe_suffix)"
-	OTSH_QUIET=1 cmd_build "$src_abs"
-
-	printf '%s: running %s\n' "$PROG" "$src_abs/$name"
-	# From the project's own directory: host keys, identity secrets and
-	# anything else the app opens by relative path belong beside its source.
-	cd "$src_abs"
-	exec "./$name" "$@"
-}
-
-cmd_test() {
-	split_args "$@"
-	SRC="${SRC:-$OTSH/tests}"
-	require_odin
-	resolve_libssh
-	exec "$ODIN" test "$SRC" \
-		-collection:otsh="$OTSH" \
-		-extra-linker-flags:"${LDFLAGS}" \
-		${ODIN_ARGS[@]+"${ODIN_ARGS[@]}"}
-}
-
-# True when something is already listening on this port. bash's /dev/tcp is
-# used rather than lsof/nc so this needs nothing installed; a refused connection
-# means the port is free.
-port_in_use() {
-	(exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && exec 3<&- && return 0
-	return 1
-}
-
-# The first free port at or above $1. A generated project that collides with
-# something already running fails on its first `otsh run` with "address in
-# use", which is a rotten way to meet a library — and the fix is one probe.
-first_free_port() {
-	local p="$1" limit=$(($1 + 40))
-	while [ "$p" -lt "$limit" ]; do
-		port_in_use "$p" || { printf '%s\n' "$p"; return 0; }
-		p=$((p + 1))
-	done
-	printf '%s\n' "$1"
-}
-
-cmd_new() {
-	local dir="" dir_abs name minor
-	local port="" port_explicit=""
-	while [ "$#" -gt 0 ]; do
-		case "$1" in
-		--port)
-			port="${2:?--port needs a number}"
-			port_explicit=yes
-			shift 2
-			;;
-		-*) die "unknown option for \`otsh new\`: $1" "usage: otsh new <dir> [--port N]" ;;
-		*)
-			dir="$1"
-			shift
-			;;
-		esac
-	done
-	[ -n "$dir" ] || die "otsh new needs a directory" "usage: otsh new <dir> [--port N]"
-	if [ -n "$port_explicit" ]; then
-		case "$port" in
-		'' | *[!0-9]*) die "--port must be a number, got '$port'" ;;
-		esac
-	else
-		# Not 2222 by assumption: 2222 is what examples/tracker uses, so a
-		# reader following the README and then making their own app would
-		# collide on their very first run. Pick one that is actually free.
-		port="$(first_free_port 2222)"
-	fi
-
-	# Refuse rather than merge: overwriting somebody's main.odin because they
-	# reused a path is not a mistake worth being clever about.
-	if [ -e "$dir" ]; then
-		if [ -d "$dir" ] && [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
-			: # an empty directory is fine to fill
-		else
-			die "$dir already exists" \
-				"pick a path that does not, or empty this one first"
-		fi
-	fi
-
-	mkdir -p "$dir"
-	dir_abs="$(cd "$dir" && pwd)"
-	# The directory name becomes an Odin file's contents, a binary name and a
-	# host key filename. Keep it to characters all three tolerate. printf
-	# rather than piping basename straight in: tr would map the trailing
-	# newline too, and every project would be called "name_".
-	name="$(printf '%s' "$(basename "$dir_abs")" | tr -c 'A-Za-z0-9_-' '_')"
-	minor="$(otsh_version_minor)"
-
-	local body
-	body="$(main_odin_template)"
-	body="${body//@NAME@/$name}"
-	body="${body//@PORT@/$port}"
-	body="${body//@MINOR@/$minor}"
-	printf '%s\n' "$body" >"$dir_abs/main.odin"
-
-	body="$(project_build_sh_template)"
-	printf '%s\n' "${body//@OTSH@/$OTSH}" >"$dir_abs/build.sh"
-	chmod +x "$dir_abs/build.sh"
-
-	body="$(project_gitignore_template)"
-	printf '%s\n' "${body//@NAME@/$name}" >"$dir_abs/.gitignore"
-
-	cat <<EOF
-$PROG: created $dir_abs
-
-  main.odin    three procs and a config — start here
-  build.sh     builds against $OTSH
-  .gitignore   host key, identity secret, build output
-
-next:
-  cd $dir_abs
-  ./build.sh && ./$name
-  ssh -p $port localhost        # from another terminal
-
-or, without leaving this one:
-  otsh run $dir_abs --local
-EOF
-}
-
-# --- scaffold templates -------------------------------------------------------
-#
-# Here rather than in a template directory so that `otsh` is one file you can
-# read end to end, and so a symlink on $PATH cannot go stale against a
-# half-copied tree. Placeholders are substituted by cmd_new above.
-#
-# Functions rather than `VAR=$(cat <<'EOF' ...)`: bash 3.2 — which is what
-# /bin/bash still is on macOS — ends a $( ) command substitution at the first
-# `)` sitting at the start of a line *inside* the heredoc body, and the
-# scaffold's `#assert(` block closes on exactly such a line. Reproduced here
-# before it was worked around, not guessed at.
-
-main_odin_template() {
-	cat <<'ODIN'
-// @NAME@ — a TUI served over SSH.
-//
-//	build      ./build.sh
-//	serve      ./@NAME@ — listens on port @PORT@
-//	connect    ssh -p @PORT@ localhost — from any machine with an ssh client
-//	iterate    ./@NAME@ --local — the same app in this terminal, no SSH at all
-//
-// Generated by `otsh new`. Three procs and a config is the whole shape:
-// `create` builds the model for one connection, `update` handles one message,
-// `view` paints one frame. None of it knows it is on a network.
-package main
-
-import "core:fmt"
-import "core:os"
-import "otsh:sshtui"
-import "otsh:tui"
-
-// -collection:otsh= points the compiler at a directory of source, so "which
-// otsh" is "whatever commit that directory is on". This turns being pointed at
-// an older one into a clear compile error instead of a confusing one. See
-// "Pinning and upgrading otsh" in the otsh docs.
-#assert(
-	sshtui.VERSION_MAJOR == 0 && sshtui.VERSION_MINOR >= @MINOR@,
-	"@NAME@ needs otsh >= 0.@MINOR@.0",
-)
-
-// One per connection. Yours to define — this is your app's state.
-Model :: struct {
-	who:     string,
-	presses: int,
-}
-
-// Runs once per keystroke, tick and resize, on this connection's own thread.
-update :: proc(p: ^tui.Program, msg: tui.Msg) {
-	m := (^Model)(p.app.data)
-	#partial switch e in msg {
-	case tui.Key:
-		// Ctrl+C arrives as a keystroke, not a signal: the client's terminal
-		// is in raw mode, so nothing turns it into SIGINT on the way here.
-		if e.kind == .Esc || (e.kind == .Rune && (e.r == 'q' || e.ctrl && e.r == 'c')) {
-			tui.quit(p)
-			return
-		}
-		m.presses += 1
-	}
-}
-
-// Runs once per frame. Paint the whole screen — the diff renderer works out
-// the few bytes that actually have to go down the wire.
-view :: proc(p: ^tui.Program, sc: ^tui.Screen) {
-	defer free_all(context.temp_allocator)
-	m := (^Model)(p.app.data)
-
-	dim := tui.Style{fg = tui.ansi(8)}
-	text := tui.Style{fg = tui.ansi(15), attrs = {.Bold}}
-
-	// The client chooses the window size and can make it tiny. Draw something
-	// honest rather than reaching outside a box that does not fit.
-	if sc.w < 30 || sc.h < 8 {
-		tui.draw_text_clipped(sc, 0, 0, sc.w, "terminal too small", dim)
-		return
-	}
-
-	rows := [][2]string {
-		{"you are", m.who},
-		{"terminal", fmt.tprintf("%d×%d", sc.w, sc.h)},
-		{"keys pressed", fmt.tprintf("%d", m.presses)},
-	}
-
-	w := min(sc.w - 4, 48)
-	h := len(rows) + 4
-	x := (sc.w - w) / 2
-	y := max((sc.h - h) / 2, 0)
-
-	tui.draw_box(sc, x, y, w, h, tui.Style{fg = tui.ansi(6)}, tui.BORDER_ROUND, " @NAME@ ")
-	for row, i in rows {
-		tui.draw_text(sc, x + 3, y + 2 + i, row[0], dim)
-		tui.draw_text_clipped(sc, x + 18, y + 2 + i, w - 21, row[1], text)
-	}
-	tui.draw_text(sc, x + 3, y + h - 2, "press keys · q to quit", dim)
-}
-
-// Called once per connection, before the first frame, on that connection's own
-// thread. info.user is whatever the client typed after `ssh` — it is not
-// verified identity. Use info.id (see Config.identity_secret) when you need to
-// recognise someone across connections.
-create :: proc(info: sshtui.Info) -> tui.App {
-	m := new(Model)
-	m.who = info.user == "" ? "guest" : info.user
-	return tui.App{data = m, update = update, view = view}
-}
-
-// Called after the connection's loop ends. Free whatever create allocated.
-destroy :: proc(app: tui.App) {
-	free(app.data)
-}
-
-main :: proc() {
-	cfg := sshtui.Config {
-		port          = @PORT@,
-		// Generated on first run, chmod 600. Keep it: clients pin its
-		// fingerprint, and replacing it makes every returning client warn.
-		host_key_path = "@NAME@_hostkey",
-		create        = create,
-		destroy       = destroy,
-	}
-
-	// --local runs this exact app against your own terminal — no ssh client,
-	// no host key, no second process. It is the fast half of the edit loop.
-	for arg in os.args[1:] {
-		if arg == "--local" || arg == "-l" {
-			if !sshtui.run_local(cfg) {
-				fmt.eprintln("@NAME@: stdin is not a terminal")
-				os.exit(1)
-			}
-			return
-		}
-	}
-
-	// serve returns false when the server never came up — port in use, bad
-	// host key, libssh too old — after printing why. Exiting 0 would hide it.
-	if !sshtui.serve(cfg) {
-		os.exit(1)
-	}
-}
-ODIN
-}
-
-project_build_sh_template() {
-	cat <<'SH'
-#!/usr/bin/env bash
-# Build this app.
-#
-# otsh is a source collection, not a library you install: -collection:otsh=
-# points the Odin compiler at a checkout, and the version this app uses is
-# whatever commit that checkout is on. So this script's only job is knowing
-# where that checkout is; `otsh build` supplies the collection flag and the
-# libssh linker flags. Run `otsh flags` to see exactly what those are, or
-# `otsh doctor` when a build fails for reasons that are not your code.
-#
-# The path below is the checkout `otsh new` was run from. Point it somewhere
-# else without editing this file by setting OTSH_ROOT — which is what a CI
-# job, or a colleague who keeps their checkout elsewhere, will want.
-set -euo pipefail
-
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-otsh="${OTSH_ROOT:-@OTSH@}"
-
-if [ -x "$otsh/otsh" ]; then
-	exec "$otsh/otsh" build "$here" "$@"
-fi
-# The recorded checkout is gone or moved. An `otsh` on PATH is the next best
-# answer, and the one that makes this project build on a machine that is not
-# the one it was created on.
-if command -v otsh >/dev/null; then
-	exec otsh build "$here" "$@"
-fi
-
-echo "build.sh: no otsh checkout at $otsh, and no otsh on PATH." >&2
-echo "  git clone https://github.com/souriscloud/otsh" >&2
-echo "  OTSH_ROOT=/path/to/otsh ./build.sh" >&2
-exit 1
-SH
-}
-
-project_gitignore_template() {
-	cat <<'IGNORE'
-# --- secrets ------------------------------------------------------------------
-# The host key identifies this server to returning clients — committing it lets
-# anyone impersonate you. The identity secret is the HMAC key behind every
-# user's pseudonymous Info.id. Both are generated on first run; back them up
-# somewhere that is not this repository.
-*hostkey
-*hostkey.pub
-*_secret
-*.pem
-
-# --- build output -------------------------------------------------------------
-/@NAME@
-/@NAME@.exe
-*.pdb
-*.o
-*.dSYM/
-IGNORE
-}
-
-# --- dispatch -----------------------------------------------------------------
-
 cmd="${1:-help}"
-shift || true
 case "$cmd" in
-new) cmd_new "$@" ;;
-build) cmd_build "$@" ;;
-run) cmd_run "$@" ;;
-test) cmd_test "$@" ;;
-flags) cmd_flags "$@" ;;
-install) cmd_install "$@" ;;
-use-odin | use_odin) cmd_use_odin "$@" ;;
-doctor) cmd_doctor "$@" ;;
-version | --version | -v) cmd_version "$@" ;;
-help | --help | -h) cmd_help "$@" ;;
+doctor) sh_doctor ;;
+version | --version | -v) sh_version ;;
+help | --help | -h) sh_help ;;
 *)
-	printf '%s: unknown command: %s\n\n' "$PROG" "$cmd" >&2
-	cmd_help >&2
+	printf '%s: odin compiler not found (tried '\''%s'\'').\n' "$PROG" "$tried" >&2
+	printf '  %s\n' "Install it from https://odin-lang.org, or if you have it somewhere" >&2
+	printf '  %s\n' "custom, record that once for every project:" >&2
+	printf '  %s\n' "    $PROG use-odin /path/to/odin" >&2
+	printf '  %s\n' "For a single command, ODIN=/path/to/odin $PROG ... also works." >&2
 	exit 1
 	;;
 esac

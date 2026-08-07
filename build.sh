@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Builds an app against the otsh packages, dropping the binary in the current
 # directory. Unchanged in what it does; it is now a wrapper.
 #
@@ -11,13 +11,14 @@
 # flags to paste into a Makefile or an IDE. This file stays because CI, the
 # docs and a decade of muscle memory all type `./build.sh`, and because "build
 # it into the directory I am standing in" is still the right default from
-# inside this repo.
-set -euo pipefail
+# inside this repo. /bin/sh rather than bash for the same reason ./otsh is:
+# this has to run on machines where bash does not exist.
+set -eu
 
-OTSH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OTSH="$(CDPATH='' cd -P "$(dirname "$0")" && pwd)"
 
 SRC="${1:-$OTSH/examples/tracker}"
-shift || true
+if [ "$#" -gt 0 ]; then shift; fi
 
 # --out-dir "$PWD" keeps the historical output location: check.sh and CI both
 # `rm -f tracker whoami ...` from the repository root afterwards. OTSH_PROG

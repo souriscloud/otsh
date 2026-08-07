@@ -10,6 +10,14 @@ name: ci
 # expensive ones run when there is a reason: on demand, weekly, and for
 # release tags. Routine pushes now cost ~3 billed minutes instead of 47.
 # Nothing about coverage changes — the same jobs run, just not on every commit.
+#
+# The repository has since gone public, which makes Actions minutes free on
+# hosted runners. The gating stays anyway: the reasoning was never only money
+# — a 17-minute Windows job on every push is feedback nobody reads, the
+# billed-minute numbers above stay true if the repo ever goes private again,
+# and "runs when there is a reason" is the right shape regardless of price.
+# What being public did change is the `release` job at the bottom: four
+# runners per tag is affordable now, and a tag is exactly a reason.
 on:
   push:
     branches: [main]
@@ -138,6 +146,20 @@ jobs:
           done
           for ex in examples/*/; do
             odin check "$ex" -collection:otsh=. -target:freebsd_amd64
+          done
+
+      # The otsh tool (cmd/otsh) claims five targets and the release job below
+      # builds four of them for real — but only on tags. This step is what
+      # guards them on every push, the same way the loops above guard the
+      # library: a type-check is not a run, but it catches the core:os and
+      # core:sys drift that would otherwise wait for release day. The native
+      # linux_amd64 build is already exercised by every ./build.sh step here,
+      # because the ./otsh bootstrap compiles cmd/otsh on first use.
+      - name: Cross-type-check the otsh tool for every claimed target
+        if: runner.os == 'Linux'
+        run: |
+          for target in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64 windows_amd64 freebsd_amd64; do
+            odin check cmd/otsh -target:"$target"
           done
 
   # The canary. Everything above builds against a pin, which is what keeps CI
@@ -318,3 +340,90 @@ jobs:
       # Validates links, images, unconverted Markdown and the sidebar.
       - name: Docs site builds and validates
         run: python3 docs/tools/build_site.py --check
+
+  # Prebuilt binaries of the otsh TOOL (cmd/otsh) for every release tag. The
+  # library stays source-only — -collection:otsh= points at a checkout and
+  # nothing about that changes — but the tool is a program, and a program you
+  # can download beats one you must first compile. Each binary is the tool
+  # alone: it links against nothing but the OS (libssh is a dependency of the
+  # apps it builds, not of the tool), so no runner here installs libssh.
+  #
+  # Four native runners rather than cross-compiles wherever a runner exists,
+  # because a binary that ran `version` on its own platform is a claim and a
+  # cross-compiled one is a prediction. The one exception is darwin-amd64,
+  # cross-built and untested on the arm64 macOS runner — macos-13, the last
+  # hosted Intel Mac, was retired — and labelled here so nobody mistakes it
+  # for the others. Artifact names match what the ./otsh bootstrap looks for
+  # in bin/, so a downloaded binary dropped there is used as-is.
+  #
+  # The release is created as a PRE-release with placeholder notes (0.x is
+  # pre-release policy anyway — see docs/releasing.md); publishing is a human
+  # editing in the changelog section afterwards. Created here rather than as
+  # a draft because draft releases cannot be reliably resolved by tag name
+  # for uploads, and four parallel jobs racing `gh release create` is safe
+  # for a published release — the tag can hold only one, so the losers get a
+  # clean 422 and move on to uploading.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: otsh-linux-amd64
+          - os: ubuntu-24.04-arm
+            artifact: otsh-linux-arm64
+          - os: macos-latest
+            artifact: otsh-darwin-arm64
+            cross_target: darwin_amd64
+            cross_artifact: otsh-darwin-amd64
+          - os: windows-latest
+            artifact: otsh-windows-amd64.exe
+    runs-on: ${{ matrix.os }}
+    # The one job in this file that writes to the repository: it creates the
+    # release and attaches assets. Scoped here, not at the top — every other
+    # job keeps the read-only token.
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Odin
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release: ${{ env.ODIN_RELEASE }}
+
+      - name: Build the tool
+        run: odin build cmd/otsh -out:${{ matrix.artifact }} -o:speed
+
+      # `version` from inside the checkout exercises the checkout-resolution
+      # walk and the version parse — the two things most likely to differ
+      # between "it linked" and "it works".
+      - name: Smoke-test the native binary
+        run: |
+          ./${{ matrix.artifact }} version
+          mkdir -p bin && cp ${{ matrix.artifact }} bin/
+          ./otsh version
+
+      - name: Cross-build darwin-amd64 (unsmoked — no Intel runner exists)
+        if: matrix.cross_target != ''
+        run: odin build cmd/otsh -target:${{ matrix.cross_target }} -out:${{ matrix.cross_artifact }} -o:speed
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          gh release view "$tag" >/dev/null 2>&1 || \
+            gh release create "$tag" --prerelease \
+              --title "otsh ${tag#v}" \
+              --notes "Binaries below are the otsh command-line tool. Release notes: see the ${tag#v} section of CHANGELOG.md — docs/releasing.md step 7 replaces this placeholder." \
+              || true
+          gh release upload "$tag" "${{ matrix.artifact }}" --clobber
+          if [ -n "${{ matrix.cross_artifact }}" ]; then
+            gh release upload "$tag" "${{ matrix.cross_artifact }}" --clobber
+          fi

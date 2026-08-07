@@ -1,0 +1,36 @@
+#!/bin/sh
+# Build this app.
+#
+# otsh is a source collection, not a library you install: -collection:otsh=
+# points the Odin compiler at a checkout, and the version this app uses is
+# whatever commit that checkout is on. So this script's only job is knowing
+# where that checkout is; `otsh build` supplies the collection flag and the
+# libssh linker flags. Run `otsh flags` to see exactly what those are, or
+# `otsh doctor` when a build fails for reasons that are not your code.
+#
+# The path below is the checkout `otsh new` was run from. Point it somewhere
+# else without editing this file by setting OTSH_ROOT — which is what a CI
+# job, or a colleague who keeps their checkout elsewhere, will want.
+#
+# /bin/sh, not bash, on purpose: this script has to run on machines where
+# bash does not exist — a stock Alpine, FreeBSD, a Debian stripped to
+# essentials — and it needs nothing bash adds.
+set -eu
+
+here="$(CDPATH='' cd -P "$(dirname "$0")" && pwd)"
+otsh="${OTSH_ROOT:-@OTSH@}"
+
+if [ -x "$otsh/otsh" ]; then
+	exec "$otsh/otsh" build "$here" "$@"
+fi
+# The recorded checkout is gone or moved. An `otsh` on PATH is the next best
+# answer, and the one that makes this project build on a machine that is not
+# the one it was created on.
+if command -v otsh >/dev/null; then
+	exec otsh build "$here" "$@"
+fi
+
+echo "build.sh: no otsh checkout at $otsh, and no otsh on PATH." >&2
+echo "  git clone https://github.com/souriscloud/otsh" >&2
+echo "  OTSH_ROOT=/path/to/otsh ./build.sh" >&2
+exit 1

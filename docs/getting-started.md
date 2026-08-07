@@ -31,6 +31,10 @@ anyone who would rather drive the compiler themselves.
 - **macOS, Linux, Windows or FreeBSD.** macOS, Linux and Windows have all been
   built and run; FreeBSD has not — see [Platform
   support](#platform-support) below before you rely on that one.
+- **No bash, anywhere.** `otsh` at the repository root, `build.sh`, `test.sh`,
+  and the `build.sh` that `otsh new` scaffolds into a project are all
+  `#!/bin/sh`; the tool they build and run, `cmd/otsh`, is a compiled Odin
+  binary. None of it needs bash to exist on the machine that runs it.
 
 `./otsh doctor` checks all of the above and tells you which one is missing,
 as a checklist rather than as a compiler backtrace:
@@ -54,6 +58,14 @@ Both of those were run in a container, and the second is how the libssh check
 came to be written the way it is: an empty `/usr/local/lib`, which that image
 has and which is where the search falls back to, was reported as "found" until
 the check started looking for the library *file* rather than the directory.
+
+On a machine with no Odin compiler anywhere — and, just as often, no bash —
+`otsh doctor` still answers. The bootstrap script carries a portable-sh copy
+of the same checklist, kept in step with `cmd/otsh/doctor.odin` by hand, so
+the one command a fresh machine actually needs works before there is a
+compiler to build the real tool with. Verified on a bare `alpine:3.22`
+container, which has neither: `./otsh doctor` printed the same three-failure
+checklist — odin, libssh, clang — and exited 1.
 
 ### If your Odin lives somewhere custom
 
@@ -98,6 +110,22 @@ the same code: the latter two are wrappers around the first.
 
 `otsh`, at the root of this repository, is the whole toolchain: it knows where
 the collection is and where libssh lives, so nothing has to be typed twice.
+The file itself is a small POSIX `#!/bin/sh` bootstrap; the tool behind it is
+the Odin program in `cmd/otsh`, which the bootstrap builds the first time any
+command runs —
+
+```
+otsh: building the otsh tool (cmd/otsh -> bin/otsh-linux-arm64)...
+```
+
+on stderr, a few seconds — and execs directly on every call after that, which
+is instant. Building it needs nothing beyond the Odin compiler the rest of
+this page already asks for. Would rather not build it at all? Every [GitHub
+release](https://github.com/souriscloud/otsh/releases) carries the tool
+prebuilt for Linux, macOS and Windows; drop the one for your platform into
+`bin/` under its release name — `bin/otsh-linux-amd64`, say — and this file
+execs it without ever compiling. `OTSH_ROOT=/path/to/checkout` does the same
+for a binary kept anywhere else.
 
 ```sh
 git clone https://github.com/souriscloud/otsh
@@ -124,12 +152,17 @@ otherwise `~/.local/bin`, telling you the exact line to add for your shell —
 --uninstall` removes it. It refuses to overwrite anything that is not its own
 symlink.
 
-**Symlink it — do not copy it.** The script resolves its own real location
-through the symlink and points `-collection:otsh=` at the checkout it finds
-there. A copy sitting in `~/.local/bin` has no `ssh/`, `tui/` or `sshtui/` next
-to it, and nothing will build. Nothing about how otsh is distributed changes
-here: your app still compiles against a directory of source, and pinning it is
-still [checking out a tag](#pinning-and-upgrading-otsh).
+**Symlink it — do not copy it.** The bootstrap resolves its own real location
+through the symlink to find the checkout to build from; the compiled tool
+does the same walk on its own real path — through symlinks, up to the first
+ancestor holding `ssh/version.odin` — so it still finds the checkout once the
+bootstrap has exec'd it, and points `-collection:otsh=` there. A copy sitting
+in `~/.local/bin` has no `ssh/`, `tui/` or `sshtui/` next to it, and nothing
+will build; `$OTSH_ROOT` is the escape hatch for a binary that genuinely does
+live somewhere else — a downloaded release binary, say. Nothing about how
+otsh is distributed changes here: your app still compiles against a directory
+of source, and pinning it is still [checking out a
+tag](#pinning-and-upgrading-otsh).
 
 | command | what it does |
 | --- | --- |
@@ -164,7 +197,7 @@ Three files, and nothing you have to edit before it runs:
 | file | |
 | --- | --- |
 | `main.odin` | the three procs and a config — a box showing who connected, the terminal size, and a keypress count. It also wires `--local` |
-| `build.sh` | the project's own build script. It records the checkout it was generated against and delegates to `otsh build`; `OTSH_ROOT=/elsewhere ./build.sh` overrides that without editing the file, and an `otsh` on `$PATH` is the fallback if the recorded checkout is gone |
+| `build.sh` | the project's own build script — `#!/bin/sh`, so it runs on machines with no bash. It records the checkout it was generated against and delegates to `otsh build`; `OTSH_ROOT=/elsewhere ./build.sh` overrides that without editing the file, and an `otsh` on `$PATH` is the fallback if the recorded checkout is gone |
 | `.gitignore` | `*hostkey`, `*_secret`, `*.pem` and the build output — the two secrets are generated on first run, and committing a host key lets anyone impersonate your server |
 
 `main.odin` opens with a `#assert` on `sshtui.VERSION_MINOR` pinning the otsh

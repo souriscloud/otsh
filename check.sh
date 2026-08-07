@@ -26,6 +26,11 @@ step() {
 }
 
 echo "build"
+# The otsh tool itself, first and by name: everything below goes through it,
+# and "the tool does not compile" should be reported as that rather than as
+# six cascading example failures. `version` is the cheapest command that
+# forces the bootstrap to build cmd/otsh.
+step "the otsh tool builds" ./otsh version
 step "packages + default example" ./build.sh
 for ex in examples/*/; do
 	step "example $(basename "$ex")" ./build.sh "$ex"

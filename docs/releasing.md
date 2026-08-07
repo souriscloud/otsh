@@ -198,21 +198,61 @@ not.
 
 ### 7. Publish the GitHub release
 
+The tag push already did most of this. `.github/workflows/ci.yml`'s `release`
+job runs on any `v*` tag, independently of `build`, `macos` and `windows` —
+it needs no libssh, only Odin, so it typically finishes before the test
+matrix does. On four native runners (`ubuntu-latest`, `ubuntu-24.04-arm`,
+`macos-latest`, `windows-latest`) it builds `cmd/otsh` with `odin build
+cmd/otsh -out:otsh-linux-amd64 -o:speed` (naming the `-out:` after whichever
+artifact that runner owns), smoke-tests each binary with `version`,
+and — from the `macos-latest` leg only — cross-builds a `darwin_amd64`
+binary that nothing here can run, since the last hosted Intel Mac
+(`macos-13`) was retired; it is genuinely untested, not merely unmentioned.
+Whichever leg gets there first creates the GitHub release for the tag as a
+**pre-release** with placeholder notes (`gh release create v0.1.0
+--prerelease --notes "..."`); the other three find it already exists and
+just upload alongside. By the time you read this, `v0.1.0` usually already
+exists on GitHub with five binaries attached — `otsh-linux-amd64`,
+`otsh-linux-arm64`, `otsh-darwin-arm64`, `otsh-darwin-amd64`,
+`otsh-windows-amd64.exe` — and a placeholder body pointing back at this
+step.
+
+Publishing, then, is replacing that placeholder with the real notes —
+`gh release edit`, not `gh release create`:
+
 ```sh
-gh release create v0.1.0 \
-  --title "otsh 0.1.0" \
+gh release edit v0.1.0 \
   --notes-file <(sed -n '/^## 0\.1\.0 /,/^## /p' CHANGELOG.md | sed '$d')
 ```
 
 Or paste that section by hand at
-`https://github.com/souriscloud/otsh/releases/new`. Either way the release notes
+`https://github.com/souriscloud/otsh/releases`. Either way the release notes
 are the changelog section for that version, not a second summary written from
-memory.
+memory. If for some reason the `release` job's first leg hasn't reached the
+"create" step yet (checked with `gh release view v0.1.0`), fall back to
+creating it yourself with the same `--prerelease` flag CI uses — the later
+legs will still find it and upload into it rather than failing:
 
-There are no binaries to attach. otsh is consumed as source, so the source
-tarball GitHub generates from the tag is the whole artefact.
+```sh
+gh release create v0.1.0 --prerelease \
+  --title "otsh 0.1.0" \
+  --notes-file <(sed -n '/^## 0\.1\.0 /,/^## /p' CHANGELOG.md | sed '$d')
+```
 
-Mark it a pre-release for as long as `VERSION_MAJOR` is 0.
+Check `gh release view v0.1.0` shows all five binaries before calling this
+step done — a leg that failed silently uploads nothing, and nothing else here
+would tell you.
+
+otsh the **library** is still consumed entirely as source — none of this
+changes `-collection:otsh=` pointing at a checkout, and the source tarball
+GitHub generates from the tag is still there too. What's now attached is the
+**tool**, `cmd/otsh` compiled, five times: it links against nothing but the
+OS, no libssh, because libssh is a dependency of the apps the tool builds,
+not of the tool itself.
+
+Mark it a pre-release for as long as `VERSION_MAJOR` is 0 — CI does this
+unconditionally by passing `--prerelease` every time, so remember to update
+`.github/workflows/ci.yml` the day that stops being true.
 
 ## Pre-release checklist
 
@@ -233,6 +273,9 @@ Mark it a pre-release for as long as `VERSION_MAJOR` is 0.
 - [ ] Committed, tagged with an annotated `v*` tag, branch pushed before the tag
 - [ ] Full CI matrix green — including reading the `windows` job, which cannot
       fail the run
+- [ ] `release` job's five artifacts attached (`gh release view v0.1.0`), each
+      built natively except `otsh-darwin-amd64`, which is cross-built and
+      untested
 - [ ] GitHub release published from the changelog section, marked pre-release
 
 ## A note on what CI has and has not done
@@ -248,3 +291,8 @@ What nobody has watched yet is a `v*` tag driving the full matrix. Pushes to
 to tags, the weekly schedule and manual dispatch. So the first release tag is
 also the first time the tag trigger itself is exercised — if the matrix does
 not start, check the `on.push.tags` filter before assuming the jobs failed.
+
+The `release` job is in exactly that position: it exists, it is gated the
+same way, and it has never run against a real tag — everything §7 above says
+about it is read from the workflow file, not watched. `gh release view` after
+the first real tag is what turns that from a description into a fact.
