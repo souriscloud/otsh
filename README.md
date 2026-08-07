@@ -12,9 +12,10 @@ every machine.
 
 ## Try it
 
-otsh is a source library, not a binary you download: your app compiles it in.
-So you need the [Odin compiler](https://odin-lang.org), libssh ≥ 0.10.6, and —
-on Linux — clang, which is what Odin links with.
+otsh is a source library, not a binary you download: your app compiles it in
+— though the `otsh` command-line tool itself now also ships prebuilt, per
+release. So you need the [Odin compiler](https://odin-lang.org), libssh ≥
+0.10.6, and — on Linux — clang, which is what Odin links with.
 
 ```sh
 brew install libssh pkg-config              # macOS
@@ -56,8 +57,11 @@ renderer at your terminal instead of an SSH channel.
 ```
 
 The scaffold builds and serves as-is — no editing, no flags to get right
-first. `./otsh` is a single script at the root of this repo; symlink it onto
-your `$PATH` and it works from any directory:
+first. `./otsh` is a tiny POSIX `#!/bin/sh` bootstrap at the root of this
+repo; the tool itself is the Odin program in `cmd/otsh`, which the bootstrap
+builds on first use — needing nothing but the Odin compiler you already need
+for the library above — and then execs directly. Symlink `otsh` onto your
+`$PATH` and it works from any directory, exactly as before:
 
 ```sh
 ln -s "$PWD/otsh" ~/.local/bin/otsh

@@ -92,6 +92,58 @@ describes how one is made.
 
 ### Changed
 
+- **The `otsh` command is now a compiled Odin program, not bash.** The
+  ~900-line script at the repository root did not merely degrade off bash —
+  it did not run at all: a stock Alpine container answered every subcommand
+  with `env: can't execute 'bash'`, a Debian with bash removed said the same,
+  and FreeBSD's base system has no bash to find either. macOS's own
+  `/bin/bash` is a 3.2 whose heredoc parsing had already cost this project one
+  real bug: bash 3.2 ends a `$( )` command substitution at the first `)`
+  sitting at the start of a line *inside* the heredoc body, and the old
+  script's scaffold template closed its `#assert(` block on exactly such a
+  line — reproduced before it was worked around, not guessed at.
+
+  The tool now lives in `cmd/otsh`, compiled Odin; `otsh` at the repository
+  root is a small POSIX `#!/bin/sh` bootstrap that resolves its own real
+  location through a symlink, builds `cmd/otsh` into a binary named after the
+  OS and architecture it is on — `bin/otsh-linux-arm64`, say — the first time
+  any command runs, printing `otsh: building the otsh tool (cmd/otsh ->
+  bin/otsh-linux-arm64)...` to stderr while it does, and execs the result,
+  which is instant on every call after the first. Naming the binary per OS
+  and architecture means a checkout
+  bind-mounted into a container builds its Linux tool beside the host's macOS
+  one instead of dying on "exec format error". On a machine with no Odin
+  compiler anywhere, the bootstrap answers `doctor`, `help` and `version`
+  itself, in portable sh — the same three-failure checklist `otsh doctor`
+  always printed on a bare machine — and every other command gets the same
+  "odin compiler not found" message `otsh build` gave before, with the same
+  use-odin/`ODIN=` hints.
+
+  Every command, message and exit code is a port of the script it replaces,
+  verified with a golden-output diff between the two. The one deliberate
+  behaviour change: `otsh new` used to scaffold a project with no compiler
+  present; now, since it is itself part of the compiled tool, it needs one —
+  a scaffold nothing could build was of limited use anyway, and the error
+  names exactly what to install. The `build.sh` that `otsh new` scaffolds
+  into new projects is `#!/bin/sh` too, like this repository's own
+  `build.sh` and `test.sh`.
+
+  Every `v*` tag now also builds the tool natively on four runners —
+  `ubuntu-latest`, `ubuntu-24.04-arm`, `macos-latest` (plus an untested
+  `darwin-amd64` cross-build; no Intel Mac runner exists to test it on), and
+  `windows-latest` — and attaches `otsh-linux-amd64`, `otsh-linux-arm64`,
+  `otsh-darwin-arm64`, `otsh-darwin-amd64` and `otsh-windows-amd64.exe` to a
+  pre-release CI creates itself. The tool binary links against nothing but
+  the OS — no libssh — because libssh is a dependency of the apps it builds,
+  not of the tool.
+
+  Verified in containers: on **Debian 12 with bash removed** and on **Alpine
+  3.22, which never had bash**, `otsh doctor`, `otsh new`, `otsh build` and
+  `otsh run` all worked, and a real `openssh` client over a pty connected to
+  the scaffolded app and rendered a frame. That Alpine run was also the first
+  time an otsh app was built and served on musl — one scaffold app, one
+  session; the test suite itself has not been run there.
+
 - **`libssh/libssh.odin` names its library through a constant** —
   `LIB :: #config(OTSH_LIBSSH, …)`, consumed as `foreign import lib {LIB}` —
   so `-define:OTSH_LIBSSH=system:/path/to/libssh.a` can replace it. The default

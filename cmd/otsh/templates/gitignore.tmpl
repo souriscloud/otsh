@@ -1,0 +1,16 @@
+# --- secrets ------------------------------------------------------------------
+# The host key identifies this server to returning clients — committing it lets
+# anyone impersonate you. The identity secret is the HMAC key behind every
+# user's pseudonymous Info.id. Both are generated on first run; back them up
+# somewhere that is not this repository.
+*hostkey
+*hostkey.pub
+*_secret
+*.pem
+
+# --- build output -------------------------------------------------------------
+/@NAME@
+/@NAME@.exe
+*.pdb
+*.o
+*.dSYM/
