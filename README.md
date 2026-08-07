@@ -12,8 +12,20 @@ every machine.
 
 ## Try it
 
+otsh is a source library, not a binary you download: your app compiles it in.
+So you need the [Odin compiler](https://odin-lang.org), libssh ≥ 0.10.6, and —
+on Linux — clang, which is what Odin links with.
+
+```sh
+brew install libssh pkg-config              # macOS
+sudo apt install libssh-dev pkg-config clang # Debian/Ubuntu
+```
+
+Then:
+
 ```sh
 git clone https://github.com/souriscloud/otsh && cd otsh
+./otsh doctor                    # says which of the three is missing, if any
 ./otsh run examples/tracker      # build it and start it — [::]:2222, IPv4 and IPv6
 ```
 
