@@ -143,6 +143,168 @@ resolve_libssh() {
 	esac
 }
 
+# --- static linking -----------------------------------------------------------
+#
+# Two modes, because the platforms genuinely differ and pretending otherwise
+# would ship a flag that fails confusingly on one of them:
+#
+#   --static        libssh and its crypto/compression dependencies come from
+#                   archives; the platform C library stays dynamic. Works on
+#                   macOS and Linux. On macOS this is the most that exists.
+#   --fully-static  the above plus `-static`: no dynamic dependencies at all.
+#                   Linux only.
+#
+# The mechanism is libssh/libssh.odin's OTSH_LIBSSH define. `-lssh` resolves to
+# the shared library before an archive on every linker tested, so adding
+# libssh.a to the command line does nothing while the `-l` is still there; the
+# define replaces the `-l` with the archive's own path. See the comment on LIB
+# in libssh/libssh.odin and docs/static-linking.md.
+#
+# Everything below is a search for archives that a package manager may or may
+# not have installed. It reports what is missing rather than handing the linker
+# a half-built command line, because the linker's version of "you are missing
+# libcrypto.a" is four hundred lines of undefined BN_* symbols.
+
+# Directories worth searching for an archive, most specific first.
+static_search_dirs() {
+	local m d
+	printf '%s\n' "$LIBDIR"
+	if command -v pkg-config >/dev/null; then
+		for m in libcrypto zlib libzstd; do
+			pkg-config --exists "$m" 2>/dev/null && pkg-config --variable=libdir "$m"
+		done
+	fi
+	# Homebrew keeps OpenSSL outside its main prefix on purpose — macOS ships
+	# its own ancient libcrypto in /usr/lib and Homebrew will not shadow it —
+	# so the keg has to be named separately.
+	printf '%s\n' \
+		/opt/homebrew/opt/openssl@3/lib /usr/local/opt/openssl@3/lib \
+		/opt/homebrew/lib /usr/local/lib
+	# Debian/Ubuntu multiarch, then the usual suspects.
+	for d in /usr/lib/*-linux-gnu* /usr/lib64 /usr/lib; do
+		[ -d "$d" ] && printf '%s\n' "$d"
+	done
+}
+
+# Absolute path of lib<name>.a if one exists, nothing otherwise.
+find_archive() {
+	local d
+	while IFS= read -r d; do
+		if [ -f "$d/lib$1.a" ]; then
+			printf '%s\n' "$d/lib$1.a"
+			return 0
+		fi
+	done <<EOF
+$(static_search_dirs)
+EOF
+	return 1
+}
+
+# Sets LIBSSH_A and STATIC_LIBS. $1 non-empty means --fully-static.
+resolve_libssh_static() {
+	local want_full="${1:-}" a tok
+
+	resolve_libssh
+
+	case "$UNAME" in
+	MINGW* | MSYS* | CYGWIN*)
+		die "static linking is not supported on Windows." \
+			"vcpkg's libssh:x64-windows triplet is a DLL plus an import library;" \
+			"there is no libssh.lib to link. x64-windows-static builds one, but" \
+			"otsh has never been tested against it — see docs/static-linking.md."
+		;;
+	esac
+
+	if [ -n "$want_full" ] && [ "$UNAME" = Darwin ]; then
+		die "macOS cannot link a fully static executable." \
+			"Apple ships no static libSystem or libc.a — the SDK has neither, and" \
+			"clang stops at \`ld: library 'crt0.o' not found\`. Statically linked" \
+			"binaries are unsupported on Darwin and have been for many releases." \
+			"Use --static instead: it removes the libssh, libcrypto and Kerberos" \
+			"dependencies and leaves only libSystem, which every mac already has."
+	fi
+
+	LIBSSH_A="$LIBDIR/libssh.a"
+	if [ ! -f "$LIBSSH_A" ]; then
+		die "no libssh.a in $LIBDIR — nothing to link statically." \
+			"That directory has the shared library otsh normally links against," \
+			"but no archive beside it. Some distributions ship one and some do not:" \
+			"  brew install libssh              # macOS: ships libssh.a" \
+			"  apt install libssh-dev           # Debian/Ubuntu: ships libssh.a" \
+			"  Alpine's libssh-dev ships only libssh.so — build libssh yourself" \
+			"See docs/static-linking.md for building libssh as an archive."
+	fi
+
+	# libssh cannot do anything without a crypto backend.
+	if ! a="$(find_archive crypto)"; then
+		die "found libssh.a but no libcrypto.a to go with it." \
+			"libssh's crypto backend is OpenSSL on every platform otsh is built on." \
+			"  brew install openssl@3           # macOS" \
+			"  apt install libssl-dev           # Debian/Ubuntu" \
+			"  apk add openssl-libs-static      # Alpine"
+	fi
+	STATIC_LIBS="$a"
+
+	# zlib. Linux distributions ship libz.a; macOS ships only the dylib (the
+	# SDK has libz.tbd stubs and no archive at all), so there it stays dynamic
+	# — which is harmless, because libz is part of the OS.
+	if a="$(find_archive z)"; then
+		STATIC_LIBS="$STATIC_LIBS $a"
+	else
+		STATIC_LIBS="$STATIC_LIBS -lz"
+	fi
+
+	# Whatever else this OpenSSL was built against. libssh's own .pc file
+	# declares no static dependencies whatsoever — `pkg-config --static --libs
+	# libssh` prints just `-lssh` on Homebrew 0.12.2 and Debian 0.11.5 alike —
+	# but libcrypto's does, and on Debian it names zstd, without which the link
+	# dies on ZSTD_decompressStream. Each -l becomes an archive where one
+	# exists, because passing `-lfoo` next to libfoo.a still records a
+	# dependency on the shared object and produces a "static" binary that is
+	# nothing of the sort.
+	if command -v pkg-config >/dev/null && pkg-config --exists libcrypto; then
+		for tok in $(pkg-config --static --libs libcrypto); do
+			case "$tok" in
+			-lcrypto | -lz | -L*) ;; # already placed above
+			-l*)
+				if a="$(find_archive "${tok#-l}")"; then
+					STATIC_LIBS="$STATIC_LIBS $a"
+				else
+					STATIC_LIBS="$STATIC_LIBS $tok"
+				fi
+				;;
+			*) STATIC_LIBS="$STATIC_LIBS $tok" ;; # -pthread and friends
+			esac
+		done
+	fi
+
+	# GSSAPI. Whether libssh.a needs Kerberos is a property of how it was
+	# built, not of the platform: Debian builds it with GSSAPI on, Alpine has
+	# no packaged archive at all, and a source build defaults to on wherever
+	# krb5 headers were present. Ask the archive rather than guessing.
+	if nm -u "$LIBSSH_A" 2>/dev/null | grep -q 'gss_acquire_cred'; then
+		if [ "$UNAME" = Darwin ]; then
+			STATIC_LIBS="$STATIC_LIBS -framework Kerberos"
+		elif a="$(find_archive gssapi_krb5)"; then
+			STATIC_LIBS="$STATIC_LIBS $a"
+		elif [ -n "$want_full" ]; then
+			die "$LIBSSH_A was built with GSSAPI, and there is no libgssapi_krb5.a to link." \
+				"MIT Kerberos ships no static libraries on Debian or Ubuntu —" \
+				"libkrb5-dev contains not one .a file — so a GSSAPI-enabled" \
+				"libssh.a cannot go into a fully static binary at all." \
+				"Either use --static, which links krb5 dynamically and still" \
+				"drops the libssh dependency, or build libssh yourself with" \
+				"-DWITH_GSSAPI=OFF. docs/static-linking.md has the cmake line."
+		else
+			STATIC_LIBS="$STATIC_LIBS -lgssapi_krb5"
+		fi
+	fi
+
+	if [ -n "$want_full" ]; then
+		STATIC_LIBS="$STATIC_LIBS -static"
+	fi
+}
+
 # Odin refuses an -out: without a recognised extension on Windows:
 #   Output path C:/otsh-ci/otsh/tracker must have an appropriate extension.
 # A directory's basename is extensionless, so add the one Windows wants.
@@ -214,11 +376,15 @@ usage: otsh <command> [arguments]
   new <dir> [--port N]   scaffold a project that builds and serves as-is
                          (picks a free port unless you name one)
   build [dir] [flags]    build a project; extra flags go to \`odin build\`
+                         --static        link libssh from its archive, so the
+                                         binary needs no libssh installed
+                         --fully-static  no dynamic dependencies at all
+                                         (Linux only — see docs)
   run [dir] [args]       build, then run it from its own directory
   test [dir] [flags]     run a package's tests (default: otsh's own suite)
-  flags                  print the -collection: and -extra-linker-flags:
+  flags [--static]       print the -collection: and -extra-linker-flags:
                          values, for a Makefile, justfile or IDE
-  install                put `otsh` on your $PATH (or --uninstall)
+  install                put \`otsh\` on your \$PATH (or --uninstall)
   use-odin [path]        record where your Odin compiler lives (or --unset)
   doctor                 check odin, libssh and clang
   version                version and checkout of this otsh
@@ -312,17 +478,42 @@ cmd_version() {
 }
 
 cmd_flags() {
-	resolve_libssh
-	# Two lines, nothing else on stdout, so this can be read by eye or by a
-	# script. Paste these, do not $(otsh flags) them — the linker value
-	# contains a space, so word splitting turns it into two arguments and
-	# odin reports `Unknown flag: 'Wl,-rpath,...'`. In a script use
+	local static_mode="" full_static=""
+	case "${1:-}" in
+	--static) static_mode=yes ;;
+	--fully-static)
+		static_mode=yes
+		full_static=yes
+		;;
+	"") ;;
+	*) die "usage: $PROG flags [--static | --fully-static]" ;;
+	esac
+
+	# Two lines normally, three with --static, nothing else on stdout, so this
+	# can be read by eye or by a script. Paste these, do not $(otsh flags) them
+	# — the linker value contains a space, so word splitting turns it into two
+	# arguments and odin reports `Unknown flag: 'Wl,-rpath,...'`. In a script
+	# use
 	#   eval "odin build . $(otsh flags | tr '\n' ' ')"
 	# which re-parses the quoting. Original note follows:
 	# paste these, do not $(otsh flags) them —
 	# the linker flags contain a space and word splitting would break them.
+	# Resolved before anything is printed, so a mode this platform cannot do
+	# fails with an empty stdout rather than half a flag list somebody might
+	# paste.
+	if [ -n "$static_mode" ]; then
+		resolve_libssh_static "$full_static"
+	else
+		resolve_libssh
+	fi
+
 	printf -- '-collection:otsh=%s\n' "$OTSH"
-	printf -- '-extra-linker-flags:"%s"\n' "$LDFLAGS"
+	if [ -n "$static_mode" ]; then
+		printf -- '-define:OTSH_LIBSSH=system:%s\n' "$LIBSSH_A"
+		printf -- '-extra-linker-flags:"%s"\n' "$STATIC_LIBS"
+	else
+		printf -- '-extra-linker-flags:"%s"\n' "$LDFLAGS"
+	fi
 }
 
 # Record a compiler path for this user, once, for every checkout and project.
@@ -512,6 +703,7 @@ version_ge() {
 
 cmd_build() {
 	local out="" out_dir="" src_abs name a
+	local static_mode="" full_static=""
 	local args=()
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
@@ -522,6 +714,15 @@ cmd_build() {
 		--out-dir)
 			out_dir="${2:?--out-dir needs a path}"
 			shift 2
+			;;
+		--static)
+			static_mode=yes
+			shift
+			;;
+		--fully-static)
+			static_mode=yes
+			full_static=yes
+			shift
 			;;
 		*)
 			args+=("$1")
@@ -534,7 +735,29 @@ cmd_build() {
 	SRC="${SRC:-.}"
 	require_package "$SRC"
 	require_odin
-	resolve_libssh
+
+	local define_flag=()
+	if [ -n "$static_mode" ]; then
+		resolve_libssh_static "$full_static"
+		define_flag=(-define:OTSH_LIBSSH=system:"$LIBSSH_A")
+		LDFLAGS="$STATIC_LIBS"
+	else
+		resolve_libssh
+	fi
+
+	# Odin takes exactly one -extra-linker-flags — a second is rejected with
+	# "Previous flag set: 'extra-linker-flags'" — so a caller's own linker flags
+	# have to be folded into ours rather than passed through beside them. This
+	# is what lets somebody add the one library their distribution's libssh
+	# happens to need without giving up everything otsh resolved for them.
+	local passthrough=()
+	for a in ${ODIN_ARGS[@]+"${ODIN_ARGS[@]}"}; do
+		case "$a" in
+		-extra-linker-flags:*) LDFLAGS="$LDFLAGS ${a#-extra-linker-flags:}" ;;
+		*) passthrough+=("$a") ;;
+		esac
+	done
+	ODIN_ARGS=(${passthrough[@]+"${passthrough[@]}"})
 
 	# The binary is named after the package directory and lands *in* it, so
 	# that a project keeps its own build output, and so that `otsh run` can
@@ -559,6 +782,7 @@ cmd_build() {
 	"$ODIN" build "$SRC" \
 		${out_flag[@]+"${out_flag[@]}"} \
 		-collection:otsh="$OTSH" \
+		${define_flag[@]+"${define_flag[@]}"} \
 		-extra-linker-flags:"${LDFLAGS}" \
 		${ODIN_ARGS[@]+"${ODIN_ARGS[@]}"}
 

@@ -34,6 +34,95 @@ describes how one is made.
 
 ### Added
 
+- **Static linking, so a binary can ship to a machine that has no libssh** —
+  `otsh build --static` and `otsh build --fully-static`, with
+  `otsh flags --static` printing the same for a Makefile or an IDE. The
+  motivating case is distributing an executable to hosts whose packages you do
+  not control, or into a scratch container: a `FROM scratch` image containing
+  nothing but a fully static `examples/tracker` was built, run, and connected
+  to with a real ssh client over a pty from the host — a frame rendered and `q`
+  quit cleanly.
+
+  **This is a security trade, not a free win.** A statically linked libssh
+  means the next libssh CVE requires rebuilding and redeploying your binary,
+  where a dynamic one is fixed by the system package manager and a restart. The
+  version really is frozen in — a static binary carries libssh's own
+  `SSH-2.0-libssh_0.12.2` banner, a dynamic one carries none of it. It also
+  changes what the 0.10.6 Terrapin floor means: `check_libssh_version` still
+  fires, but it now tests a version fixed at link time rather than whatever the
+  host has installed, so the floor becomes a build-time assertion instead of a
+  runtime guard. The dynamic build remains the default and is unchanged.
+
+  What each platform can actually do, all measured rather than assumed:
+
+  | Platform | libssh from an archive | Nothing dynamic at all |
+  | --- | --- | --- |
+  | macOS | yes | **impossible** — Apple ships no static libc |
+  | Linux, glibc | yes | yes, if libssh was built without GSSAPI |
+  | Linux, musl | yes, after building libssh yourself | yes |
+
+  - **macOS cannot link a fully static executable**, and `--fully-static` says
+    so and exits rather than shipping a flag that fails confusingly: there is
+    no `libSystem.a` or `libc.a` anywhere in the SDK and clang stops at
+    `ld: library 'crt0.o' not found`. `--static` there drops libssh and
+    OpenSSL, leaving only libSystem, zlib and Kerberos — all part of macOS.
+    `examples/tracker` goes from 654,792 to 5,363,960 bytes.
+  - **Debian's own `libssh.a` cannot be fully statically linked**, because it
+    is built with GSSAPI and MIT Kerberos ships no static libraries at all on
+    Debian or Ubuntu — `libkrb5-dev` contains not one `.a` file. otsh inspects
+    the archive for `gss_acquire_cred` rather than guessing, and names the fix.
+    `--static` works there (7,940,088 bytes, no libssh); `--fully-static` needs
+    a libssh built with `-DWITH_GSSAPI=OFF` (8,379,912 bytes).
+  - **Alpine ships no static libssh at all** — `libssh-dev` contains exactly
+    `usr/lib/libssh.so`, and `libssh2-static` is a different library — so otsh
+    reports that instead of handing the linker a broken command line. With
+    libssh built from source it produces a genuinely static musl binary
+    (16,194,256 bytes, 4,923,784 stripped; `ldd` says "not a dynamic
+    executable").
+  - **glibc's static-NSS warnings do not affect an otsh server.** A `-static`
+    glibc link warns about `getaddrinfo` and `getpwnam`; the resulting binary
+    was run and driven through a real ssh session anyway. otsh binds a numeric
+    address and only calls `getpeername`/`inet_ntop` on an accepted socket, so
+    no NSS backend is ever loaded. The caveat still applies to app code that
+    resolves hostnames.
+
+  [docs/static-linking.md](docs/static-linking.md) has the per-platform
+  measurements, the sizes, the cmake line for building libssh as an archive,
+  and the two traps in doing it by hand.
+
+### Changed
+
+- **`libssh/libssh.odin` names its library through a constant** —
+  `LIB :: #config(OTSH_LIBSSH, …)`, consumed as `foreign import lib {LIB}` —
+  so `-define:OTSH_LIBSSH=system:/path/to/libssh.a` can replace it. The default
+  is exactly what it was, `system:ssh` on unix-likes and `system:ssh.lib` on
+  Windows, and the dynamic build is byte-for-byte the build it always was.
+
+  The braced form is load-bearing: `foreign import` takes a string *literal*,
+  so `foreign import lib LIB` is a syntax error and only
+  `foreign import lib {LIB}` accepts a compile-time constant. The define
+  carries a path rather than being a boolean because there is no portable
+  location for a `libssh.a`. `system:` followed by an absolute path is passed
+  to the linker verbatim as an input file, which is the point — adding
+  `libssh.a` through `-extra-linker-flags` alone does nothing, because every
+  linker tested resolves the `-lssh` that `system:ssh` emits to the shared
+  library regardless of an archive also being on the command line.
+
+- **`otsh help` no longer runs itself.** The `install` line described putting
+  `` `otsh` `` on your `$PATH`, inside an unquoted heredoc — so the backticks
+  were command substitution and the shell recursively invoked whatever `otsh`
+  was on `$PATH`, splicing a second copy of the help text into the middle of
+  the first, while `$PATH` expanded to the reader's actual path. Both are now
+  escaped, the way the neighbouring `` \`odin build\` `` always was.
+
+- **`otsh build` folds a caller's `-extra-linker-flags:` into its own** rather
+  than passing both. Odin accepts only one and rejects a second with
+  `Previous flag set: 'extra-linker-flags'`, so
+  `otsh build ~/app -extra-linker-flags:"-lmylib"` previously could not work at
+  all. It now does, which is what lets somebody add the one library their
+  distribution's libssh happens to need without giving up everything otsh
+  resolved for them.
+
 - **`otsh`, one executable at the repository root, so starting a project is a
   command rather than a build script you write yourself.** Getting to "hello
   world" used to mean cloning the repo and then hand-writing an `odin build`

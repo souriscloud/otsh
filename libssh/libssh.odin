@@ -7,21 +7,49 @@ package libssh
 
 import "core:c"
 
-when ODIN_OS == .Darwin || ODIN_OS == .Linux || ODIN_OS == .FreeBSD {
-	foreign import lib "system:ssh"
-} else when ODIN_OS == .Windows {
-	// vcpkg is the expected provider: `vcpkg install libssh:x64-windows` builds
-	// the import library as ssh.lib. The linker still needs its directory, e.g.
-	// -extra-linker-flags:"/LIBPATH:C:\\vcpkg\\installed\\x64-windows\\lib".
-	//
-	// Exercised for real once: on 2026-07-31 these bindings linked against
-	// vcpkg libssh 0.12.0 on Windows 11 and served live openssh sessions. The
-	// hosted CI windows job has still never executed, so "runs on Windows"
-	// rests on that one machine. See docs/getting-started.md.
-	foreign import lib "system:ssh.lib"
-} else {
+when ODIN_OS != .Darwin &&
+	ODIN_OS != .Linux &&
+	ODIN_OS != .FreeBSD &&
+	ODIN_OS != .Windows {
 	#panic("libssh bindings support unix-likes and Windows")
 }
+
+// What the linker is told to link against, and the one knob static linking
+// turns.
+//
+// The default names the *system* library: `system:ssh` becomes `-lssh`, which
+// the linker resolves to libssh.so/.dylib wherever it finds it, and
+// `system:ssh.lib` is the vcpkg import library on Windows — vcpkg is the
+// expected provider there (`vcpkg install libssh:x64-windows`), and the linker
+// still needs its directory, e.g.
+// -extra-linker-flags:"/LIBPATH:C:\\vcpkg\\installed\\x64-windows\\lib".
+// There is no rpath equivalent on Windows; ssh.dll has to be on %PATH% at run
+// time. Exercised for real once: on 2026-07-31 these bindings linked against
+// vcpkg libssh 0.12.0 on Windows 11 and served live openssh sessions. The
+// hosted CI windows job has since run green. See docs/getting-started.md.
+//
+// Pointing this at a static archive instead is what makes a binary that runs
+// on a machine with no libssh installed:
+//
+//	-define:OTSH_LIBSSH=system:/usr/lib/x86_64-linux-gnu/libssh.a
+//
+// `system:` followed by an absolute path is passed to the linker verbatim as an
+// input file rather than turned into a `-l`, which is the whole trick: `-lssh`
+// finds the shared library first on every platform tested, so an archive added
+// alongside it is ignored and the binary keeps its libssh dependency. Naming
+// the archive here removes the `-l` entirely. The archive's own dependencies —
+// libcrypto, libz — still have to be supplied, as archives, through
+// -extra-linker-flags. `otsh build --static` works all of that out; see
+// docs/static-linking.md for what it costs and why you might not want it.
+//
+// This is deliberately a path and not a boolean: there is no portable place a
+// libssh.a lives, so a boolean would only push the guessing into these
+// bindings, where it cannot see pkg-config. `foreign import` needs a string
+// *literal* — `foreign import lib LIB` is a syntax error — so the braced form
+// is what lets a compile-time constant, and therefore a -define, reach it.
+LIB :: #config(OTSH_LIBSSH, "system:ssh.lib" when ODIN_OS == .Windows else "system:ssh")
+
+foreign import lib {LIB}
 
 // --- opaque handles ---------------------------------------------------------
 
