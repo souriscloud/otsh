@@ -58,12 +58,13 @@ tar -xzf odin-linux-amd64-dev-2026-07a.tar.gz
 ./odin-linux-amd64-nightly+2026-07-10/odin version
 ```
 
-`build.sh` and `test.sh` find the compiler through `$ODIN`, then a gitignored
-`.odin-path` file, then `$PATH` — so an unpacked tarball anywhere on disk
-works without installing it:
+`otsh`, `build.sh` and `test.sh` find the compiler through `$ODIN`, then a
+gitignored `.odin-path` in the checkout, then `$XDG_CONFIG_HOME/otsh/odin-path`,
+then `$PATH` — so an unpacked tarball anywhere on disk works without installing
+it, and `otsh use-odin` records the choice for every project at once:
 
 ```sh
-echo "$PWD/odin-linux-amd64-nightly+2026-07-10/odin" > .odin-path
+otsh use-odin "$PWD/odin-linux-amd64-nightly+2026-07-10/odin"
 ```
 
 macOS users can `brew install odin`, but Homebrew tracks its own version and is

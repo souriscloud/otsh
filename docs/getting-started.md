@@ -55,14 +55,38 @@ came to be written the way it is: an empty `/usr/local/lib`, which that image
 has and which is where the search falls back to, was reported as "found" until
 the check started looking for the library *file* rather than the directory.
 
-The compiler is resolved in this order: `$ODIN` if it is set; then a gitignored
-`.odin-path` file next to `otsh`, if what it contains resolves to an
-executable; then `odin` on your `$PATH`. `.odin-path` exists for machines where
-the compiler is not on `$PATH`, and is never committed. A path in it that does
-not resolve is skipped rather than obeyed, so one checkout seen by two machines
-at once — a worktree bind-mounted into a container, say — still builds on the
-machine the file was not written on. `otsh`, `build.sh` and `test.sh` all get
-this from the same place: the latter two are wrappers around the first.
+### If your Odin lives somewhere custom
+
+Plenty of people build Odin from source or unpack a nightly into a directory
+of their own, so it is never on `$PATH`. Tell otsh once:
+
+```sh
+otsh use-odin ~/src/Odin/odin      # checked, then remembered for every project
+otsh use-odin                      # show what is set and what it resolves to
+otsh use-odin --unset              # forget it
+```
+
+That writes `$XDG_CONFIG_HOME/otsh/odin-path` (`~/.config/otsh/odin-path` by
+default) — a setting that belongs to **you**, not to a checkout. It survives
+re-cloning otsh, and it applies to every otsh checkout you have, which matters
+as soon as you pin one version per project. The path is verified before it is
+written: something that is not the Odin compiler is refused rather than saved
+and discovered on your next build.
+
+The full resolution order, most specific first:
+
+| | |
+| --- | --- |
+| `$ODIN` | one invocation — `ODIN=/path/to/odin otsh build .` |
+| `.odin-path` next to `otsh` | that one checkout; gitignored, for people working on otsh itself |
+| `$XDG_CONFIG_HOME/otsh/odin-path` | you, everywhere — what `otsh use-odin` writes |
+| `odin` | your `$PATH` |
+
+Each file is used only if what it names actually resolves, so a stale entry is
+skipped rather than obeyed — one checkout seen by two machines at once, a
+worktree bind-mounted into a container say, still builds on the machine the
+file was not written on. `otsh`, `build.sh` and `test.sh` all resolve through
+the same code: the latter two are wrappers around the first.
 
 ## Quick start: the `otsh` command
 
