@@ -57,8 +57,14 @@ the check started looking for the library *file* rather than the directory.
 
 ### If your Odin lives somewhere custom
 
-Plenty of people build Odin from source or unpack a nightly into a directory
-of their own, so it is never on `$PATH`. Tell otsh once:
+Usually you do not have to do anything. When the compiler is not on `$PATH`,
+otsh looks where Odin actually ends up when it is built from source or a
+nightly is unpacked — `$ODIN_ROOT`, `~/odin`, `~/.odin`, `~/src/Odin`,
+`~/Odin`, `~/dev/Odin`, `/usr/local/odin`, `/opt/odin` — and uses the first one
+that answers `odin version`. That search runs only after everything explicit
+has come up empty, so it can never override a choice you made.
+
+If yours is somewhere else, tell otsh once:
 
 ```sh
 otsh use-odin ~/src/Odin/odin      # checked, then remembered for every project
@@ -122,7 +128,7 @@ still [checking out a tag](#pinning-and-upgrading-otsh).
 
 | command | what it does |
 | --- | --- |
-| `otsh new path/to/app [--port N]` | scaffold a runnable project — see below |
+| `otsh new path/to/app [--port N]` | scaffold a runnable project — picks a free port unless you name one |
 | `otsh build path/to/app [flags]` | build it; the binary lands **in that directory**, named after it |
 | `otsh run path/to/app [args]` | build, then run it from that directory; args after it go to your program |
 | `otsh test [path/to/pkg] [flags]` | run a package's tests (default: otsh's own suite) |
