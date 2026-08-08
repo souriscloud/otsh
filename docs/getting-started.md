@@ -106,6 +106,20 @@ worktree bind-mounted into a container say, still builds on the machine the
 file was not written on. `otsh`, `build.sh` and `test.sh` all resolve through
 the same code: the latter two are wrappers around the first.
 
+### Windows
+
+`otsh.cmd` beside it is the native entry point — `.\otsh doctor` works from
+cmd.exe and from PowerShell with no shell installed at all, because the POSIX
+`otsh` script would need Git Bash and that is not a thing every Windows machine
+has. It resolves the compiler the same way, builds `cmd\otsh` once into
+`bin\otsh-windows-amd64.exe`, and execs that afterwards. Verified on Windows
+11 with the Odin compiler present and libssh deliberately absent: `doctor`
+reported odin found, libssh missing and clang as not-required-on-Windows, then
+`new` scaffolded a project — all from cmd.exe.
+
+A release also attaches a prebuilt `otsh-windows-amd64.exe`; drop it in `bin\`
+and nothing is ever compiled.
+
 ## Quick start: the `otsh` command
 
 `otsh`, at the root of this repository, is the whole toolchain: it knows where
