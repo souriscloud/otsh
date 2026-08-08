@@ -32,6 +32,20 @@ describes how one is made.
 
 ## Unreleased
 
+## 0.4.1 — 2026-08-08
+
+### Fixed
+
+- **A released binary can say what it is.** Run outside an otsh checkout, the
+  v0.4.0 binaries printed `otsh (unknown)`: the version is read from
+  `ssh/version.odin`, which answers "which source tree will this build
+  against" and cannot answer "which tool is this". The release build now
+  stamps `-define:OTSH_TOOL_VERSION` from the tag, and `otsh version` prints
+  the tool's own version and a pointer to `OTSH_ROOT` when no checkout is
+  around it. Inside a checkout the output is unchanged. The release job's
+  smoke test had missed this by running `version` from inside the checkout —
+  the one place it could not fail.
+
 ## 0.4.0 — 2026-08-08
 
 A tooling release. The `otsh` command is now a compiled Odin program with a
