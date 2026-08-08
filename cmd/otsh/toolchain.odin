@@ -111,6 +111,14 @@ require_odin :: proc() {
 	}
 }
 
+// What this binary was built from, stamped in at compile time by the release
+// job (-define:OTSH_TOOL_VERSION=0.4.0). Empty for a locally built tool, where
+// the checkout below is the better answer anyway. It exists because a binary
+// downloaded from a release and run on its own could otherwise not say what it
+// was — the release smoke test never caught that, because it runs `version`
+// from inside a checkout.
+TOOL_VERSION :: #config(OTSH_TOOL_VERSION, "")
+
 // The version of this checkout, read off the source of truth rather than
 // repeated here: ssh/version.odin is what an app's #assert compares against.
 // Absent only when this binary is outside any checkout — say so rather than

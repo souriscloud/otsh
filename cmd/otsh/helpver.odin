@@ -56,7 +56,20 @@ docs: %s/docs/getting-started.md
 }
 
 cmd_version :: proc() {
-	fmt.printf("otsh %s\n", otsh_version())
+	// Two different questions, and a standalone binary can only answer the
+	// first: which tool is this, and which source tree will it build against.
+	v := otsh_version()
+	if v == "(unknown)" && TOOL_VERSION != "" {
+		fmt.printf("otsh %s (tool)\n", TOOL_VERSION)
+		fmt.printf("  source   %s — no otsh checkout here\n", OTSH)
+		fmt.printf("  hint     run it from a checkout, or set OTSH_ROOT=/path/to/otsh\n")
+		return
+	}
+	if TOOL_VERSION != "" && TOOL_VERSION != v {
+		fmt.printf("otsh %s  (tool built from %s)\n", v, TOOL_VERSION)
+	} else {
+		fmt.printf("otsh %s\n", v)
+	}
 	fmt.printf("  source   %s\n", OTSH)
 	// The commit is the real pin: -collection:otsh= names a source tree, so
 	// an app's version is whatever that tree is checked out at, not a tag it

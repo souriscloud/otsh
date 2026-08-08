@@ -398,7 +398,9 @@ jobs:
           release: ${{ env.ODIN_RELEASE }}
 
       - name: Build the tool
-        run: odin build cmd/otsh -out:${{ matrix.artifact }} -o:speed
+        run: |
+          odin build cmd/otsh -out:${{ matrix.artifact }} -o:speed \
+            -define:OTSH_TOOL_VERSION="${GITHUB_REF_NAME#v}"
 
       # `version` from inside the checkout exercises the checkout-resolution
       # walk and the version parse — the two things most likely to differ
