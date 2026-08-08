@@ -32,6 +32,15 @@ describes how one is made.
 
 ## Unreleased
 
+## 0.4.0 — 2026-08-08
+
+A tooling release. The `otsh` command is now a compiled Odin program with a
+tiny POSIX bootstrap and a native Windows entry point, because the bash script
+it replaces did not run at all where bash is absent — Alpine, FreeBSD, a
+Debian without it. Releases now attach prebuilt binaries. Nothing in the
+library packages changed behaviour; if you only `import "otsh:sshtui"`, this
+is a no-op for your code.
+
 ### Added
 
 - **Static linking, so a binary can ship to a machine that has no libssh** —
@@ -222,9 +231,6 @@ describes how one is made.
   points at a source tree, nothing is installed system-wide, and pinning is
   still checking out a tag — see "Pinning and upgrading otsh" in
   [docs/getting-started.md](docs/getting-started.md), which is unchanged.
-
-### Changed
-
 - **`build.sh` and `test.sh` are now thin wrappers around `otsh`.** Same
   command line, same defaults, same output locations, same exit codes —
   `./build.sh` still drops the binary in your current directory and
